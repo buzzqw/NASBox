@@ -28,13 +28,12 @@ problema semplicemente non può più presentarsi.
 10. [Frequenza di sincronizzazione](#10-frequenza-di-sincronizzazione)
 11. [Pausa e pausa a tempo](#11-pausa-e-pausa-a-tempo)
 12. [Coda dei trasferimenti](#12-coda-dei-trasferimenti)
-13. [Manutenzione: pulizia conflitti](#13-manutenzione-pulizia-conflitti)
-14. [Icona nella tray](#14-icona-nella-tray)
-15. [Log](#15-log)
-16. [Storico / Cestino](#16-storico--cestino)
-17. [File e percorsi di configurazione](#17-file-e-percorsi-di-configurazione)
-18. [Comandi del demone server (NAS)](#18-comandi-del-demone-server-nas)
-19. [Risoluzione problemi](#19-risoluzione-problemi)
+13. [Icona nella tray](#13-icona-nella-tray)
+14. [Log](#14-log)
+15. [Storico / Cestino](#15-storico--cestino)
+16. [File e percorsi di configurazione](#16-file-e-percorsi-di-configurazione)
+17. [Comandi del demone server (NAS)](#17-comandi-del-demone-server-nas)
+18. [Risoluzione problemi](#18-risoluzione-problemi)
 
 ---
 
@@ -139,22 +138,6 @@ Se salti la configurazione guidata (o il NAS non era raggiungibile in quel
 momento), il primo avvio dell'app chiede comunque dove mettere la cartella
 NASBox (non parte mai senza), e il resto (connessione NAS, banda, retention,
 esclusioni) si sistema dal tab **Impostazioni** con calma.
-
-### Aggiornamento automatico del client
-
-Prima di costruire la finestra, il client cerca una versione piu recente:
-
-- in `client-update/` accanto al lanciatore o accanto alla cartella `client/`;
-- in `.update/` dentro la cartella `client/`;
-- nel percorso indicato da `NASBOX_CLIENT_UPDATE_PATH` o dalla chiave
-  `client_update_path` di `client.json`;
-- sul NAS, in `.nasbox-client-update` sotto `remote_prefix` (oppure nel
-  percorso assoluto indicato da `client_update_remote_path`).
-
-Il bundle deve contenere `main.py` e `sync_client/version.py` oppure una
-cartella `client/` con questi file. Se trova una versione piu recente, chiede
-conferma, sostituisce il client in modo atomico e lo riavvia. Se il controllo NAS
-non e configurato o non e raggiungibile, il client parte normalmente.
 
 Ripeti questa installazione su **ogni PC** che vuoi far partecipare alla
 sincronizzazione — puntandolo alla stessa cartella NASBox sul NAS.
@@ -512,37 +495,8 @@ la sincronizzazione.
   trasferimento grosso vedi il conteggio scendere via via, non restare
   fermo fino alla fine.
 - **Cerca**: filtro live per nome file, sopra la tabella.
-- **Messaggi di stato**: la barra di avanzamento e il testo sotto la tabella
-  indicano in ogni momento cosa sta facendo il programma: preparazione del
-  piano, confronto con il NAS, aggiornamento dell'anteprima, trasferimento
-  in corso. I secondi trascorsi compaiono accanto a ogni fase, così è sempre
-  chiaro da quanto tempo è in corso un'operazione.
-- Durante una scansione di anteprima (`rsync --dry-run`) che può durare
-  minuti su cartelle molto grandi, la barra mostra "Coda: aggiorno
-  l'anteprima…" invece di fingere che non stia succedendo nulla.
 
-## 13. Manutenzione: pulizia conflitti
-
-Quando due versioni dello stesso file vengono modificate contemporaneamente su
-PC diversi, NASBox conserva entrambe per non perdere dati: una resta al suo
-posto, l'altra viene rinominata con ` (conflitto da <device> <token>)` nel nome
-del file. Nel Log compaiono come azione `CONFLICT`.
-
-Questi file sopravvivono finché non vengono cancellati a mano. Nel tab
-**Impostazioni**, sotto **Informazioni**, c'è una sezione **Manutenzione**
-con:
-
-- **Cerca conflitti**: scansiona la cartella NASBox e conta i file con
-  `(conflitto da` nel nome.
-- **Elimina i conflitti trovati**: abilitato solo dopo la scansione. Chiede
-  conferma con un avviso: l'eliminazione è definitiva, non passa dal cestino.
-  Prima di procedere, verifica il contenuto dei file: potrebbero esserci
-  modifiche che vuoi conservare.
-
-In futuro i conflitti saranno gestiti con retention automatica; per ora vanno
-rimossi a mano.
-
-## 14. Icona nella tray
+## 13. Icona nella tray
 
 L'app resta attiva in background quando chiudi la finestra (icona nella
 system tray) — chiudere la finestra non ferma la sincronizzazione. Click
@@ -562,7 +516,7 @@ sull'icona per riaprire la finestra principale; click destro per il menu:
   viene interrotto subito; durante l'arresto compare un messaggio di attesa e
   l'app si chiude appena i processi in background terminano.
 
-## 15. Log
+## 14. Log
 
 Tab **Log**: cronologia di ogni upload, download, cancellazione ed errore,
 con filtro per tipo di azione e un campo **Cerca** (per percorso o dettaglio)
@@ -586,7 +540,7 @@ altre azioni che puoi trovare nel filtro:
 | `SERVER_OUTDATED` | Il pacchetto server sul NAS è più vecchio di quanto questo client si aspetti (vedi [§18](#18-risoluzione-problemi)) |
 | `PRUNE_LOCAL_TRASH` / `PRUNE_REMOTE_TRIGGER` | Pulizia dello storico, locale o richiesta al NAS (vedi [§15](#15-storico--cestino)) |
 
-## 16. Storico / Cestino
+## 15. Storico / Cestino
 
 Ogni volta che un file viene sovrascritto o cancellato (in push o in pull),
 la versione precedente **non sparisce**: viene spostata in una cartella
@@ -642,7 +596,7 @@ numero limitato di giorni su un piano gratuito.
   versione più recente selezionata. Nel cestino locale puoi anche eliminare
   definitivamente più voci con una sola conferma.
 
-## 17. File e percorsi di configurazione
+## 16. File e percorsi di configurazione
 
 | Percorso | Contenuto |
 |---|---|
@@ -657,72 +611,7 @@ numero limitato di giorni su un piano gratuito.
 `client.json` è JSON semplice: si può anche editare a mano (app chiusa) se
 mai servisse, ma tutti i campi documentati qui sono già esposti in GUI.
 
-## 18. Comandi del demone server (NAS)
-
-```bash
-./sync-daemon-server.sh --start              # Avvia il demone in background
-./sync-daemon-server.sh --stop               # Arresta
-./sync-daemon-server.sh --restart            # Arresta + avvia
-./sync-daemon-server.sh --run-foreground     # Loop in primo piano (debug)
-./sync-daemon-server.sh --run-once [--dry-run]  # Singolo pass di pruning
-./sync-daemon-server.sh --status             # Stato + storico/retention
-./sync-daemon-server.sh --print-config       # Configurazione KEY=VALUE
-./sync-daemon-server.sh --journal-compact    # Compatta il journal nel manifest
-./sync-daemon-server.sh --manifest-export    # Esporta il manifest corrente
-./sync-daemon-server.sh --manifest-get PATH  # Legge lo stato di un percorso
-./sync-daemon-server.sh --file-states        # Stato batch file/tombstone
-./sync-daemon-server.sh --checked-delete     # Cancellazione condizionata
-./sync-daemon-server.sh --init-repository    # Crea il marker .nasbox-root
-./sync-daemon-server.sh -c FILE              # Usa un altro server.conf
-```
-
-Configurazione in `server.conf`:
-
-```ini
-SHARE_ROOT=/volume1/NASBox        # La cartella NASBox sul NAS
-RETENTION_DAYS=90                 # Giorni di retention per .sync-trash (0 = mai)
-TOMBSTONE_TTL_DAYS=0              # Giorni dopo cui le tombstone vengono rimosse (0 = mai)
-SYNC_LOCK_MAX_AGE_MINUTES=10      # Minuti dopo cui un lock stantio viene forzato (0 = mai)
-CHECK_INTERVAL_MINUTES=60         # Ogni quanto il demone controlla e fa pruning
-LOG_MAX_BYTES=5242880             # Rotazione log
-JOURNAL_MAX_BYTES=10485760        # Compattazione automatica journal
-```
-
-**Tombstone (TOMBSTONE_TTL_DAYS):** quando un file viene cancellato, il manifest
-ne conserva una "tombstone" per evitare che un client offline resusciti il file.
-Con TTL > 0, le tombstone più vecchie di TTL giorni vengono rimosse dal
-manifest. A 0 (default) si conservano per sempre.
-
-**Lock stantii (SYNC_LOCK_MAX_AGE_MINUTES):** se un client muore mentre tiene
-il lock di sincronizzazione (connessione SSH caduta, crash), il processo
-`flock` sul NAS può restare attivo e bloccare tutti gli altri client. Con
-MAX_AGE > 0, il demone cerca e uccide i lock più vecchi di MAX_AGE minuti
-ad ogni pass di pruning. A 0 la pulizia è disabilitata.
-
-### Avvio automatico dopo il riavvio del NAS
-
-Il demone non usa cron o Task Scheduler: è un singolo processo sempre attivo
-con il suo timer interno. Per farlo ripartire da solo dopo un riavvio del NAS:
-
-- **Synology DSM**: `install.sh` registra uno script in
-  `/usr/local/etc/rc.d/` che viene eseguito all'avvio.
-- **QNAP QTS**: registra un'attività "All'avvio" nel Task Scheduler.
-- **Linux generico con systemd**: crea un'unità di servizio.
-
-Nel caso remoto in cui la registrazione automatica fallisca, puoi sempre
-lanciare `./sync-daemon-server.sh --start` a mano dopo un riavvio, o
-assicurarti che un sistema di init/supervisor lo avvii.
-
-## 19. Risoluzione problemi
-
-**"lock di sincronizzazione sul NAS non acquisito" nel Log**
-- Significa che il client non riesce ad acquisire il lock remoto entro 45
-  secondi. Di solito è un lock stantio lasciato da un client crashato.
-- Sul NAS: `ps aux | grep sync-transfer` — se trovi processi `flock` attivi
-  da più di qualche minuto, killali a mano (`kill <PID>`).
-- Il demone server 3.9.1+ pulisce automaticamente i lock stantii se
-  `SYNC_LOCK_MAX_AGE_MINUTES > 0` (default 10 minuti).
-- Verifica anche che il demone server sia attivo (`./sync-daemon-server.sh --status`).
+## 17. Comandi del demone server (NAS)
 
 Dalla cartella del pacchetto sul NAS:
 
@@ -754,16 +643,6 @@ NAS" configurato, ricontrolla da solo **ogni 15 minuti** (oltre che ad ogni
   avviso ad ogni controllo. Per aggiornare: sostituisci la cartella `server/`
   sul NAS con quella più recente e fai `./sync-daemon-server.sh --restart`
   (o il pulsante "Riavvia demone", o riavvia il servizio di sistema).
-
-Se nella stessa cartella dello script attivo è presente un file versionato con
-nome `sync-daemon-server-X.Y.Z.sh`, il client confronta quella versione con
-quella attiva. Se è più recente, propone l'aggiornamento: con conferma copia il
-file versionato sopra `sync-daemon-server.sh`, esegue `--restart` via SSH e
-verifica di nuovo `VERSION` e `RUNNING=true` tramite `--print-config`.
-
-Se invece il demone risponde `RUNNING=false`, il client segnala il problema e
-invoca automaticamente `sync-daemon-server.sh --start`. L'esito viene mostrato
-nella tray e registrato nel Log (`SERVER_DOWN`/`SERVER_RESTARTED`).
 
 **Cartella di stato del demone auto-esclusa dalla sincronizzazione:** il
 demone riporta anche, via `--print-config`, dove si trova la propria
@@ -800,7 +679,7 @@ Se rimuovi il pacchetto: `./uninstall.sh` ferma il demone e rimuove
 l'eventuale registrazione come servizio di sistema (systemd o rc.d); non
 cancella `server.conf` né i log.
 
-## 19. Risoluzione problemi
+## 18. Risoluzione problemi
 
 **"NAS non raggiungibile" nel tab Stato**
 - Prova manualmente: `ssh -p <porta> <utente>@<host_lan>` dallo stesso PC.

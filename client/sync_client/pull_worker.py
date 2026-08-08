@@ -32,6 +32,8 @@ import threading
 import time
 from pathlib import Path
 
+from PyQt6.QtCore import pyqtSignal
+
 from . import rsync_ops
 from .config import Config
 from .logger import EventLogger
@@ -46,6 +48,11 @@ TICK_SECONDS = 1
 
 
 class PullWorker(TransferWorker):
+    # The pull preflight knows the real batch size before rsync starts, just like
+    # PushWorker. Keep the signal on this worker too so a pull cannot fail while
+    # trying to report its progress.
+    batch_size_known = pyqtSignal(int)
+
     def __init__(
         self, cfg: Config, logger: EventLogger, watchers: WatcherHandle,
         transfer_lock: threading.Lock, sync_state: SyncStateStore,
@@ -173,7 +180,7 @@ class PullWorker(TransferWorker):
                         external = {
                             path for path in w.dirty_paths()
                             if not any(
-                                path.rstrip("/") == own_path.rstrip("/")
+                                path == own_path
                                 or path.startswith(own_path.rstrip("/") + "/")
                                 for own_path in self._self_written_paths
                             )

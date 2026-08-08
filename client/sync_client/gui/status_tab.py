@@ -7,8 +7,8 @@ import time
 from PyQt6.QtCore import Qt, QTimer, QUrl
 from PyQt6.QtGui import QDesktopServices
 from PyQt6.QtWidgets import (
-    QGroupBox, QHBoxLayout, QLabel, QMessageBox, QPushButton, QVBoxLayout,
-    QWidget,
+    QGroupBox, QHBoxLayout, QLabel, QMessageBox, QPushButton, QSizePolicy,
+    QVBoxLayout, QWidget,
 )
 
 from ..config import Config
@@ -23,6 +23,9 @@ from .. import updater
 from .dialogs import FolderSetupDialog, PauseForDialog
 from .async_utils import run_in_background
 from .format_utils import human_size
+
+UPDATE_CHECK_INITIAL_DELAY_MS = 10_000
+UPDATE_CHECK_INTERVAL_MS = 60 * 60 * 1000
 
 
 class StatusTab(QWidget):
@@ -56,19 +59,23 @@ class StatusTab(QWidget):
         self.queue_label = QLabel(t("status.queue_unknown"))
         self.queue_label.setObjectName("statusQueue")
         status_layout.addWidget(self.queue_label)
-        # Version info with click-to-check-update
+        # Keep the update status on the same row as the version: showing a
+        # separate label here changes the card height while the check runs.
+        version_row = QHBoxLayout()
         self.version_label = QLabel(f"{APP_NAME} v{APP_VERSION}")
         self.version_label.setObjectName("statusVersion")
         self.version_label.setCursor(Qt.CursorShape.PointingHandCursor)
         self.version_label.setToolTip(t("status.version_tooltip"))
         self.version_label.mousePressEvent = lambda _e: self._check_for_update()
-        status_layout.addWidget(self.version_label)
+        version_row.addWidget(self.version_label)
         self.update_available_label = QLabel()
         self.update_available_label.setObjectName("statusUpdateAvailable")
-        self.update_available_label.setWordWrap(True)
+        self.update_available_label.setWordWrap(False)
+        self.update_available_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.update_available_label.hide()
         self.update_available_label.mousePressEvent = lambda _e: self._check_for_update()
-        status_layout.addWidget(self.update_available_label)
+        version_row.addWidget(self.update_available_label, 1)
+        status_layout.addLayout(version_row)
         # Shown only while a large first-time batch is being checksummed locally
         # (see PushWorker.hash_progress) -- otherwise this phase used to look
         # frozen for as long as it took, with the rest of the status area
@@ -146,6 +153,9 @@ class StatusTab(QWidget):
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._tick_countdown)
         self._timer.start(1000)
+        self._update_timer = QTimer(self)
+        self._update_timer.setSingleShot(True)
+        self._update_timer.timeout.connect(self._check_for_update)
 
     # --- actions ---
 
@@ -248,7 +258,7 @@ class StatusTab(QWidget):
         self._refresh_pause_button()
         if not self._update_auto_checked and connected and configured and not paused:
             self._update_auto_checked = True
-            QTimer.singleShot(10000, self._check_for_update)
+            self._update_timer.start(UPDATE_CHECK_INITIAL_DELAY_MS)
 
     def on_hash_progress(self, done: int, total: int) -> None:
         if total <= 0 or done >= total:
@@ -316,6 +326,8 @@ class StatusTab(QWidget):
     def _check_for_update(self) -> None:
         if self._update_check_busy:
             return
+        self._update_timer.stop()
+        self._update_auto_checked = True
         self._update_check_busy = True
         self.update_available_label.setText(t("status.update_checking"))
         self.update_available_label.show()
@@ -327,8 +339,10 @@ class StatusTab(QWidget):
 
     def _on_update_check_done(self, result, exc: Exception | None) -> None:
         self._update_check_busy = False
-        self._update_auto_checked = False
         self._update_candidate = None
+        # Automatic checks are deliberately infrequent. Manual clicks still
+        # run immediately, but never cause the status loop to retry every tick.
+        self._update_timer.start(UPDATE_CHECK_INTERVAL_MS)
         if exc is not None:
             self.update_available_label.setText(t("status.update_check_failed", detail=str(exc)))
             return

@@ -138,9 +138,7 @@ class TransfersTab(QWidget):
             self._ensure_queue_sequence((item.direction, item.path))
         self._recently_completed.clear()
         if self._queue_progress_running:
-            self._queue_progress_total = max(
-                self._queue_progress_total, self._queue_progress_done + len(self._all_items),
-            )
+            self._refresh_queue_total_from_items()
             self._refresh_queue_progress()
         elif self._all_items and not self._queue_scan_running:
             self._queue_progress_total = len(self._all_items)
@@ -158,13 +156,14 @@ class TransfersTab(QWidget):
                 self._all_items.append(item)
                 existing.add(key)
             self._ensure_queue_sequence(key)
+        self._refresh_queue_total_from_items()
         self._apply_filter()
 
     def _apply_filter(self) -> None:
         needle = self.search_edit.text().strip().lower()
         # Stable priority sort only runs on queue/state changes, never on live
-        # speed samples: pending uploads stay visible first while completed
-        # files move to the bottom without adding per-sample CPU work.
+        # speed samples: active files stay at the top, waiting files follow,
+        # and completed files move to the bottom so the queue visibly advances.
         items = sorted(self._all_items, key=self._queue_sort_key)
         if needle:
             items = [it for it in items if needle in it.path.lower()]
@@ -192,13 +191,16 @@ class TransfersTab(QWidget):
         )
         self._update_summary()
 
-    def _queue_sort_key(self, item: TransferItem) -> int:
+    def _queue_sort_key(self, item: TransferItem) -> tuple[int, int, int]:
         key = (item.direction, item.path)
         if key in self._completed_items:
-            return 2
-        if item.direction == "upload":
-            return 0
-        return 1
+            state_priority = 2
+        elif key in self._active_items:
+            state_priority = 0
+        else:
+            state_priority = 1
+        direction_priority = 0 if item.direction == "upload" else 1
+        return state_priority, direction_priority, self._queue_sequence.get(key, 0)
 
     def _ensure_queue_sequence(self, key: tuple[str, str]) -> int:
         sequence = self._queue_sequence.get(key)
@@ -207,6 +209,17 @@ class TransfersTab(QWidget):
             self._queue_sequence[key] = sequence
             self._next_queue_sequence += 1
         return sequence
+
+    def _refresh_queue_total_from_items(self) -> None:
+        if not self._queue_progress_running:
+            return
+        remaining = sum(
+            1 for item in self._all_items
+            if (item.direction, item.path) not in self._completed_items
+        )
+        self._queue_progress_total = max(
+            self._queue_progress_total, self._queue_progress_done + remaining,
+        )
 
     # --- live updates during an in-progress transfer (buffered, see _flush) ---
 
@@ -291,6 +304,7 @@ class TransfersTab(QWidget):
         if not known:
             self._all_items.append(TransferItem(direction, path, size))
         self._ensure_queue_sequence(key)
+        self._refresh_queue_total_from_items()
         self._active_items.add((direction, path))
         self._current_files[direction] = path
         self._item_progress[key] = 0
@@ -513,7 +527,7 @@ class TransfersTab(QWidget):
             self.queue_progress.setFormat(t("transfers.progress_preparing"))
             return
         self.queue_progress.setRange(0, 100)
-        percent = min(100, round(100 * self._queue_progress_done / self._queue_progress_total))
+        percent = min(100, int(100 * self._queue_progress_done / self._queue_progress_total))
         self.queue_progress.setValue(percent)
         self.queue_progress.setFormat(t(
             "transfers.progress_format",

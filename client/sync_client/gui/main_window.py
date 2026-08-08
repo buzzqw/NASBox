@@ -38,8 +38,8 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle(f"{APP_NAME} {APP_VERSION}")
         self.setWindowIcon(icons.app_icon())
-        self.resize(1040, 680)
-        self.setMinimumSize(760, 520)
+        self.resize(1280, 760)
+        self.setMinimumSize(1000, 620)
         self._is_shutting_down = False
         self._shutdown_thread: threading.Thread | None = None
         self._shutdown_dialog: QProgressDialog | None = None

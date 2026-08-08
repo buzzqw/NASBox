@@ -1,41 +1,33 @@
-# Configurazioni personali
+# Local NAS server configuration and runtime state
 server/server.conf
-*.conf
-!*.conf.example
-
-# Stato runtime (log, PID, journal, lock)
 server/state/
 
-# Cache Python
+# Python bytecode, test output, and virtual environments
 __pycache__/
-*.pyc
-*.pyo
+*.py[cod]
+*.so
+.pytest_cache/
+.coverage
+htmlcov/
 .venv/
+venv/
 
-# Bundle client update
-client/.update/
-client-update/
+# Build artifacts
+build/
+dist/
+*.egg-info/
 
-# File temporanei e backup
-*.swp
-*.swo
-*~
-*.bak
-*.backup-*
-.nasbox-client-update/
+# Local configuration, credentials, and logs
+.env
+.env.*
+!.env.example
+*.log
+*.pid
+*.sqlite3
+*.sqlite3-*
+client.json
 
-# Dati sensibili
-*secret*
-*credential*
-*.pem
-*.key
-id_*
-known_hosts
-
-# Configurazioni specifiche utente
-**/client.json
-**/sync_state.db
-
-# OS
+# Editor and operating-system files
 .DS_Store
-Thumbs.db
+.idea/
+.vscode/

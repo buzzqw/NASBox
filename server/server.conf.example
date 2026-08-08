@@ -24,18 +24,5 @@ RETENTION_DAYS=90
 # no cron/Task Scheduler involved. This just controls that internal sleep.
 CHECK_INTERVAL_MINUTES=60
 
-# --- Manifest management ---
-# Tombstone (deleted-file) entries persist in the manifest to prevent
-# offline clients from resurrecting old data. When TTL > 0, tombstones
-# older than this many days are garbage-collected from the manifest.
-# 0 = keep tombstones forever (default, safest).
-TOMBSTONE_TTL_DAYS=0
-
-# --- Stale lock cleanup ---
-# A sync-transfer lock held longer than this is considered stale (SSH died,
-# client crashed, network dropped). The daemon kills such processes on each
-# pruning pass. 0 = disabled, keep every lock indefinitely.
-SYNC_LOCK_MAX_AGE_MINUTES=10
-
 # --- Housekeeping ---
 LOG_MAX_BYTES=5242880   # rotate server.log past this size (bytes)

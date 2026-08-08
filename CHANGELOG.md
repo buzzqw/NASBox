@@ -2,102 +2,33 @@
 
 Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
-## 1.10.13 - 2026-08-08
+## 1.10.29 - 2026-08-08
 
-- Il pull riconosce come proprie anche le cancellazioni dei file contenuti in
-  una directory rimossa da `rsync`, evitando un nuovo annullamento del batch.
+- Ripristinata la numerazione progressiva della coda: ogni file conserva la
+  propria posizione, anche quando gli elementi completati vengono spostati in fondo.
 
-## 1.10.12 - 2026-08-08
+## 1.10.28 - 2026-08-08
 
-- Il watcher ignora i file temporanei creati da `rsync` durante un pull, evitando
-  che il trasferimento venga annullato e ripetuto continuamente.
+- Corretta la coda Trasferimenti: la numerazione segue l’ordine visualizzato e
+  il progresso non raggiunge il 100% finché l’ultimo file è ancora in corso.
 
-## 1.10.11 - 2026-08-08
+## 1.10.27 - 2026-08-08
 
-- I rinvii del pull riportano ora i percorsi locali che hanno causato
-  l'interruzione, rendendo visibile la causa del conflitto.
+- La coda Trasferimenti ordina gli elementi in corso e ancora da trasferire in
+  alto, lasciando quelli completati in fondo per rendere visibile l’avanzamento.
+- Nella tab Log `Percorso` usa lo spazio principale e `Dettaglio` resta compatto.
 
-## 1.10.10 - 2026-08-08
+## 1.10.26 - 2026-08-08
 
-- Evitato il ciclo di download ripetuto: il watcher riconosce subito le scritture
-  locali generate dal pull come appartenenti al trasferimento in corso.
+- Allargata la finestra principale e resa la tabella Log più leggibile: percorso
+  e dettaglio ora si dividono lo spazio disponibile.
 
-## 1.10.9 - 2026-08-08
+## 1.10.25 - 2026-08-08
 
-- Il watcher locale rispetta le stesse esclusioni di `rsync`, evitando che i
-  bundle client e il codice del demone riattivino continuamente push e pull.
-
-## 1.10.8 - 2026-08-08
-
-- La coda mostra l'avanzamento della fase di preparazione e verifica dei file
-  prima dell'avvio del trasferimento vero e proprio.
-
-## 1.10.7 - 2026-08-08
-
-- I numeri laterali della coda sono progressivi per file e restano associati
-  all'ordine di evasione anche quando i completati vengono spostati in fondo.
-
-## 1.10.6 - 2026-08-08
-
-- Corretta la colonna Dimensione della coda: ora conserva la dimensione dei
-  file anche dopo la riconciliazione del piano di sincronizzazione.
-
-## 1.10.5 - 2026-08-08
-
-- La coda mostra una barra di progresso solo sulla riga del file attualmente
-  trasferito.
-
-## 1.10.4 - 2026-08-08
-
-- L'installer copia il client nella directory canonica `~/NASBox/sync-daemon/client`.
-- Il launcher e il servizio systemd usano sempre il client installato in quella
-  directory persistente.
-
-## 1.10.3 - 2026-08-08
-
-- L'azione `Esci` dalla tray nasconde subito la finestra principale e completa
-  lo shutdown dell'applicazione.
-
-## 1.10.2 - 2026-08-08
-
-- La coda Trasferimenti ordina gli upload pendenti in alto e sposta i file
-  completati in fondo, dando una progressione visiva senza riordinare ad ogni
-  aggiornamento della velocità.
-
-## 1.10.1 - 2026-08-08
-
-- Aggiornato il pacchetto client/server per verificare il flusso di update
-  automatico all'avvio.
-
-## 1.10.0 - 2026-08-08
-
-- Il client controlla una versione piu recente nel percorso di avvio o nel NAS
-  prima di costruire la finestra, chiede conferma e si aggiorna riavviandosi.
-- Il tab Trasferimenti mostra il piano effettivo anche quando la scansione
-  dell'anteprima non riesce ad aggiornarsi mentre il lock NAS e occupato.
-
-## 1.9.1 - 2026-08-08
-
-- Il caricamento di un lotto grande (es. dopo aver copiato una cartella
-  enorme) ora procede a blocchi da 100 file invece che tutto insieme: i primi
-  file arrivano sul NAS entro pochi secondi/minuti invece che solo dopo aver
-  verificato l'intero lotto, e un fallimento a metà lascia da rifare solo i
-  blocchi rimanenti, non l'intera operazione. Il limite di sicurezza sulle
-  cancellazioni resta calcolato sul totale dell'operazione, non per blocco.
-- Corretto un bug per cui il tab Trasferimenti poteva restare bloccato su
-  "NAS occupato da un'altra sincronizzazione" per l'intera durata di
-  un'operazione a blocchi composta solo da cancellazioni (nessun blocco con
-  upload effettivi), anche se il lavoro procedeva normalmente.
-- Corretto un secondo bug del tab Trasferimenti: il conteggio "coda N/N" era
-  sempre uguale a se stesso (e cresceva ogni volta) perché il totale reale
-  arrivava da una scansione di anteprima separata che non riesce mai a
-  ottenere il lock mentre un caricamento a blocchi è in corso. Ora il totale
-  vero arriva direttamente dal caricamento stesso, che lo conosce già in
-  anticipo.
-- `sync-daemon-server.sh`: il controllo dello stato dei file (`--file-states-current`,
-  usato prima di ogni caricamento) ora calcola i checksum in parallelo (8 alla
-  volta) invece che uno alla volta -- misurato circa il 30-60% più veloce su
-  un NAS reale, a seconda del carico I/O.
+- Il controllo aggiornamenti resta sulla stessa riga della versione e viene
+  eseguito automaticamente al massimo una volta ogni ora.
+- La cartella `sync-daemon` viene esclusa interamente dalla sincronizzazione,
+  evitando conflitti tra i file del pacchetto e le copie sul NAS.
 
 ## 1.9.0 - 2026-08-08
 

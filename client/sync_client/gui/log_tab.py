@@ -56,7 +56,15 @@ class LogTab(QWidget):
         cols = [t("log.col_time"), t("log.col_action"), t("log.col_path"), t("log.col_detail")]
         self.table = QTableWidget(0, len(cols))
         self.table.setHorizontalHeaderLabels(cols)
-        self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        self.table.setWordWrap(False)
+        header = self.table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        # Let both long-text columns grow with the window instead of leaving
+        # Dettaglio at its tiny default width while Percorso consumes the rest.
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
+        header.resizeSection(3, 180)
         root.addWidget(self.table)
 
         # Incoming live events (potentially many per second during a big sync)

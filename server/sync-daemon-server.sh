@@ -187,9 +187,7 @@ compact_manifest_unlocked() {
     local journal_lines tombstone_cutoff_seconds now_epoch
     journal_lines=$(wc -l < "$JOURNAL_FILE" 2>/dev/null || echo 0)
     if (( journal_lines <= 1 )); then
-        # When tombstone GC is enabled, also sweep the manifest even without
-        # new journal transactions. Otherwise stale tombstones accumulate until
-        # the next journal write forces a compaction pass.
+        # Sweep old tombstones even when no new journal transaction arrived.
         if (( TOMBSTONE_TTL_DAYS > 0 )); then
             now_epoch=$(date '+%s')
             tombstone_cutoff_seconds=$(( TOMBSTONE_TTL_DAYS * 86400 ))
@@ -197,8 +195,6 @@ compact_manifest_unlocked() {
             awk -F '\t' -v now="$now_epoch" -v cutoff="$tombstone_cutoff_seconds" '
                 NR == 1 { print; next }
                 {
-                    # Tombstone: digest (field 2) is empty, size (field 3) is "0".
-                    # Field 6 carries the server timestamp when the tombstone was created.
                     if ($2 == "" && $3 == "0" && NF >= 6) {
                         age = now - int($6)
                         if (age > cutoff) next
@@ -246,10 +242,8 @@ compact_manifest_unlocked() {
         END {
             print "NASBOX_MANIFEST_V1"
             for (path in state) {
-                # Drop tombstones older than the TTL, unless TTL is disabled.
                 if (cutoff == 0) { print state[path]; continue }
                 split(state[path], f, FS)
-                # Tombstone: digest empty, size "0"
                 if (f[2] == "" && f[3] == "0") {
                     age = now - int(f[6])
                     if (age > cutoff) continue
@@ -935,10 +929,8 @@ prune_root() {
 }
 
 cleanup_stale_sync_locks() {
-    # Kill any flock process holding the sync-transfer lock for longer than
-    # SYNC_LOCK_MAX_AGE_MINUTES. A well-behaved client releases the lock within
-    # seconds; one that lasts minutes is a stale session (SSH died, client
-    # crashed, network dropped), blocking all other clients.
+    # A client crash can leave an SSH/flock process holding the transaction lock.
+    # Release only locks older than the configured safety threshold.
     local max_age_seconds=$(( SYNC_LOCK_MAX_AGE_MINUTES * 60 ))
     local stale_pids stale_count now pid elapsed
     stale_pids=()

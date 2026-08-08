@@ -1023,7 +1023,10 @@ def server_package_excluded_path(cfg: Config) -> Optional[str]:
         return None  # the package IS the share root -- excluding "/" would exclude everything, so don't
     if not package_dir.startswith(share_dir + "/"):
         return None  # installed outside the synced tree entirely -- nothing to protect it from
-    return package_dir[len(share_dir) + 1:]
+    package_relative = package_dir[len(share_dir) + 1:]
+    # The server script lives in SHARE_ROOT/sync-daemon/server, but the whole
+    # package is local installation data and must never enter synchronization.
+    return package_relative.split("/", 1)[0]
 
 
 def _server_package_exclude_arg(cfg: Config) -> list[str]:

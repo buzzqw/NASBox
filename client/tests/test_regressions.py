@@ -10,7 +10,7 @@ from pathlib import Path
 from unittest.mock import Mock
 from unittest.mock import patch
 
-from sync_client import engine, paths, push_worker, repository_safety, rsync_ops, trash, updater
+from sync_client import engine, paths, pull_worker, push_worker, repository_safety, rsync_ops, trash, updater
 from sync_client.sync_state import SyncStateStore
 from sync_client.watcher import WatcherHandle
 
@@ -45,6 +45,22 @@ class _Watcher:
 
 
 class RegressionTests(unittest.TestCase):
+    def test_pull_worker_exposes_batch_size_signal(self) -> None:
+        self.assertTrue(hasattr(pull_worker.PullWorker, "batch_size_known"))
+
+    def test_server_package_exclusion_covers_the_whole_sync_daemon_folder(self) -> None:
+        cfg = type("Config", (), {"get": lambda _self, key, default=None: {
+            "remote_server_script": "/volume1/NASBox/sync-daemon/server/sync-daemon-server.sh",
+            "remote_prefix": "/volume1/NASBox",
+            "server_state_dir_remote": "/volume1/NASBox/sync-daemon/server/state",
+            "exclude_patterns": [],
+        }.get(key, default), "exclude_patterns": lambda _self: []})()
+
+        self.assertEqual(rsync_ops.server_package_excluded_path(cfg), "sync-daemon")
+        self.assertTrue(rsync_ops.path_is_excluded(cfg, "sync-daemon/README.md"))
+        self.assertTrue(rsync_ops.path_is_excluded(cfg, "sync-daemon/server/server.conf"))
+        self.assertFalse(rsync_ops.path_is_excluded(cfg, "RPG/manuale.pdf"))
+
     def test_empty_initial_folder_is_not_queued_for_push(self) -> None:
         with tempfile.TemporaryDirectory() as folder:
             with patch("sync_client.engine.FolderWatcher", _Watcher):
@@ -265,29 +281,42 @@ class RegressionTests(unittest.TestCase):
         tab.on_queue_updated([
             rsync_ops.TransferItem("upload", "first.txt", 10),
             rsync_ops.TransferItem("upload", "second.txt", 20),
+            rsync_ops.TransferItem("upload", "third.txt", 30),
         ])
         tab.on_transfer_started("upload")
         tab.on_item_started("upload", "first.txt")
 
         self.assertEqual(tab.table.item(0, 3).text(), "In corso")
+        self.assertEqual(tab.table.verticalHeaderItem(0).text(), "1")
+        self.assertEqual(tab.table.item(1, 1).text(), "second.txt")
+        self.assertEqual(tab.table.item(1, 3).text(), "In attesa")
+        self.assertEqual(tab.table.verticalHeaderItem(1).text(), "2")
+        self.assertEqual(tab.table.item(2, 1).text(), "third.txt")
+        self.assertEqual(tab.table.verticalHeaderItem(2).text(), "3")
         self.assertIn("first.txt", tab.activity_label.text())
 
         tab.on_item_done("upload", "first.txt")
-        self.assertEqual(tab.queue_progress.value(), 50)
+        self.assertEqual(tab.queue_progress.value(), 33)
         tab._flush()
-        self.assertEqual(tab.table.rowCount(), 2)
+        self.assertEqual(tab.table.rowCount(), 3)
         self.assertEqual(tab.table.item(0, 1).text(), "second.txt")
         self.assertEqual(tab.table.item(0, 3).text(), "In attesa")
         self.assertEqual(tab.table.verticalHeaderItem(0).text(), "2")
-        self.assertEqual(tab.table.item(1, 1).text(), "first.txt")
-        self.assertEqual(tab.table.item(1, 3).text(), "Completato")
-        self.assertEqual(tab.table.verticalHeaderItem(1).text(), "1")
-        tab.on_queue_updated([rsync_ops.TransferItem("upload", "second.txt", 20)])
-        self.assertEqual(tab.table.rowCount(), 2)
+        self.assertEqual(tab.table.item(1, 1).text(), "third.txt")
+        self.assertEqual(tab.table.verticalHeaderItem(1).text(), "3")
+        self.assertEqual(tab.table.item(2, 1).text(), "first.txt")
+        self.assertEqual(tab.table.item(2, 3).text(), "Completato")
+        self.assertEqual(tab.table.verticalHeaderItem(2).text(), "1")
+        tab.on_queue_updated([
+            rsync_ops.TransferItem("upload", "second.txt", 20),
+            rsync_ops.TransferItem("upload", "third.txt", 30),
+        ])
+        self.assertEqual(tab.table.rowCount(), 3)
         tab.on_transfer_finished("upload", True)
         tab._flush()
-        self.assertEqual(tab.table.rowCount(), 1)
+        self.assertEqual(tab.table.rowCount(), 2)
         self.assertEqual(tab.table.item(0, 1).text(), "second.txt")
+        self.assertEqual(tab.table.verticalHeaderItem(0).text(), "2")
         self.assertIn("1 operazioni", tab.activity_label.text())
         tab.deleteLater()
 
