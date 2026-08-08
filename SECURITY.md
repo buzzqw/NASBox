@@ -1,10 +1,21 @@
-# Security Policy
+# Security Policy / Politica di sicurezza
 
-## Versioni supportate
+## Supported versions / Versioni supportate
 
+Security fixes are applied to the latest stable version.
 Le correzioni di sicurezza vengono applicate alla versione stabile piu recente.
 
-## Segnalare una vulnerabilita
+## Reporting a vulnerability / Segnalare una vulnerabilita
+
+Do not open a public issue with exploitable details, keys, IP addresses, or
+real configurations. After publication on GitHub, use the repository's private
+vulnerability reporting, if enabled; otherwise contact the repository owner
+privately via their GitHub profile.
+
+Include steps to reproduce the issue, client and server versions involved, and
+the potential impact. You will receive confirmation and updates on the remedy.
+
+---
 
 Non aprire una issue pubblica con dettagli sfruttabili, chiavi, indirizzi IP o
 configurazioni reali. Dopo la pubblicazione su GitHub, usa la segnalazione
