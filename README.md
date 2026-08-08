@@ -69,34 +69,117 @@ cestino; un piccolo demone sul NAS applica la retention dello storico.
 ## Requirements / Requisiti
 
 **Client (Linux):**
-- Python 3.11+
-- PyQt6, rsync, OpenSSH
-- `inotify-tools` recommended for instant local change detection
+- Python 3.11 or later (`python3 --version`)
+- PyQt6 (`pip install --user PyQt6` or your distro's package)
+- `rsync` and `ssh` (pre-installed on virtually every Linux)
+- `inotify-tools` strongly recommended for instant local change detection
+  (`apt install inotify-tools` / `pacman -S inotify-tools`)
 
-**NAS:**
-- bash, rsync, OpenSSH, and standard utilities (`find`, `stat`, `date`, `flock`)
+**NAS (Synology, QNAP, or any Linux box):**
+- bash, rsync, OpenSSH, coreutils (`find`, `stat`, `date`, `awk`, `flock`)
+  — all pre-installed on every NAS that can serve as an rsync target
+- No Python, no external packages needed on the NAS
 
 ## Install / Installazione
 
-Install the server package on a persistent NAS data volume first, then install
-the client on each PC.
+### 1. Prepare the NAS (one time only)
+
+Copy the `server/` folder to a **persistent data volume** on your NAS.
+On Synology this means `/volume1/…`, not `/root/` or `/etc/` (those get reset
+on firmware updates).
 
 ```bash
-# On the NAS — after copying server/ to a persistent folder
-cd server
-./install.sh
+# Example — adjust the path to your NAS
+scp -r server/ andres@192.168.1.119:/volume1/NASBox/sync-daemon-server/
 
-# On each Linux PC
-cd client
+# SSH into the NAS
+ssh andres@192.168.1.119
+cd /volume1/NASBox/sync-daemon-server
+
+# Run the interactive installer
 ./install.sh
 ```
 
-The wizard creates or verifies the SSH key, sets up the connection, and
-registers the client as a user service when systemd is available.
-Full guide in [MANUALE.md](MANUALE.md) (Italian) / [MANUAL.md](MANUAL.md) (English).
+The installer will:
+- Ask for `SHARE_ROOT` — the NASBox folder path on the NAS (e.g. `/volume1/NASBox`)
+- Ask for retention in days (how long deleted/overwritten files stay in `.sync-trash`)
+- Create the `.nasbox-root` repository marker (clients refuse to sync without it)
+- Register the daemon for auto-start (systemd, rc.d, or Task Scheduler)
 
-At startup the client also checks for a newer bundle in the startup path or
-on the NAS and, on confirmation, updates and restarts itself.
+Verify it's running:
+
+```bash
+./sync-daemon-server.sh --status
+# Should show: "Demone: IN ESECUZIONE (PID …)"
+```
+
+### 2. Install the client on each PC
+
+```bash
+# Clone or copy the repository to your PC
+cd NASBox/client
+
+# Run the interactive installer
+./install.sh
+```
+
+The wizard does everything in one pass:
+
+1. **SSH key** — generates an `ed25519` key pair if you don't already have one,
+   then copies the public key to the NAS (`ssh-copy-id`). This is mandatory:
+   NASBox uses SSH key authentication exclusively, never passwords.
+2. **NAS connection** — asks for the NAS LAN host/IP, SSH user, and port.
+   Optionally: a WAN host for direct outside access, and a bastion (jump host)
+   for when you're away from home. See [§7 of the manual](MANUAL.md#7-the-bastion-case-nas-not-reachable-from-outside).
+3. **NASBox folder** — asks where to put the synced folder on this PC
+   (default: `~/NASBox`). Created if it doesn't exist.
+4. **Launcher** — creates a `.desktop` entry so NASBox appears in your app menu.
+5. **Auto-start** — if systemd is available, registers a user service so the
+   client starts automatically at login.
+
+When the wizard finishes, the client launches and starts syncing immediately.
+
+### 3. Verify everything works
+
+```bash
+# Check the client is running
+systemctl --user status sync-daemon-client.service
+
+# Open the GUI
+python3 ~/NASBox/sync-daemon/client/main.py
+
+# Look at the Status tab — it should show "✅ Syncing — connected to <NAS>"
+# Drop a test file in your NASBox folder and watch it appear on the NAS
+```
+
+### 4. Repeat on every PC
+
+Run `client/install.sh` on each PC you want to keep in sync. Point them all
+to the same NAS and the same `remote_prefix`. Everything else is automatic.
+
+### Keeping the client up to date
+
+At every startup the client checks for a newer version:
+- In `client-update/` or `.update/` next to the installed `client/` folder
+- On the NAS, in `.nasbox-client-update` under `remote_prefix`
+
+If a newer version is found, it asks for confirmation, replaces itself
+atomically, and restarts. To push an update: copy the new `client-update/`
+folder to one of these locations.
+
+### Keeping the server up to date
+
+Copy the new `server/` folder to the NAS, overwriting the `.sh` files (do NOT
+overwrite `server.conf`), then:
+
+```bash
+./sync-daemon-server.sh --restart
+./sync-daemon-server.sh --status   # confirm it's running with the new version
+```
+
+The client detects outdated servers automatically and notifies you.
+
+---
 
 ## Dev & Test / Sviluppo e test
 
