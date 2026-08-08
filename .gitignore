@@ -1,0 +1,41 @@
+# Configurazioni personali
+server/server.conf
+*.conf
+!*.conf.example
+
+# Stato runtime (log, PID, journal, lock)
+server/state/
+
+# Cache Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+
+# Bundle client update
+client/.update/
+client-update/
+
+# File temporanei e backup
+*.swp
+*.swo
+*~
+*.bak
+*.backup-*
+.nasbox-client-update/
+
+# Dati sensibili
+*secret*
+*credential*
+*.pem
+*.key
+id_*
+known_hosts
+
+# Configurazioni specifiche utente
+**/client.json
+**/sync_state.db
+
+# OS
+.DS_Store
+Thumbs.db

@@ -1,0 +1,41 @@
+# sync-daemon-server configuration
+# Copy this file to "server.conf" next to sync-daemon-server.sh and edit it.
+#
+# This package is self-contained on purpose: everything it needs (this config,
+# its logs, its PID file) lives inside its own install folder. Put that folder
+# on a persistent data volume (e.g. /volume1/NASBox/sync-daemon-server/) -- on
+# Synology DSM and QNAP QTS, /etc and /root are reset or not guaranteed to
+# survive firmware updates, but volumes under /volume1 (or /share on QNAP) are.
+
+# --- The NASBox folder itself (same as remote_prefix in the client) ---
+# Every client mirrors this one folder, root to root -- there is no per-user
+# or per-folder subpath under it to configure.
+SHARE_ROOT=/volume1/NASBox
+
+# The installer creates SHARE_ROOT/.nasbox-root. Do not remove it: clients
+# refuse destructive synchronization when the repository marker is missing.
+
+# --- History/trash retention, in days, for SHARE_ROOT/.sync-trash ---
+# Examples: 30 (one month), 365 (one year), 0 (disabled -- never auto-prune)
+RETENTION_DAYS=90
+
+# --- How often the daemon itself wakes up to check/prune, in minutes ---
+# The daemon is a single always-running process with its own internal timer --
+# no cron/Task Scheduler involved. This just controls that internal sleep.
+CHECK_INTERVAL_MINUTES=60
+
+# --- Manifest management ---
+# Tombstone (deleted-file) entries persist in the manifest to prevent
+# offline clients from resurrecting old data. When TTL > 0, tombstones
+# older than this many days are garbage-collected from the manifest.
+# 0 = keep tombstones forever (default, safest).
+TOMBSTONE_TTL_DAYS=0
+
+# --- Stale lock cleanup ---
+# A sync-transfer lock held longer than this is considered stale (SSH died,
+# client crashed, network dropped). The daemon kills such processes on each
+# pruning pass. 0 = disabled, keep every lock indefinitely.
+SYNC_LOCK_MAX_AGE_MINUTES=10
+
+# --- Housekeeping ---
+LOG_MAX_BYTES=5242880   # rotate server.log past this size (bytes)
