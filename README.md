@@ -5,6 +5,41 @@
 [![Platform](https://img.shields.io/badge/Platform-Linux-lightgrey.svg)](#)
 [![Donate](https://img.shields.io/badge/Donate-PayPal-00457C.svg)](https://www.paypal.com/cgi-bin/webscr?cmd=_donations&business=azanzani@gmail.com&item_name=Support+NASBox+Project)
 
+## What is NASBox? / Cos'è NASBox?
+
+**NASBox is your own private Dropbox.** You have a NAS at home (Synology,
+QNAP, or any Linux box) and multiple PCs — desktop, laptop, maybe one at work.
+NASBox keeps one folder perfectly in sync across all of them, through your NAS.
+No cloud, no subscription, no third party touching your files. Everything goes
+over SSH+rsync.
+
+Files you drop in the NASBox folder appear on all your other PCs within seconds.
+Delete a file, and its previous version is kept in `.sync-trash` for as long as
+you want. Two people edit the same file at the same time? Both versions are
+kept, labelled as conflicts, so no data is ever lost.
+
+The NAS is the hub: clients never talk to each other directly. If you're outside
+your home network, a bastion (jump host) routes the connection automatically.
+
+---
+
+**NASBox è il tuo Dropbox privato.** Hai un NAS a casa (Synology, QNAP o un
+qualsiasi Linux) e più PC — fisso, portatile, magari uno al lavoro. NASBox
+tiene una cartella perfettamente sincronizzata su tutti, passando dal tuo NAS.
+Nessun cloud, nessun abbonamento, nessun dato in mano a terzi. Tutto viaggia
+su SSH+rsync.
+
+I file che metti nella cartella NASBox compaiono su tutti gli altri PC in pochi
+secondi. Cancelli un file? La versione precedente resta in `.sync-trash` per
+il tempo che decidi tu. Due persone modificano lo stesso file nello stesso
+momento? Entrambe le versioni vengono conservate, etichettate come conflitti,
+così nessun dato va mai perso.
+
+Il NAS è il perno centrale: i client non parlano mai tra loro direttamente.
+Se sei fuori casa, un bastione (jump host) instrada la connessione in automatico.
+
+---
+
 **NASBox** syncs a folder across multiple PCs through a NAS, using SSH and rsync.
 A PyQt6 graphical client handles uploads, downloads, queue, history and trash;
 a small daemon on the NAS enforces history retention.
