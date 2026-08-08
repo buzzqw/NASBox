@@ -411,6 +411,11 @@ class TransfersTab(QWidget):
             pending = self._pending_removals
             self._pending_removals = set()
             self._active_items.difference_update(pending)
+            self._recently_completed.update(pending)
+            self._all_items = [
+                item for item in self._all_items
+                if (item.direction, item.path) not in pending
+            ]
             self._apply_filter()
             self._refresh_activity()
 

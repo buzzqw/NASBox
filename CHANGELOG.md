@@ -2,6 +2,11 @@
 
 Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
+## 1.10.30 - 2026-08-08
+
+- Rimossi dalla coda i file appena completati, mantenendo la numerazione
+  progressiva originale per i file ancora in attesa.
+
 ## 1.10.29 - 2026-08-08
 
 - Ripristinata la numerazione progressiva della coda: ogni file conserva la

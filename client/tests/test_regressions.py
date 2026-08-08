@@ -298,20 +298,17 @@ class RegressionTests(unittest.TestCase):
         tab.on_item_done("upload", "first.txt")
         self.assertEqual(tab.queue_progress.value(), 33)
         tab._flush()
-        self.assertEqual(tab.table.rowCount(), 3)
+        self.assertEqual(tab.table.rowCount(), 2)
         self.assertEqual(tab.table.item(0, 1).text(), "second.txt")
         self.assertEqual(tab.table.item(0, 3).text(), "In attesa")
         self.assertEqual(tab.table.verticalHeaderItem(0).text(), "2")
         self.assertEqual(tab.table.item(1, 1).text(), "third.txt")
         self.assertEqual(tab.table.verticalHeaderItem(1).text(), "3")
-        self.assertEqual(tab.table.item(2, 1).text(), "first.txt")
-        self.assertEqual(tab.table.item(2, 3).text(), "Completato")
-        self.assertEqual(tab.table.verticalHeaderItem(2).text(), "1")
         tab.on_queue_updated([
             rsync_ops.TransferItem("upload", "second.txt", 20),
             rsync_ops.TransferItem("upload", "third.txt", 30),
         ])
-        self.assertEqual(tab.table.rowCount(), 3)
+        self.assertEqual(tab.table.rowCount(), 2)
         tab.on_transfer_finished("upload", True)
         tab._flush()
         self.assertEqual(tab.table.rowCount(), 2)
@@ -409,7 +406,7 @@ class RegressionTests(unittest.TestCase):
         self.assertFalse(watcher._is_internal_path(".folder/.document.json"))
         self.assertFalse(watcher._is_internal_path("RPG/manuale.pdf"))
 
-    def test_transfer_queue_places_uploads_first_and_completed_items_last(self) -> None:
+    def test_transfer_queue_places_uploads_first_and_removes_completed_items(self) -> None:
         from PyQt6.QtWidgets import QApplication
         from sync_client.gui.transfers_tab import TransfersTab
 
@@ -428,8 +425,8 @@ class RegressionTests(unittest.TestCase):
         tab._flush()
 
         self.assertEqual(tab.table.item(0, 1).text(), "remote.txt")
-        self.assertEqual(tab.table.item(1, 1).text(), "local.txt")
-        self.assertEqual(tab.table.item(1, 3).text(), "Completato")
+        self.assertEqual(tab.table.rowCount(), 1)
+        self.assertEqual(tab.table.verticalHeaderItem(0).text(), "2")
         tab.deleteLater()
 
     def test_tray_quit_hides_window_and_starts_shutdown(self) -> None:
