@@ -571,12 +571,21 @@ class SettingsTab(QWidget):
         if not local_root:
             self.conflict_count_label.setText(t("settings.maint_conflict_no_folder"))
             return
-        self._conflict_files = []
-        root = Path(local_root)
-        for entry in root.rglob("*"):
-            if entry.is_file() and self._CONFLICT_TAG in entry.name:
-                self._conflict_files.append(entry)
-        count = len(self._conflict_files)
+        self.maint_scan_btn.setEnabled(False)
+        self.conflict_count_label.setText(t("settings.maint_conflict_scanning"))
+        run_in_background(
+            self, "_conflict_scan_call",
+            lambda: _conflict_scan_worker(local_root),
+            self._on_conflict_scan_done,
+        )
+
+    def _on_conflict_scan_done(self, result, exc: Exception | None) -> None:
+        self.maint_scan_btn.setEnabled(True)
+        if exc is not None:
+            self.conflict_count_label.setText(t("settings.maint_conflict_error", detail=str(exc)))
+            return
+        count = len(result)
+        self._conflict_files = result
         if count == 0:
             self.conflict_count_label.setText(t("settings.maint_conflict_count_none"))
             self.maint_delete_btn.setEnabled(False)
@@ -674,3 +683,15 @@ def _restart_worker(cfg: Config, script_path: str) -> dict:
         return {"connected": False}
     ok, stdout, stderr = rsync_ops.run_remote_script(cfg, conn, script_path, ["--restart"], timeout=30)
     return {"connected": True, "ok": ok, "detail": (stdout + stderr).strip()}
+
+
+_CONFLICT_TAG = " (conflitto da "
+
+
+def _conflict_scan_worker(local_root: str) -> list[Path]:
+    result: list[Path] = []
+    root = Path(local_root)
+    for entry in root.rglob("*"):
+        if entry.is_file() and _CONFLICT_TAG in entry.name:
+            result.append(entry)
+    return result

@@ -96,15 +96,22 @@ scp -r server/ andres@192.168.1.119:/volume1/NASBox/sync-daemon-server/
 ssh andres@192.168.1.119
 cd /volume1/NASBox/sync-daemon-server
 
-# Run the interactive installer
-./install.sh
+# Run the interactive installer as root so it can register the systemd service
+sudo ./install.sh
 ```
 
 The installer will:
 - Ask for `SHARE_ROOT` — the NASBox folder path on the NAS (e.g. `/volume1/NASBox`)
 - Ask for retention in days (how long deleted/overwritten files stay in `.sync-trash`)
 - Create the `.nasbox-root` repository marker (clients refuse to sync without it)
-- Register the daemon for auto-start (systemd, rc.d, or Task Scheduler)
+- Register the daemon as a **systemd system service** for auto-start at boot
+  (or a Synology `rc.d` hook, or a QNAP Task Scheduler entry, depending on
+  platform)
+
+If you run without `sudo`, the installer still configures everything and starts
+the daemon, but warns that it can't register the system service — you'll need
+to re-run `sudo ./install.sh` later, or start the daemon manually after each
+NAS reboot with `./sync-daemon-server.sh --start`.
 
 Verify it's running:
 

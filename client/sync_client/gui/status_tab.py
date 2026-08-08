@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import os
+import sys
 import time
 
-from PyQt6.QtCore import QTimer, QUrl
+from PyQt6.QtCore import Qt, QTimer, QUrl
 from PyQt6.QtGui import QDesktopServices
 from PyQt6.QtWidgets import (
     QGroupBox, QHBoxLayout, QLabel, QMessageBox, QPushButton, QVBoxLayout,
@@ -16,6 +18,8 @@ from .. import trash
 from .. import rsync_ops
 from ..i18n import t
 from ..repository_safety import RepositorySafetyError, initialize_local_root
+from ..version import APP_NAME, APP_VERSION
+from .. import updater
 from .dialogs import FolderSetupDialog, PauseForDialog
 from .async_utils import run_in_background
 from .format_utils import human_size
@@ -32,6 +36,9 @@ class StatusTab(QWidget):
         self.cfg = cfg
         self.engine = engine
         self.scan_worker = scan_worker
+        self._update_check_busy = False
+        self._update_auto_checked = False
+        self._update_candidate = None
 
         root = QVBoxLayout(self)
         root.setContentsMargins(4, 8, 4, 4)
@@ -49,6 +56,19 @@ class StatusTab(QWidget):
         self.queue_label = QLabel(t("status.queue_unknown"))
         self.queue_label.setObjectName("statusQueue")
         status_layout.addWidget(self.queue_label)
+        # Version info with click-to-check-update
+        self.version_label = QLabel(f"{APP_NAME} v{APP_VERSION}")
+        self.version_label.setObjectName("statusVersion")
+        self.version_label.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.version_label.setToolTip(t("status.version_tooltip"))
+        self.version_label.mousePressEvent = lambda _e: self._check_for_update()
+        status_layout.addWidget(self.version_label)
+        self.update_available_label = QLabel()
+        self.update_available_label.setObjectName("statusUpdateAvailable")
+        self.update_available_label.setWordWrap(True)
+        self.update_available_label.hide()
+        self.update_available_label.mousePressEvent = lambda _e: self._check_for_update()
+        status_layout.addWidget(self.update_available_label)
         # Shown only while a large first-time batch is being checksummed locally
         # (see PushWorker.hash_progress) -- otherwise this phase used to look
         # frozen for as long as it took, with the rest of the status area
@@ -226,6 +246,9 @@ class StatusTab(QWidget):
             self.status_label.style().unpolish(self.status_label)
             self.status_label.style().polish(self.status_label)
         self._refresh_pause_button()
+        if not self._update_auto_checked and connected and configured and not paused:
+            self._update_auto_checked = True
+            QTimer.singleShot(10000, self._check_for_update)
 
     def on_hash_progress(self, done: int, total: int) -> None:
         if total <= 0 or done >= total:
@@ -287,3 +310,73 @@ class StatusTab(QWidget):
             self.integrity_label.setText(t("status.integrity_ok"))
             return
         self.integrity_label.setText(t("status.integrity_different", count=len(paths)))
+
+    # --- update check ---
+
+    def _check_for_update(self) -> None:
+        if self._update_check_busy:
+            return
+        self._update_check_busy = True
+        self.update_available_label.setText(t("status.update_checking"))
+        self.update_available_label.show()
+        run_in_background(
+            self, "_update_check_call",
+            lambda: _update_check_worker(self.cfg),
+            self._on_update_check_done,
+        )
+
+    def _on_update_check_done(self, result, exc: Exception | None) -> None:
+        self._update_check_busy = False
+        self._update_auto_checked = False
+        self._update_candidate = None
+        if exc is not None:
+            self.update_available_label.setText(t("status.update_check_failed", detail=str(exc)))
+            return
+        candidate = result.get("candidate")
+        if candidate is None:
+            self.update_available_label.hide()
+            return
+        self._update_candidate = candidate
+        self.update_available_label.setText(
+            t("status.update_available", version=candidate.version)
+        )
+        self.update_available_label.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.update_available_label.mousePressEvent = lambda _e: self._install_update()
+        self.update_available_label.show()
+
+    def _install_update(self) -> None:
+        candidate = getattr(self, '_update_candidate', None)
+        if candidate is None:
+            return
+        answer = QMessageBox.question(
+            self,
+            t("status.update_confirm_title"),
+            t("status.update_confirm_body", version=candidate.version),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            from pathlib import Path
+            import os, sys
+            source_root = candidate.materialize()
+            current_root = Path(os.path.abspath(__file__)).resolve().parents[2]
+            updater.install_update(source_root, current_root)
+            candidate.cleanup()
+            QMessageBox.information(self, t("status.update_restart_title"), t("status.update_restart_body"))
+            os.execv(sys.executable, [sys.executable, str(current_root / "main.py"), *sys.argv[1:]])
+        except Exception as exc:
+            candidate.cleanup()
+            QMessageBox.warning(self, t("status.update_failed_title"), str(exc))
+
+
+def _update_check_worker(cfg: Config) -> dict:
+    from pathlib import Path
+    import os
+    current_root = Path(os.path.abspath(__file__)).resolve().parents[2]
+    candidate = updater.find_update(cfg, current_root, str(current_root / "main.py"))
+    result: dict = {"candidate": None}
+    if candidate is not None:
+        result["candidate"] = candidate
+    return result

@@ -149,12 +149,23 @@ class PullWorker(TransferWorker):
                     baselines = {}
                     if manifest_entries is not None:
                         baselines = self.sync_state.get_many(set(manifest_entries))
+                        changed_count = 0
                         for path, state in manifest_entries.items():
                             if state.kind != RemoteKind.FILE or rsync_ops.path_is_excluded(self.cfg, path):
                                 continue
                             baseline = baselines.get(path)
                             if baseline is None or baseline.is_tombstone or baseline.digest != state.digest:
                                 checksum_paths.add(path)
+                                changed_count += 1
+                        # Count tombstones (deletions the client hasn't seen yet) as well.
+                        tombstone_count = sum(
+                            1 for path, state in manifest_entries.items()
+                            if state.kind == RemoteKind.TOMBSTONE and baselines.get(path) is not None
+                            and not baselines[path].is_tombstone
+                        )
+                        estimated_total = changed_count + tombstone_count
+                        if estimated_total > 0:
+                            self.batch_size_known.emit(estimated_total)
 
                     def _cancel_check(w=watcher) -> bool:
                         if w is None or not w.is_dirty():

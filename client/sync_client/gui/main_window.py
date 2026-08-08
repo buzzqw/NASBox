@@ -11,6 +11,7 @@ from PyQt6.QtWidgets import (
 
 from .. import config as config_module
 from .. import logger as logger_module
+from .. import updater
 from ..engine import SyncEngine
 from ..version import APP_NAME, APP_VERSION
 from ..pull_worker import PullWorker
@@ -97,6 +98,9 @@ class MainWindow(QMainWindow):
         header_layout.addStretch(1)
         version = QLabel(f"v{APP_VERSION}")
         version.setObjectName("versionBadge")
+        version.setCursor(Qt.CursorShape.PointingHandCursor)
+        version.setToolTip(t("main_window.version_tooltip"))
+        version.mousePressEvent = lambda _e: self._check_for_client_update()
         header_layout.addWidget(version)
         shell_layout.addWidget(header)
 
@@ -238,6 +242,51 @@ class MainWindow(QMainWindow):
         else:
             event.ignore()
             self.quit_application()
+
+    _update_check_busy = False
+
+    def _check_for_client_update(self) -> None:
+        if self._update_check_busy:
+            return
+        self._update_check_busy = True
+        from pathlib import Path
+        current_root = Path(__file__).resolve().parents[2]
+        run_in_background(
+            self, "_update_check",
+            lambda: {"candidate": updater.find_update(self.cfg, current_root, str(current_root / "main.py"))},
+            self._on_client_update_done,
+        )
+
+    def _on_client_update_done(self, result, exc: Exception | None) -> None:
+        self._update_check_busy = False
+        if exc is not None:
+            QMessageBox.warning(self, t("main_window.update_check_failed"), str(exc))
+            return
+        candidate = result.get("candidate") if result else None
+        if candidate is None:
+            QMessageBox.information(self, t("main_window.update_check_title"), t("main_window.update_none"))
+            return
+        answer = QMessageBox.question(
+            self,
+            t("main_window.update_available_title"),
+            t("main_window.update_available_body", version=candidate.version, origin=candidate.origin),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            candidate.cleanup()
+            return
+        try:
+            import os, sys
+            source_root = candidate.materialize()
+            current_root = Path(__file__).resolve().parents[2]
+            updater.install_update(source_root, current_root)
+            candidate.cleanup()
+            QMessageBox.information(self, t("main_window.update_restart_title"), t("main_window.update_restart_body"))
+            os.execv(sys.executable, [sys.executable, str(current_root / "main.py"), *sys.argv[1:]])
+        except Exception as exc:
+            candidate.cleanup()
+            QMessageBox.warning(self, t("main_window.update_failed_title"), str(exc))
 
     def quit_application(self) -> None:
         """Stop background workers without leaving the UI frozen during exit."""
