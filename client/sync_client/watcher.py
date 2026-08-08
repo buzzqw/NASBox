@@ -146,7 +146,7 @@ class FolderWatcher:
                 continue
             # CSV quoting preserves commas, quotes and embedded newlines in a
             # filename; line-oriented --format output cannot do that.
-            relative = self._to_relative(row[0] + row[2])
+            relative = self._to_relative(os.path.join(row[0], row[2]))
             if not self._is_internal_path(relative):
                 self.mark_dirty(relative)
 

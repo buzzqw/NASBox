@@ -173,7 +173,7 @@ class PullWorker(TransferWorker):
                         external = {
                             path for path in w.dirty_paths()
                             if not any(
-                                path == own_path
+                                path.rstrip("/") == own_path.rstrip("/")
                                 or path.startswith(own_path.rstrip("/") + "/")
                                 for own_path in self._self_written_paths
                             )
