@@ -13,6 +13,11 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 - Impostate larghezze iniziali piu leggibili per ora, azione, percorso e
   dettaglio.
 
+## 1.10.32 - 2026-08-09
+
+- Corretto l'errore `Path is not defined` durante l'installazione manuale degli
+  aggiornamenti client.
+
 ## 1.10.30 - 2026-08-08
 
 - Rimossi dalla coda i file appena completati, mantenendo la numerazione

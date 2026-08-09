@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import threading
 import time
+from pathlib import Path
 
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtWidgets import (
@@ -249,7 +250,6 @@ class MainWindow(QMainWindow):
         if self._update_check_busy:
             return
         self._update_check_busy = True
-        from pathlib import Path
         current_root = Path(__file__).resolve().parents[2]
         run_in_background(
             self, "_update_check",
