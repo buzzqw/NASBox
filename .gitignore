@@ -27,6 +27,10 @@ dist/
 *.sqlite3-*
 client.json
 
+# Client update bundles are deployment data, not source files.
+client-update/
+client/.update/
+
 # Editor and operating-system files
 .DS_Store
 .idea/
