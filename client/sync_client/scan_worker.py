@@ -219,6 +219,6 @@ class ScanWorker(QThread):
                 remote = remote_states.get(path)
                 if remote is not None and remote.kind == RemoteKind.FILE:
                     items.append(rsync_ops.TransferItem("download", path, remote.size))
-                elif self.cfg.get("delete_enabled"):
+                elif self.cfg.get("delete_enabled") and local_fingerprint is not None:
                     items.append(rsync_ops.TransferItem("delete_local", path))
         return items

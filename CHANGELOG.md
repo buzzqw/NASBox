@@ -7,6 +7,10 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 - Sostituita la licenza proprietaria con la European Union Public Licence
   versione 1.2 (EUPL-1.2).
 
+## 1.10.35 - 2026-08-09
+
+- Ignorate dalla coda le cancellazioni locali di percorsi già inesistenti.
+
 ## 1.10.34 - 2026-08-09
 
 - La coda trasferimenti usa manifest e journal NAS invece di due scansioni

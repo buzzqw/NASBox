@@ -267,6 +267,42 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(worker._manifest_revision, 7)
         self.assertEqual(worker._manifest_entries, manifest_entries)
 
+    def test_manifest_preview_ignores_deleted_local_path_when_remote_is_absent(self) -> None:
+        import threading
+
+        with tempfile.TemporaryDirectory() as folder:
+            cfg = Mock()
+            cfg.is_configured.return_value = True
+            cfg.local_root.return_value = folder
+            cfg.exclude_patterns.return_value = []
+            cfg.get.side_effect = lambda key, default=None: {
+                "remote_server_script": "/server.sh",
+                "delete_enabled": True,
+                "remote_prefix": "/remote",
+            }.get(key, default)
+            watcher = Mock()
+            watcher.is_dirty.return_value = True
+            watcher.dirty_paths.return_value = {"already-gone.tmp"}
+            watchers = Mock()
+            watchers.get.return_value = watcher
+            sync_state = Mock()
+            sync_state.all_entries.return_value = {}
+            sync_state.fingerprint.return_value = None
+            worker = scan_worker.ScanWorker(
+                cfg, sync_state=sync_state, transfer_lock=threading.Lock(), watchers=watchers,
+            )
+            worker._conn = rsync_ops.NasConnection("fake-host")
+
+            with patch.object(
+                rsync_ops, "remote_manifest_snapshot", return_value=(7, {}),
+            ), patch.object(
+                rsync_ops, "remote_file_states",
+                return_value={"already-gone.tmp": rsync_ops.RemoteState(rsync_ops.RemoteKind.ABSENT)},
+            ):
+                items = worker._manifest_preview()
+
+        self.assertEqual(items, [])
+
     def test_manifest_preview_falls_back_to_dry_run_when_unavailable(self) -> None:
         import threading
 
