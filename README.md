@@ -126,9 +126,9 @@ logs or personal client configurations. These files are excluded by
 
 ### License
 
-NASBox is source-available but **not open source**. The [license](LICENSE)
-permits personal, educational and evaluation use only. Commercial use requires
-a written commercial license from the copyright holder.
+NASBox is licensed under the European Union Public Licence, version 1.2
+(EUPL-1.2). The [license](LICENSE) is a free and open-source copyleft licence
+that permits use, study, modification and distribution under its terms.
 
 ---
 
@@ -262,7 +262,6 @@ vulnerabilita.
 
 ### Licenza
 
-NASBox e source-available ma **non open source**. La [licenza](LICENSE)
-consente uso personale, didattico e di valutazione non commerciale. L'uso
-commerciale richiede una licenza commerciale autorizzata per iscritto dal
-titolare del copyright.
+NASBox e distribuito con la European Union Public Licence, versione 1.2
+(EUPL-1.2). La [licenza](LICENSE) e una licenza copyleft libera e open source
+che consente uso, studio, modifica e distribuzione secondo i suoi termini.

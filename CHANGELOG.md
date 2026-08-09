@@ -2,6 +2,11 @@
 
 Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
+## Unreleased
+
+- Sostituita la licenza proprietaria con la European Union Public Licence
+  versione 1.2 (EUPL-1.2).
+
 ## 1.10.30 - 2026-08-08
 
 - Rimossi dalla coda i file appena completati, mantenendo la numerazione
