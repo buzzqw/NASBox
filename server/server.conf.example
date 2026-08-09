@@ -3,7 +3,7 @@
 #
 # This package is self-contained on purpose: everything it needs (this config,
 # its logs, its PID file) lives inside its own install folder. Put that folder
-# on a persistent data volume (e.g. /volume1/NASBox/sync-daemon-server/) -- on
+# on a persistent data volume (e.g. /volume1/Varie/sync-daemon/) -- on
 # Synology DSM and QNAP QTS, /etc and /root are reset or not guaranteed to
 # survive firmware updates, but volumes under /volume1 (or /share on QNAP) are.
 

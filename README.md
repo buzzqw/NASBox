@@ -30,22 +30,29 @@ NAS:
 
 ## Installazione
 
-Installa prima il pacchetto server su un volume dati persistente del NAS, poi
-installa il client su ogni PC che deve partecipare alla sincronizzazione.
+Il checkout Git ufficiale sul NAS è `/volume1/Varie/sync-daemon`. La cartella
+sincronizzata è separata e deve rimanere `/volume1/NASBox`: non spostarla e non
+usarla come checkout del codice.
 
 ```bash
-# Sul NAS, dopo avere copiato server/ in una cartella persistente
-cd server
-./install.sh
+# Prima installazione sul NAS
+git clone https://github.com/buzzqw/NASBox.git /volume1/Varie/sync-daemon
+cd /volume1/Varie/sync-daemon
+sudo ./server/install.sh
 
-# Su ogni PC Linux
-cd client
+# Aggiornamento successivo del sorgente sul NAS
+git -C /volume1/Varie/sync-daemon pull --ff-only
+
+# Su ogni PC Linux, da una copia temporanea della cartella client/
+scp -r <utente>@<nas>:/volume1/Varie/sync-daemon/client /tmp/nasbox-client
+cd /tmp/nasbox-client
 ./install.sh
 ```
 
-Il wizard crea o verifica la chiave SSH, configura il collegamento e registra
-il client come servizio utente quando systemd e disponibile. La guida completa
-e in [MANUALE.md](MANUALE.md).
+Il wizard server chiede `SHARE_ROOT`: usa `/volume1/NASBox`. Il wizard client
+crea o verifica la chiave SSH, configura il collegamento e registra il client
+come servizio utente quando systemd è disponibile. La guida completa è in
+[MANUALE.md](MANUALE.md).
 
 ## Sviluppo e test
 

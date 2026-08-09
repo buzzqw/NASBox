@@ -4,8 +4,8 @@
 #
 # Deliberately does NOT copy files elsewhere: this whole folder is the
 # package. Run it from wherever you extracted/copied it -- ideally a
-# persistent data volume (e.g. /volume1/NASBox/sync-daemon-server/ on
-# Synology, /share/.../sync-daemon-server/ on QNAP), since /etc and /root are
+# persistent data volume (e.g. /volume1/Varie/sync-daemon/ on Synology,
+# /share/.../sync-daemon/ on QNAP), since /etc and /root are
 # not guaranteed to survive firmware updates on these boxes.
 set -euo pipefail
 

@@ -144,11 +144,14 @@ sincronizzazione — puntandolo alla stessa cartella NASBox sul NAS.
 
 ## 4. Installazione del pacchetto server (NAS)
 
-Copia l'intera cartella `server/` su un **volume dati persistente** del NAS,
-ad esempio:
+Il checkout Git completo del progetto deve stare su un **volume dati
+persistente** del NAS. Per la configurazione ufficiale Synology usare:
 
-- Synology: `/volume1/NASBox/sync-daemon-server/`
-- QNAP: `/share/CACHEDEV1_DATA/.../sync-daemon-server/`
+- Checkout sorgente: `/volume1/Varie/sync-daemon/`
+- Cartella sincronizzata (`SHARE_ROOT`): `/volume1/NASBox`
+
+Il checkout del codice e la cartella sincronizzata sono distinti: il secondo
+non deve contenere il repository Git.
 
 > **Perché non altrove?** Su Synology DSM e QNAP QTS le cartelle `/etc` e
 > `/root` possono essere azzerate o modificate dagli aggiornamenti firmware.
@@ -158,8 +161,16 @@ ad esempio:
 Poi, via SSH sul NAS:
 
 ```bash
-cd /volume1/NASBox/sync-daemon-server
-./install.sh
+git clone https://github.com/buzzqw/NASBox.git /volume1/Varie/sync-daemon
+cd /volume1/Varie/sync-daemon
+sudo ./server/install.sh
+```
+
+Per un aggiornamento del sorgente già installato:
+
+```bash
+git -C /volume1/Varie/sync-daemon pull --ff-only
+/volume1/Varie/sync-daemon/server/sync-daemon-server.sh --restart
 ```
 
 Lo script è un **wizard**, non un semplice "copia e configura":
