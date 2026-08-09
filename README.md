@@ -6,6 +6,39 @@ NASBox synchronizes one folder between multiple PCs through a NAS using SSH
 and rsync. The PyQt6 client manages uploads, downloads, queues, history and
 trash; the small NAS daemon applies remote history retention.
 
+### What NASBox Is
+
+NASBox is a self-hosted Dropbox-like synchronization tool for people who own
+or manage a NAS. It keeps one local folder on each participating PC mirrored
+with one folder on the NAS, using SSH and rsync. The NAS stores the files and
+the clients perform the synchronization; the NAS daemon independently manages
+remote trash/history retention.
+
+The goal is to provide the convenience of a synchronized folder without making
+a third-party cloud the primary place where the data lives. NASBox is suited
+to personal or family files, home labs and private infrastructure where the
+owner wants direct control of storage and access.
+
+### NASBox Compared With Dropbox
+
+NASBox provides folder synchronization like Dropbox, but it is not a Dropbox
+replacement in every respect:
+
+| | NASBox | Dropbox |
+|---|---|---|
+| Where data lives | On your NAS and local PCs | In Dropbox cloud storage and local clients |
+| Control | You manage storage, users, SSH keys, backups and access | Dropbox manages hosted storage and service infrastructure |
+| Connectivity | LAN, direct WAN or an SSH bastion | Dropbox service endpoints |
+| Cost model | Uses your existing NAS and network | Uses a hosted account and plan limits |
+| Synchronization model | One NASBox root mirrored root-to-root, with exclusions | Dropbox folders with broader cloud collaboration features |
+| History/trash | Local trash plus NAS-side retention daemon | Dropbox-managed recovery and version history |
+| Sharing/collaboration | Not the main goal; no Dropbox-style public links or suite | Sharing, links and collaboration are core features |
+
+NASBox trades managed cloud convenience and collaboration features for direct
+ownership of the storage path. You are responsible for NAS availability,
+backups, SSH security, remote access, disk health and service continuity.
+NASBox is a synchronization tool, not a backup by itself.
+
 ### Features
 
 - One NASBox folder per PC, synchronized root-to-root with the NAS.
@@ -104,6 +137,40 @@ a written commercial license from the copyright holder.
 NASBox sincronizza una cartella tra piu PC tramite un NAS, usando SSH e rsync.
 Il client grafico PyQt6 gestisce caricamenti, scaricamenti, coda, storico e
 cestino; il piccolo demone sul NAS applica la retention dello storico remoto.
+
+### Che cos'e NASBox
+
+NASBox e uno strumento di sincronizzazione self-hosted, simile a Dropbox, per
+chi possiede o gestisce un NAS. Mantiene una cartella locale su ogni PC
+partecipante sincronizzata con una cartella sul NAS, usando SSH e rsync. Il NAS
+conserva i file e i client eseguono la sincronizzazione; il demone sul NAS
+gestisce in modo indipendente retention, cestino e storico remoto.
+
+Lo scopo e offrire la comodita di una cartella sincronizzata senza usare un
+cloud di terze parti come sede principale dei dati. NASBox e pensato per file
+personali o familiari, home lab e infrastrutture private in cui il proprietario
+vuole mantenere il controllo diretto di spazio, accessi e conservazione.
+
+### NASBox rispetto a Dropbox
+
+NASBox offre una sincronizzazione di cartelle simile a Dropbox, ma non vuole
+essere un sostituto completo di ogni sua funzione:
+
+| | NASBox | Dropbox |
+|---|---|---|
+| Dove vivono i dati | Sul tuo NAS e sui PC locali | Nel cloud Dropbox e sui client locali |
+| Controllo | Gestisci storage, utenti, chiavi SSH, backup e accessi | Dropbox gestisce storage ospitato e infrastruttura del servizio |
+| Connettivita | LAN, WAN diretta o bastione SSH | Endpoint del servizio Dropbox |
+| Modello di costo | Usa il NAS e la rete che gia possiedi | Usa un account con limiti e piani cloud |
+| Modello di sincronizzazione | Una radice NASBox sincronizzata root-to-root, con esclusioni | Cartelle Dropbox con funzioni cloud e collaborazione piu ampie |
+| Cestino/storico | Cestino locale e retention gestita dal demone NAS | Recupero e storico gestiti da Dropbox |
+| Condivisione/collaborazione | Non e l'obiettivo principale; niente link pubblici o suite stile Dropbox | Condivisione, link e collaborazione sono funzioni centrali |
+
+NASBox scambia la comodita di un cloud gestito e le funzioni collaborative con
+il controllo diretto del percorso di storage. Devi quindi occuparti di
+disponibilita del NAS, backup, sicurezza SSH, accesso remoto, salute dei dischi
+e continuita del servizio. NASBox e uno strumento di sincronizzazione, non un
+backup autonomo.
 
 ### Funzionalita
 
