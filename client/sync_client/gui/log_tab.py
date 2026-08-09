@@ -58,13 +58,15 @@ class LogTab(QWidget):
         self.table.setHorizontalHeaderLabels(cols)
         self.table.setWordWrap(False)
         header = self.table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
-        # Let both long-text columns grow with the window instead of leaving
-        # Dettaglio at its tiny default width while Percorso consumes the rest.
-        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
-        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
-        header.resizeSection(3, 180)
+        # All columns stay manually resizable. ResizeToContents, Stretch and
+        # Fixed make the header ignore drag gestures, which is especially
+        # frustrating for the two long-text columns.
+        header.setStretchLastSection(False)
+        header.setMinimumSectionSize(70)
+        for section in range(len(cols)):
+            header.setSectionResizeMode(section, QHeaderView.ResizeMode.Interactive)
+        for section, width in enumerate((155, 105, 450, 300)):
+            header.resizeSection(section, width)
         root.addWidget(self.table)
 
         # Incoming live events (potentially many per second during a big sync)
