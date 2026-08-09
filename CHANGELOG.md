@@ -7,6 +7,12 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 - Sostituita la licenza proprietaria con la European Union Public Licence
   versione 1.2 (EUPL-1.2).
 
+## 1.10.31 - 2026-08-09
+
+- Rese ridimensionabili manualmente tutte le colonne della tabella Log.
+- Impostate larghezze iniziali piu leggibili per ora, azione, percorso e
+  dettaglio.
+
 ## 1.10.30 - 2026-08-08
 
 - Rimossi dalla coda i file appena completati, mantenendo la numerazione
