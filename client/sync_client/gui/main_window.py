@@ -61,6 +61,7 @@ class MainWindow(QMainWindow):
         self.scan_worker = ScanWorker(
             self.cfg, transfer_active=transfer_active, sync_state=sync_state,
             transfer_lock=transfer_lock,
+            watchers=watchers,
         )
         self.push_worker = PushWorker(
             self.cfg, self.logger, watchers, transfer_lock, sync_state,

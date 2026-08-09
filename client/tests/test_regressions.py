@@ -10,7 +10,10 @@ from pathlib import Path
 from unittest.mock import Mock
 from unittest.mock import patch
 
-from sync_client import engine, paths, pull_worker, push_worker, repository_safety, rsync_ops, trash, updater
+from sync_client import (
+    engine, paths, pull_worker, push_worker, repository_safety, rsync_ops,
+    scan_worker, trash, updater,
+)
 from sync_client.sync_state import SyncStateStore
 from sync_client.watcher import WatcherHandle
 
@@ -109,6 +112,29 @@ class RegressionTests(unittest.TestCase):
 
         self.assertEqual(paths, {"changed.txt"})
         worker.sync_state.changed_paths.assert_called_once_with("/missing", on_progress=worker._on_hash_progress)
+
+    def test_clean_watcher_does_not_trigger_full_queue_state_walk(self) -> None:
+        import threading
+
+        cfg = Mock()
+        cfg.is_configured.return_value = True
+        cfg.local_root.return_value = "/fake-root"
+        watcher = Mock()
+        watcher.is_dirty.return_value = False
+        watchers = Mock()
+        watchers.get.return_value = watcher
+        sync_state = Mock()
+        worker = scan_worker.ScanWorker(
+            cfg, sync_state=sync_state, transfer_lock=threading.Lock(), watchers=watchers,
+        )
+        worker._conn = rsync_ops.NasConnection("fake-host")
+
+        with patch.object(rsync_ops, "scan", return_value=[]), \
+             patch.object(rsync_ops, "remote_file_states", return_value={}) as remote_states:
+            worker._scan_once()
+            remote_states.assert_called_once_with(worker.cfg, worker._conn, set())
+
+        sync_state.changed_paths.assert_not_called()
 
     def _make_push_worker_for_tick(self):
         """A fully-initialized PushWorker (real __init__, so its Qt signals work)

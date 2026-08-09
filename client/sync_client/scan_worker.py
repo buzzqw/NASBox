@@ -16,15 +16,17 @@ threads independently opening probe sockets to the same host.
 """
 from __future__ import annotations
 
+import subprocess
 import threading
 from pathlib import Path
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
-from . import rsync_ops
+from . import paths, rsync_ops
 from .config import Config
 from .reconcile import Action, RemoteKind, plan_path
 from .sync_state import SyncStateStore
+from .watcher import WatcherHandle
 
 FALLBACK_INTERVAL_SECONDS = 60
 
@@ -38,6 +40,7 @@ class ScanWorker(QThread):
         self, cfg: Config, transfer_active: threading.Event | None = None,
         sync_state: SyncStateStore | None = None,
         transfer_lock: threading.Lock | None = None,
+        watchers: WatcherHandle | None = None,
     ) -> None:
         super().__init__()
         self.cfg = cfg
@@ -48,6 +51,7 @@ class ScanWorker(QThread):
         self._transfer_active = transfer_active
         self.sync_state = sync_state
         self.transfer_lock = transfer_lock
+        self.watchers = watchers
 
     def stop(self) -> None:
         self._stop_flag.set()
@@ -115,8 +119,25 @@ class ScanWorker(QThread):
         try:
             items = rsync_ops.scan(self.cfg, self._conn, on_start=_on_start)
             if self.sync_state is not None:
+                watcher = self.watchers.get() if self.watchers is not None else None
+                dirty_paths = (
+                    watcher.dirty_paths()
+                    if watcher is not None and watcher.is_dirty()
+                    else set()
+                )
+                if watcher is None:
+                    # Keep the fallback for callers that do not provide the shared
+                    # watcher (and for installations where it failed to start).
+                    changed_paths = self.sync_state.changed_paths(self.cfg.local_root())
+                elif "" in dirty_paths:
+                    # An unknown watcher event cannot be reconciled path-by-path.
+                    changed_paths = self.sync_state.changed_paths(self.cfg.local_root())
+                else:
+                    # inotify already resolved the exact paths, so do not walk and
+                    # hash the entire local tree on every periodic queue preview.
+                    changed_paths = dirty_paths
                 changed = {
-                    path for path in self.sync_state.changed_paths(self.cfg.local_root())
+                    path for path in changed_paths
                     if not rsync_ops.path_is_excluded(self.cfg, path)
                     and not Path(self.cfg.local_root(), path).is_dir()
                 }

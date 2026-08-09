@@ -18,6 +18,12 @@ from . import paths
 from .config import Config
 
 
+# A complete reconciliation can hash tens of thousands of files. Keep the
+# throughput benefit of parallel reads without allowing that exceptional path to
+# occupy every CPU core and make the desktop unresponsive.
+HASH_MAX_WORKERS = min(8, max(1, (os.cpu_count() or 1) // 2))
+
+
 @dataclass(frozen=True)
 class Fingerprint:
     digest: str
@@ -261,10 +267,11 @@ class SyncStateStore:
             # freshly copied-in folder with nothing in the baseline yet, so every
             # file must be read once) -- the case that made this scan take 40+
             # minutes single-threaded against a spinning/SSD-mixed real NASBox tree.
-            # ThreadPoolExecutor's default worker count (min(32, cpu_count+4)) is a
-            # reasonable general-purpose choice here.
+            # Do not use ThreadPoolExecutor's default (min(32, cpu_count+4)) here:
+            # a full-tree reconciliation is an exceptional path, not a reason to
+            # consume every CPU core.
             total = len(to_hash)
-            with ThreadPoolExecutor() as pool:
+            with ThreadPoolExecutor(max_workers=HASH_MAX_WORKERS) as pool:
                 hashed = pool.map(lambda rp: self.fingerprint(root / rp), to_hash)
                 for index, (relative_path, current_fp) in enumerate(zip(to_hash, hashed)):
                     known_fp = known.get(relative_path)
