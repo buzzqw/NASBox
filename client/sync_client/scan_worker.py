@@ -1,13 +1,14 @@
-"""Background dry-run scanner that feeds the Trasferimenti tab's queue preview.
+"""Background scanner that feeds the Trasferimenti tab's queue preview.
 
 Runs on its own QThread, decoupled from SyncEngine's push/pull loop: a big
 real transfer no longer delays the queue view (which used to go stale and
-contradict the live speed readout), and a slow/large dry-run scan can no
-longer delay a push or pull that's ready to go.
+contradict the live speed readout), and a slow/large preview can no longer
+delay a push or pull that's ready to go.
 
 Woken right after SyncEngine finishes a push/pull round, so the queue
-reflects real activity promptly, with a longer timer as a fallback to
-notice NAS-side changes made by other clients between pulls.
+reflects real activity promptly. The normal preview uses the NAS journal-backed
+manifest and the local watcher; an rsync dry-run remains only as a compatibility
+fallback for an older or temporarily unavailable server protocol.
 
 Doesn't resolve its own NAS connection -- SyncEngine already does that on its
 own cadence (HOST_RECHECK_SECONDS in engine.py), and connecting this worker's
@@ -47,11 +48,13 @@ class ScanWorker(QThread):
         self._stop_flag = threading.Event()
         self._wake = threading.Event()
         self._conn: rsync_ops.NasConnection | None = None
-        self._current_proc = None  # the in-flight dry-run rsync Popen, if any -- lets stop() cancel it
+        self._current_proc = None  # the fallback dry-run Popen, if any
         self._transfer_active = transfer_active
         self.sync_state = sync_state
         self.transfer_lock = transfer_lock
         self.watchers = watchers
+        self._manifest_revision = -1
+        self._manifest_entries: dict[str, rsync_ops.RemoteState] | None = None
 
     def stop(self) -> None:
         self._stop_flag.set()
@@ -82,6 +85,9 @@ class ScanWorker(QThread):
         """Slot for SyncEngine.connection_changed -- a plain attribute swap is
         thread-safe enough here (CPython GIL), no lock needed for a single
         reference read/write like this."""
+        if conn != self._conn:
+            self._manifest_revision = -1
+            self._manifest_entries = None
         self._conn = conn
 
     def run(self) -> None:
@@ -117,56 +123,9 @@ class ScanWorker(QThread):
             self._current_proc = proc
 
         try:
-            items = rsync_ops.scan(self.cfg, self._conn, on_start=_on_start)
-            if self.sync_state is not None:
-                watcher = self.watchers.get() if self.watchers is not None else None
-                dirty_paths = (
-                    watcher.dirty_paths()
-                    if watcher is not None and watcher.is_dirty()
-                    else set()
-                )
-                if watcher is None:
-                    # Keep the fallback for callers that do not provide the shared
-                    # watcher (and for installations where it failed to start).
-                    changed_paths = self.sync_state.changed_paths(self.cfg.local_root())
-                elif "" in dirty_paths:
-                    # An unknown watcher event cannot be reconciled path-by-path.
-                    changed_paths = self.sync_state.changed_paths(self.cfg.local_root())
-                else:
-                    # inotify already resolved the exact paths, so do not walk and
-                    # hash the entire local tree on every periodic queue preview.
-                    changed_paths = dirty_paths
-                changed = {
-                    path for path in changed_paths
-                    if not rsync_ops.path_is_excluded(self.cfg, path)
-                    and not Path(self.cfg.local_root(), path).is_dir()
-                }
-                remote = rsync_ops.remote_file_states(self.cfg, self._conn, changed)
-                if remote is not None:
-                    by_path = {item.path: item for item in items}
-                    for path in changed:
-                        local_fingerprint = self.sync_state.fingerprint(Path(self.cfg.local_root(), path))
-                        decision = plan_path(
-                            self.sync_state.get(path),
-                            local_fingerprint,
-                            remote[path],
-                            delete_enabled=bool(self.cfg.get("delete_enabled")),
-                        )
-                        by_path.pop(path, None)
-                        if decision.action in (Action.UPLOAD, Action.CONFLICT_LOCAL_WINS):
-                            by_path[path] = rsync_ops.TransferItem(
-                                "upload", path, local_fingerprint.size if local_fingerprint else 0,
-                            )
-                        elif decision.action == Action.DELETE_REMOTE:
-                            by_path[path] = rsync_ops.TransferItem("delete_remote", path)
-                        elif decision.action in (Action.REMOTE_WINS, Action.CONFLICT_REMOTE_WINS):
-                            if remote[path].kind == RemoteKind.FILE:
-                                by_path[path] = rsync_ops.TransferItem(
-                                    "download", path, remote[path].size,
-                                )
-                            elif self.cfg.get("delete_enabled"):
-                                 by_path[path] = rsync_ops.TransferItem("delete_local", path)
-                    items = [by_path[path] for path in sorted(by_path)]
+            items = self._manifest_preview()
+            if items is None:
+                items = rsync_ops.scan(self.cfg, self._conn, on_start=_on_start)
             completed = True
         finally:
             self._current_proc = None
@@ -176,3 +135,90 @@ class ScanWorker(QThread):
                 self.scan_finished.emit()
         self.queue_updated.emit(items)
         self.scan_finished.emit()
+
+    def _manifest_preview(self) -> list[rsync_ops.TransferItem] | None:
+        """Build the queue from journal state without a recursive NAS scan.
+
+        ``None`` deliberately means "the manifest path is unavailable": the
+        caller then uses the old dry-run fallback rather than showing an
+        incomplete queue as if it were authoritative.
+        """
+        if self.sync_state is None or not self.cfg.get("remote_server_script"):
+            return None
+        watcher = self.watchers.get() if self.watchers is not None else None
+        if watcher is None:
+            return None
+
+        snapshot = rsync_ops.remote_manifest_snapshot(
+            self.cfg, self._conn, self._manifest_revision,
+        )
+        if snapshot is None:
+            return None
+        revision, entries = snapshot
+        if entries is not None:
+            self._manifest_revision = revision
+            self._manifest_entries = entries
+        if self._manifest_entries is None:
+            return None
+
+        dirty_paths = watcher.dirty_paths() if watcher.is_dirty() else set()
+        if "" in dirty_paths:
+            # The watcher could not resolve at least one event. This is still a
+            # local-only sweep; it does not reintroduce a recursive NAS scan.
+            dirty_paths = self.sync_state.changed_paths(self.cfg.local_root())
+
+        baseline = self.sync_state.all_entries()
+        manifest = self._manifest_entries
+        candidates = {
+            path for path, remote in manifest.items()
+            if remote.kind == RemoteKind.TOMBSTONE
+            or path not in baseline
+            or baseline[path].is_tombstone
+            or baseline[path].digest != remote.digest
+        }
+        # The manifest is a journal-backed change set, not a complete filesystem
+        # inventory: older files may predate journal support. Do not interpret a
+        # baseline path missing from it as a remote deletion; the regular pull
+        # remains responsible for discovering such legacy/unjournalized changes.
+        candidates.update(dirty_paths)
+        candidates = {
+            path for path in candidates
+            if path
+            and not rsync_ops.path_is_excluded(self.cfg, path)
+            and not Path(self.cfg.local_root(), path).is_dir()
+        }
+
+        remote_states = {
+            path: manifest[path] for path in candidates if path in manifest
+        }
+        unknown_remote = candidates - set(remote_states)
+        if unknown_remote:
+            remote = rsync_ops.remote_file_states(
+                self.cfg, self._conn, unknown_remote, compact=False,
+            )
+            if remote is None or set(remote) != unknown_remote:
+                return None
+            remote_states.update(remote)
+
+        items: list[rsync_ops.TransferItem] = []
+        for path in sorted(candidates):
+            local_fingerprint = self.sync_state.fingerprint(Path(self.cfg.local_root(), path))
+            decision = plan_path(
+                baseline.get(path),
+                local_fingerprint,
+                remote_states.get(path, rsync_ops.RemoteState(RemoteKind.ABSENT)),
+                delete_enabled=bool(self.cfg.get("delete_enabled")),
+            )
+            if decision.action in (Action.UPLOAD, Action.CONFLICT_LOCAL_WINS):
+                items.append(rsync_ops.TransferItem(
+                    "upload", path, local_fingerprint.size if local_fingerprint else 0,
+                ))
+            elif decision.action == Action.DELETE_REMOTE:
+                items.append(rsync_ops.TransferItem("delete_remote", path))
+            elif decision.action in (Action.REMOTE_WINS, Action.CONFLICT_REMOTE_WINS):
+                remote = remote_states.get(path)
+                if remote is not None and remote.kind == RemoteKind.FILE:
+                    items.append(rsync_ops.TransferItem("download", path, remote.size))
+                elif self.cfg.get("delete_enabled"):
+                    items.append(rsync_ops.TransferItem("delete_local", path))
+        return items

@@ -14,7 +14,7 @@ from sync_client import (
     engine, paths, pull_worker, push_worker, repository_safety, rsync_ops,
     scan_worker, trash, updater,
 )
-from sync_client.sync_state import SyncStateStore
+from sync_client.sync_state import Fingerprint, SyncStateStore
 from sync_client.watcher import WatcherHandle
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -50,6 +50,95 @@ class _Watcher:
 class RegressionTests(unittest.TestCase):
     def test_pull_worker_exposes_batch_size_signal(self) -> None:
         self.assertTrue(hasattr(pull_worker.PullWorker, "batch_size_known"))
+
+    def test_pull_skips_rsync_when_manifest_revision_is_unchanged(self) -> None:
+        import threading
+        import time
+
+        cfg = Mock()
+        cfg.is_paused.return_value = False
+        cfg.is_configured.return_value = True
+        cfg.get.side_effect = lambda key, default=None: {
+            "poll_interval": 60,
+            "remote_server_script": "/server.sh",
+        }.get(key, default)
+        watcher = Mock()
+        watcher.is_dirty.return_value = False
+        watchers = Mock()
+        watchers.get.return_value = watcher
+        state = Mock()
+        worker = pull_worker.PullWorker(
+            cfg, _Logger(), watchers, threading.Lock(), state,
+        )
+        worker._conn = rsync_ops.NasConnection("fake-host")
+        worker._last_manifest_revision = 12
+        worker._last_full_pull = time.time()
+
+        with patch.object(rsync_ops, "remote_lock") as remote_lock, \
+             patch.object(rsync_ops, "retry_pending_journal", return_value=(True, "")), \
+             patch.object(rsync_ops, "validate_transfer_safety"), \
+             patch.object(rsync_ops, "ensure_remote_dir", return_value=True), \
+             patch.object(rsync_ops, "remote_manifest_snapshot", return_value=(12, None)), \
+             patch.object(worker, "_run_transfer_tracked") as run_transfer:
+            remote_lock.return_value.__enter__ = Mock(return_value=None)
+            remote_lock.return_value.__exit__ = Mock(return_value=False)
+            worker._tick()
+
+        run_transfer.assert_not_called()
+        self.assertGreater(worker._last_pull, 0)
+
+    def test_pull_uses_manifest_paths_for_journalized_file_changes(self) -> None:
+        import threading
+        import time
+
+        cfg = Mock()
+        cfg.is_paused.return_value = False
+        cfg.is_configured.return_value = True
+        cfg.exclude_patterns.return_value = []
+        cfg.local_root.return_value = "/fake-root"
+        cfg.get.side_effect = lambda key, default=None: {
+            "poll_interval": 60,
+            "remote_server_script": "/server.sh",
+            "remote_prefix": "/remote",
+            "delete_enabled": False,
+        }.get(key, default)
+        watcher = Mock()
+        watcher.is_dirty.return_value = False
+        watchers = Mock()
+        watchers.get.return_value = watcher
+        state = Mock()
+        state.get_many.return_value = {
+            "remote.txt": Fingerprint("old", 3, 1_000_000_000),
+        }
+        state.fingerprint.return_value = Fingerprint("new", 123, 2_000_000_000)
+        worker = pull_worker.PullWorker(
+            cfg, _Logger(), watchers, threading.Lock(), state,
+        )
+        worker._conn = rsync_ops.NasConnection("fake-host")
+        worker._last_manifest_revision = 11
+        worker._last_full_pull = time.time()
+        manifest_entries = {
+            "remote.txt": rsync_ops.RemoteState(
+                rsync_ops.RemoteKind.FILE, "new", 123, 2_000_000_000,
+            ),
+        }
+        transfer_result = rsync_ops.TransferResult(
+            True, [rsync_ops.TransferItem("download", "remote.txt", 123)],
+        )
+
+        with patch.object(rsync_ops, "remote_lock") as remote_lock, \
+             patch.object(rsync_ops, "retry_pending_journal", return_value=(True, "")), \
+             patch.object(rsync_ops, "validate_transfer_safety"), \
+             patch.object(rsync_ops, "ensure_remote_dir", return_value=True), \
+             patch.object(rsync_ops, "remote_manifest_snapshot", return_value=(12, manifest_entries)), \
+             patch.object(rsync_ops, "remote_file_states", return_value=manifest_entries), \
+             patch.object(worker, "_run_transfer_tracked", return_value=transfer_result) as run_transfer:
+            remote_lock.return_value.__enter__ = Mock(return_value=None)
+            remote_lock.return_value.__exit__ = Mock(return_value=False)
+            worker._tick()
+
+        self.assertEqual(run_transfer.call_args.kwargs["paths"], {"remote.txt"})
+        self.assertEqual(worker._last_manifest_revision, 12)
 
     def test_server_package_exclusion_covers_the_whole_sync_daemon_folder(self) -> None:
         cfg = type("Config", (), {"get": lambda _self, key, default=None: {
@@ -124,17 +213,82 @@ class RegressionTests(unittest.TestCase):
         watchers = Mock()
         watchers.get.return_value = watcher
         sync_state = Mock()
+        sync_state.all_entries.return_value = {}
         worker = scan_worker.ScanWorker(
             cfg, sync_state=sync_state, transfer_lock=threading.Lock(), watchers=watchers,
         )
         worker._conn = rsync_ops.NasConnection("fake-host")
 
-        with patch.object(rsync_ops, "scan", return_value=[]), \
-             patch.object(rsync_ops, "remote_file_states", return_value={}) as remote_states:
+        with patch.object(rsync_ops, "scan", return_value=[]) as scan, \
+             patch.object(rsync_ops, "remote_manifest_snapshot", return_value=(1, {})) as manifest:
             worker._scan_once()
-            remote_states.assert_called_once_with(worker.cfg, worker._conn, set())
+            scan.assert_not_called()
+            manifest.assert_called_once_with(worker.cfg, worker._conn, -1)
 
         sync_state.changed_paths.assert_not_called()
+
+    def test_manifest_preview_reports_remote_changes_without_rsync_scan(self) -> None:
+        import threading
+
+        cfg = Mock()
+        cfg.is_configured.return_value = True
+        cfg.local_root.return_value = "/fake-root"
+        cfg.exclude_patterns.return_value = []
+        cfg.get.side_effect = lambda key, default=None: {
+            "remote_server_script": "/server.sh",
+            "delete_enabled": False,
+            "remote_prefix": "/remote",
+        }.get(key, default)
+        watcher = Mock()
+        watcher.is_dirty.return_value = False
+        watchers = Mock()
+        watchers.get.return_value = watcher
+        sync_state = Mock()
+        sync_state.all_entries.return_value = {
+            "remote.txt": Fingerprint("old", 3, 1_000_000_000),
+        }
+        sync_state.fingerprint.return_value = None
+        worker = scan_worker.ScanWorker(
+            cfg, sync_state=sync_state, transfer_lock=threading.Lock(), watchers=watchers,
+        )
+        worker._conn = rsync_ops.NasConnection("fake-host")
+        manifest_entries = {
+            "remote.txt": rsync_ops.RemoteState(
+                rsync_ops.RemoteKind.FILE, "new", 123, 2_000_000_000,
+            ),
+        }
+
+        with patch.object(
+            rsync_ops, "remote_manifest_snapshot", return_value=(7, manifest_entries),
+        ), patch.object(rsync_ops, "scan") as scan:
+            worker._scan_once()
+
+        scan.assert_not_called()
+        self.assertEqual(worker._manifest_revision, 7)
+        self.assertEqual(worker._manifest_entries, manifest_entries)
+
+    def test_manifest_preview_falls_back_to_dry_run_when_unavailable(self) -> None:
+        import threading
+
+        cfg = Mock()
+        cfg.is_configured.return_value = True
+        cfg.local_root.return_value = "/fake-root"
+        cfg.get.return_value = "/server.sh"
+        watcher = Mock()
+        watcher.is_dirty.return_value = False
+        watchers = Mock()
+        watchers.get.return_value = watcher
+        sync_state = Mock()
+        worker = scan_worker.ScanWorker(
+            cfg, sync_state=sync_state, transfer_lock=threading.Lock(), watchers=watchers,
+        )
+        worker._conn = rsync_ops.NasConnection("fake-host")
+
+        with patch.object(rsync_ops, "remote_manifest_snapshot", return_value=None), \
+             patch.object(rsync_ops, "scan", return_value=[]) as scan:
+            worker._scan_once()
+
+        scan.assert_called_once()
 
     def _make_push_worker_for_tick(self):
         """A fully-initialized PushWorker (real __init__, so its Qt signals work)

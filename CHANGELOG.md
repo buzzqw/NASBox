@@ -7,6 +7,13 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 - Sostituita la licenza proprietaria con la European Union Public Licence
   versione 1.2 (EUPL-1.2).
 
+## 1.10.34 - 2026-08-09
+
+- La coda trasferimenti usa manifest e journal NAS invece di due scansioni
+  `rsync --dry-run` complete a ogni intervallo.
+- I pull senza nuove transazioni journalizzate non rilanciano `rsync`; resta una
+  riconciliazione completa periodica per rilevare modifiche NAS legacy o manuali.
+
 ## 1.10.33 - 2026-08-09
 
 - Evitate le scansioni complete dell'albero locale durante le anteprime quando

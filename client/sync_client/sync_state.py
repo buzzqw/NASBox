@@ -176,6 +176,18 @@ class SyncStateStore:
             }
         return result
 
+    def all_entries(self) -> dict[str, Fingerprint]:
+        """Read the complete baseline without touching the local files."""
+        with self._lock, self._connection() as conn:
+            return {
+                row[0]: Fingerprint(row[1], row[2], row[3]) if row[1]
+                else Fingerprint("", -1, -1)
+                for row in conn.execute(
+                    "SELECT path, digest, size, mtime_ns FROM entry WHERE repository = ?",
+                    (self._repository(),),
+                )
+            }
+
     def record_local(self, local_root: str, relative_path: str) -> None:
         self.record_local_many(local_root, [relative_path])
 

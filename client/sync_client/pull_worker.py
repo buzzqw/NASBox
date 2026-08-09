@@ -45,6 +45,10 @@ from .sync_state import Fingerprint, SyncStateStore
 from .watcher import WatcherHandle
 
 TICK_SECONDS = 1
+# The manifest covers journalized changes, while older/manual NAS changes may
+# predate it. Keep a periodic full reconciliation as a bounded safety net rather
+# than turning every poll into a recursive remote scan.
+LEGACY_FULL_PULL_INTERVAL_SECONDS = 15 * 60
 
 
 class PullWorker(TransferWorker):
@@ -66,6 +70,7 @@ class PullWorker(TransferWorker):
         self._scan_worker = scan_worker
         self._wake = threading.Event()
         self._last_pull = 0.0
+        self._last_full_pull = 0.0
         self._last_manifest_revision = -1
         self._self_cancelled = False  # set by the cancel_check right before it terminates the process
         self._cancel_dirty_paths: set[str] = set()
@@ -152,8 +157,23 @@ class PullWorker(TransferWorker):
                     if snapshot is None:
                         raise rsync_ops.RemoteLockError("impossibile leggere la revisione del manifest NAS")
                     manifest_revision, manifest_entries = snapshot
+                    full_pull_required = (
+                        self._last_manifest_revision < 0
+                        or now - self._last_full_pull >= LEGACY_FULL_PULL_INTERVAL_SECONDS
+                    )
+                    if manifest_entries is None and not full_pull_required:
+                        # No committed NAS transaction happened since the last
+                        # pull. Avoid launching rsync just to rediscover the same
+                        # tree; the manifest revision is the change signal.
+                        self._last_manifest_revision = manifest_revision
+                        self._last_pull = now
+                        if self._scan_worker:
+                            self._scan_worker.wake()
+                        self.transfer_finished.emit("download", True)
+                        return
                     checksum_paths: set[str] = set()
                     baselines = {}
+                    tombstone_count = 0
                     if manifest_entries is not None:
                         baselines = self.sync_state.get_many(set(manifest_entries))
                         changed_count = 0
@@ -199,11 +219,12 @@ class PullWorker(TransferWorker):
                         self._cancel_dirty_paths = external
                         return True
 
-                    result = self._run_transfer_tracked(
-                        rsync_ops.pull, run_ts, cancel_check=_cancel_check,
-                        emit_lifecycle=False,
+                    targeted_pull = (
+                        manifest_entries is not None
+                        and not full_pull_required
+                        and tombstone_count == 0
                     )
-                    if result.ok and not self._self_cancelled and checksum_paths:
+                    if targeted_pull:
                         safe_checksum_paths: set[str] = set()
                         assert manifest_entries is not None
                         for path in checksum_paths:
@@ -222,17 +243,48 @@ class PullWorker(TransferWorker):
                                 self._self_cancelled = True
                             else:
                                 safe_checksum_paths.add(path)
-                        checksum_paths = safe_checksum_paths
-                    if result.ok and not self._self_cancelled and checksum_paths:
-                        checksum_result = self._run_transfer_tracked(
+                        if self._self_cancelled:
+                            result = rsync_ops.TransferResult(True, [])
+                        else:
+                            result = self._run_transfer_tracked(
+                                rsync_ops.pull, run_ts, cancel_check=_cancel_check,
+                                emit_lifecycle=False, paths=safe_checksum_paths,
+                            )
+                    else:
+                        result = self._run_transfer_tracked(
                             rsync_ops.pull, run_ts, cancel_check=_cancel_check,
-                            reset_written_paths=False, emit_lifecycle=False, paths=checksum_paths,
+                            emit_lifecycle=False,
                         )
-                        result = rsync_ops.TransferResult(
-                            checksum_result.ok,
-                            [*result.items, *checksum_result.items],
-                            checksum_result.raw_error,
-                        )
+                        if result.ok and not self._self_cancelled and checksum_paths:
+                            safe_checksum_paths: set[str] = set()
+                            assert manifest_entries is not None
+                            for path in checksum_paths:
+                                local_fp = self.sync_state.fingerprint(Path(self.cfg.local_root(), path))
+                                baseline = baselines.get(path)
+                                remote_digest = manifest_entries[path].digest
+                                if (
+                                    local_fp is not None and baseline is not None
+                                    and not baseline.is_tombstone
+                                    and local_fp.digest not in (baseline.digest, remote_digest)
+                                ):
+                                    # A real local edit landed during the normal
+                                    # pull. Leave it for PushWorker's conflict plan.
+                                    if watcher is not None:
+                                        watcher.mark_dirty(path)
+                                    self._self_cancelled = True
+                                else:
+                                    safe_checksum_paths.add(path)
+                            checksum_paths = safe_checksum_paths
+                        if result.ok and not self._self_cancelled and checksum_paths:
+                            checksum_result = self._run_transfer_tracked(
+                                rsync_ops.pull, run_ts, cancel_check=_cancel_check,
+                                reset_written_paths=False, emit_lifecycle=False, paths=checksum_paths,
+                            )
+                            result = rsync_ops.TransferResult(
+                                checksum_result.ok,
+                                [*result.items, *checksum_result.items],
+                                checksum_result.raw_error,
+                            )
                     if self._scan_worker:
                         self._scan_worker.wake()
                     if result.ok:
@@ -259,6 +311,8 @@ class PullWorker(TransferWorker):
                                 authoritative[path] = None
                         self.sync_state.record_fingerprints(authoritative)
                         self._last_manifest_revision = manifest_revision
+                        if full_pull_required:
+                            self._last_full_pull = time.time()
             except rsync_ops.RemoteLockError as exc:
                 detail = f"lock di sincronizzazione sul NAS non acquisito: {exc}"
                 self.transfer_lock_unavailable.emit("download", detail)
