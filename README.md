@@ -124,6 +124,17 @@ Do not publish `server/server.conf`, files under `server/state/`, SSH keys,
 logs or personal client configurations. These files are excluded by
 `.gitignore`. Read [SECURITY.md](SECURITY.md) before reporting a vulnerability.
 
+### Support the Project
+
+NASBox is free and open-source software built in spare time. If it is useful to
+you, consider supporting its development with a coffee.
+
+<div align="center">
+
+[![Donate with PayPal](https://img.shields.io/badge/Donate-PayPal-00457C?style=for-the-badge&logo=paypal)](https://www.paypal.com/cgi-bin/webscr?cmd=_donations&business=azanzani@gmail.com&item_name=Support+NASBox+Project)
+
+</div>
+
 ### License
 
 NASBox is licensed under the European Union Public Licence, version 1.2
@@ -259,6 +270,17 @@ Non pubblicare `server/server.conf`, i file sotto `server/state/`, chiavi SSH,
 log o configurazioni client personali. Questi file sono esclusi da
 `.gitignore`. Leggere [SECURITY.md](SECURITY.md) prima di segnalare una
 vulnerabilita.
+
+### Supporta il progetto
+
+NASBox e software libero e open source sviluppato nel tempo libero. Se ti e
+utile, puoi sostenere lo sviluppo offrendo un caffe.
+
+<div align="center">
+
+[![Dona con PayPal](https://img.shields.io/badge/Dona-PayPal-00457C?style=for-the-badge&logo=paypal)](https://www.paypal.com/cgi-bin/webscr?cmd=_donations&business=azanzani@gmail.com&item_name=Support+NASBox+Project)
+
+</div>
 
 ### Licenza
 
