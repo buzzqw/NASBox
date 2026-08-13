@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 
-from PyQt6.QtCore import QUrl
+from PyQt6.QtCore import QTimer, QUrl
 from PyQt6.QtGui import QCursor, QDesktopServices
 from PyQt6.QtWidgets import QMenu, QSystemTrayIcon
 
@@ -38,6 +38,13 @@ class TrayIcon(QSystemTrayIcon):
         self._connected = False
         self._paused = False
         self._pending_count = 0
+        self._active_transfers: set[str] = set()
+        self._animation_frame = 0
+        self._transfer_counts = {"upload": 0, "download": 0}
+
+        self._animation_timer = QTimer(self)
+        self._animation_timer.setInterval(420)
+        self._animation_timer.timeout.connect(self._advance_animation)
 
         menu = QMenu()
         menu.aboutToShow.connect(self._rebuild_menu)
@@ -61,9 +68,43 @@ class TrayIcon(QSystemTrayIcon):
         return "synced"
 
     def _apply_icon(self) -> None:
-        self.setIcon(icons.tray_icon(self._resolve_state()))
+        state = self._resolve_state()
+        if self._active_transfers and self.cfg.get("animate_sync_icon", False):
+            state = "syncing_alt" if self._animation_frame else "syncing"
+        self.setIcon(icons.tray_icon(state))
         suffix = t("tray.pending_suffix", count=self._pending_count) if self._pending_count else ""
         self.setToolTip(f"NASBox — {self._status_text}{suffix}")
+
+    def _advance_animation(self) -> None:
+        self._animation_frame = (self._animation_frame + 1) % 2
+        self._apply_icon()
+
+    def on_transfer_preparing(self, direction: str) -> None:
+        self._active_transfers.add(direction)
+        self._animation_frame = 0
+        self._transfer_counts[direction] = 0
+        if self.cfg.get("animate_sync_icon", False) and not self._animation_timer.isActive():
+            self._animation_timer.start()
+        self._apply_icon()
+
+    def on_transfer_item_done(self, direction: str, _item_direction: str, _path: str) -> None:
+        self._transfer_counts[direction] += 1
+
+    def on_transfer_finished(self, direction: str, success: bool) -> None:
+        count = self._transfer_counts.get(direction, 0)
+        self._active_transfers.discard(direction)
+        if not self._active_transfers:
+            self._animation_timer.stop()
+        self._animation_frame = 0
+        self._apply_icon()
+
+        if success and count and self.cfg.get("notify_sync_completion", False):
+            self.showMessage(
+                t("tray.sync_completed_title"),
+                t("tray.sync_completed_body", direction=t(f"tray.{direction}"), count=count),
+                QSystemTrayIcon.MessageIcon.Information,
+                5_000,
+            )
 
     # --- menu construction (rebuilt each time it's opened, so recent files stay current) ---
 

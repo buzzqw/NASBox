@@ -15,6 +15,7 @@ WHITE = QColor("#FFFFFF")
 STATUS_COLORS = {
     "synced": QColor("#2E9E5B"),
     "syncing": QColor("#2F6FED"),
+    "syncing_alt": QColor("#245BD1"),
     "paused": QColor("#8A8F98"),
     "error": QColor("#D64545"),
     "unconfigured": QColor("#8A8F98"),
@@ -22,6 +23,7 @@ STATUS_COLORS = {
 STATUS_GLYPHS = {
     "synced": "✓",   # check mark
     "syncing": "⇆",  # ⇆ -- mid-transfer
+    "syncing_alt": "↔",  # alternate frame for the tray animation
     "paused": "⏸",   # ⏸
     "error": "!",
     "unconfigured": "?",

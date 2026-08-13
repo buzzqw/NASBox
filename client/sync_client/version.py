@@ -5,4 +5,4 @@ the tray tooltip, and the Impostazioni tab, so "which version am I running"
 is always a glance away instead of something to dig for in git log.
 """
 APP_NAME = "NASBox"
-APP_VERSION = "1.10.35"
+APP_VERSION = "1.10.36"

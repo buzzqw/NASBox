@@ -193,6 +193,24 @@ class SettingsTab(QWidget):
         cadence_form.addRow(apply_poll_btn)
         right_col.addWidget(cadence_box)
 
+        # --- sync feedback ---
+        feedback_box = QGroupBox(t("settings.feedback_title"))
+        feedback_layout = QVBoxLayout(feedback_box)
+        self.notify_sync_checkbox = QCheckBox(t("settings.notify_sync_checkbox"))
+        self.notify_sync_checkbox.setChecked(bool(cfg.get("notify_sync_completion")))
+        self.notify_sync_checkbox.setToolTip(t("settings.notify_sync_tooltip"))
+        self.notify_sync_checkbox.toggled.connect(self._on_notify_sync_changed)
+        feedback_layout.addWidget(self.notify_sync_checkbox)
+        self.animate_sync_checkbox = QCheckBox(t("settings.animate_sync_checkbox"))
+        self.animate_sync_checkbox.setChecked(bool(cfg.get("animate_sync_icon")))
+        self.animate_sync_checkbox.setToolTip(t("settings.animate_sync_tooltip"))
+        self.animate_sync_checkbox.toggled.connect(self._on_animate_sync_changed)
+        feedback_layout.addWidget(self.animate_sync_checkbox)
+        feedback_note = QLabel(t("settings.notify_sync_note"))
+        feedback_note.setWordWrap(True)
+        feedback_layout.addWidget(feedback_note)
+        right_col.addWidget(feedback_box)
+
         # --- language ---
         language_box = QGroupBox(t("settings.language_title"))
         language_form = QFormLayout(language_box)
@@ -303,6 +321,12 @@ class SettingsTab(QWidget):
     def _apply_poll_interval(self) -> None:
         self.cfg.set("poll_interval", self.poll_spin.value())
         self.engine.wake()
+
+    def _on_notify_sync_changed(self, enabled: bool) -> None:
+        self.cfg.set("notify_sync_completion", enabled)
+
+    def _on_animate_sync_changed(self, enabled: bool) -> None:
+        self.cfg.set("animate_sync_icon", enabled)
 
     def _on_language_changed(self, index: int) -> None:
         code = self.language_combo.itemData(index)

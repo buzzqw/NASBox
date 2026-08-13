@@ -158,8 +158,15 @@ class MainWindow(QMainWindow):
         self.engine.log_event.connect(self.log_tab.on_log_event)
 
         self.tray = TrayIcon(self.cfg, self.engine, self.logger, self)
-        for worker in (self.push_worker, self.pull_worker):
+        for direction, worker in (("upload", self.push_worker), ("download", self.pull_worker)):
             worker.log_event.connect(self.tray.on_log_event)
+            worker.transfer_preparing.connect(self.tray.on_transfer_preparing)
+            worker.transfer_finished.connect(self.tray.on_transfer_finished)
+            worker.transfer_item_done.connect(
+                lambda item_direction, path, d=direction: self.tray.on_transfer_item_done(
+                    d, item_direction, path,
+                )
+            )
         self.engine.status_changed.connect(self.tray.on_status_changed)
         self.scan_worker.queue_updated.connect(self.tray.on_queue_updated)
         self.engine.server_outdated.connect(self._on_server_outdated)

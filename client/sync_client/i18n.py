@@ -262,6 +262,28 @@ STRINGS: dict[str, dict[str, str]] = {
     },
     "settings.apply_poll_tooltip": {"it": "Applica il nuovo intervallo subito.", "en": "Applies the new interval right away."},
 
+    "settings.feedback_title": {"it": "Feedback sincronizzazione", "en": "Sync feedback"},
+    "settings.notify_sync_checkbox": {
+        "it": "Mostra un popup quando una sincronizzazione completa delle modifiche",
+        "en": "Show a popup when a sync completes changes",
+    },
+    "settings.notify_sync_tooltip": {
+        "it": "Mostra una notifica nell'area di sistema dopo un trasferimento riuscito. L'animazione dell'icona resta attiva durante il trasferimento.",
+        "en": "Shows a system notification after a successful transfer. The tray icon animation remains active during transfers.",
+    },
+    "settings.notify_sync_note": {
+        "it": "Entrambe le opzioni sono disattivate di default e possono essere cambiate subito.",
+        "en": "Both options are off by default and can be changed immediately.",
+    },
+    "settings.animate_sync_checkbox": {
+        "it": "Anima l'icona nel tray durante i trasferimenti",
+        "en": "Animate the tray icon during transfers",
+    },
+    "settings.animate_sync_tooltip": {
+        "it": "Alterna il simbolo dell'icona mentre NASBox prepara o trasferisce file.",
+        "en": "Alternates the tray icon symbol while NASBox prepares or transfers files.",
+    },
+
     "settings.exclude_title": {"it": "Escludi dalla sincronizzazione", "en": "Exclude from sync"},
     "settings.exclude_note": {
         "it": "Pattern (stile rsync) mai sincronizzati, in nessuna direzione -- utile per cache, "
@@ -687,6 +709,13 @@ STRINGS: dict[str, dict[str, str]] = {
     "tray.paused": {"it": "⏸ In pausa", "en": "⏸ Paused"},
     "tray.active": {"it": "✅ Attivo — {where}", "en": "✅ Active — {where}"},
     "tray.via_bastion": {"it": "(via bastione)", "en": "(via bastion)"},
+    "tray.upload": {"it": "Caricamento", "en": "Upload"},
+    "tray.download": {"it": "Scaricamento", "en": "Download"},
+    "tray.sync_completed_title": {"it": "Sincronizzazione completata", "en": "Sync completed"},
+    "tray.sync_completed_body": {
+        "it": "{direction}: {count} operazioni completate.",
+        "en": "{direction}: {count} operations completed.",
+    },
 
     # --- main_window.py ---
     "main_window.brand_tagline": {
