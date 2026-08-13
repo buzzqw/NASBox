@@ -162,11 +162,11 @@ class MainWindow(QMainWindow):
             worker.log_event.connect(self.tray.on_log_event)
             worker.transfer_preparing.connect(self.tray.on_transfer_preparing)
             worker.transfer_finished.connect(self.tray.on_transfer_finished)
-            worker.transfer_item_done.connect(
-                lambda item_direction, path, d=direction: self.tray.on_transfer_item_done(
-                    d, item_direction, path,
-                )
+            item_done_slot = (
+                self.tray.on_upload_item_done if direction == "upload"
+                else self.tray.on_download_item_done
             )
+            worker.transfer_item_done.connect(item_done_slot)
         self.engine.status_changed.connect(self.tray.on_status_changed)
         self.scan_worker.queue_updated.connect(self.tray.on_queue_updated)
         self.engine.server_outdated.connect(self._on_server_outdated)

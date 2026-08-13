@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 
-from PyQt6.QtCore import QTimer, QUrl
+from PyQt6.QtCore import QTimer, QUrl, pyqtSlot
 from PyQt6.QtGui import QCursor, QDesktopServices
 from PyQt6.QtWidgets import QMenu, QSystemTrayIcon
 
@@ -79,6 +79,7 @@ class TrayIcon(QSystemTrayIcon):
         self._animation_frame = (self._animation_frame + 1) % 2
         self._apply_icon()
 
+    @pyqtSlot(str)
     def on_transfer_preparing(self, direction: str) -> None:
         self._active_transfers.add(direction)
         self._animation_frame = 0
@@ -87,9 +88,18 @@ class TrayIcon(QSystemTrayIcon):
             self._animation_timer.start()
         self._apply_icon()
 
-    def on_transfer_item_done(self, direction: str, _item_direction: str, _path: str) -> None:
+    def _on_transfer_item_done(self, direction: str) -> None:
         self._transfer_counts[direction] += 1
 
+    @pyqtSlot(str, str)
+    def on_upload_item_done(self, item_direction: str, path: str) -> None:
+        self._on_transfer_item_done("upload")
+
+    @pyqtSlot(str, str)
+    def on_download_item_done(self, item_direction: str, path: str) -> None:
+        self._on_transfer_item_done("download")
+
+    @pyqtSlot(str, bool)
     def on_transfer_finished(self, direction: str, success: bool) -> None:
         count = self._transfer_counts.get(direction, 0)
         self._active_transfers.discard(direction)
