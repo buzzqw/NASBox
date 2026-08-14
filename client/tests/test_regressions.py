@@ -358,9 +358,11 @@ class RegressionTests(unittest.TestCase):
         all_paths = {f"file{i}.txt" for i in range(250)}  # > 2 * PUSH_CHUNK_SIZE (100)
 
         build_plan_calls: list[set[str]] = []
+        compact_manifest_calls: list[bool] = []
 
-        def fake_build_plan(relative_paths, **_kwargs):
+        def fake_build_plan(relative_paths, **kwargs):
             build_plan_calls.append(set(relative_paths))
+            compact_manifest_calls.append(kwargs["compact_remote_manifest"])
             return set(relative_paths), [], set()  # every path in the chunk is a plain upload, no deletes
 
         def fake_run_transfer_tracked(_transfer_fn, _run_ts, paths=None, **_kwargs):
@@ -385,8 +387,27 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(len(build_plan_calls), 3)
         self.assertEqual([len(c) for c in build_plan_calls], [100, 100, 50])
         self.assertEqual(set().union(*build_plan_calls), all_paths)
+        self.assertEqual(compact_manifest_calls, [True, False, False])
         # every chunk succeeded -> the whole operation is considered clean
         self.assertFalse(worker._force_sync.is_set())
+
+    def test_push_plan_skips_manifest_compaction_after_first_chunk(self) -> None:
+        worker, _watcher = self._make_push_worker_for_tick()
+        worker.sync_state.fingerprint.return_value = Fingerprint("a" * 64, 1, 1)
+        worker.sync_state.get.return_value = None
+        remote_states = {"file.txt": rsync_ops.RemoteState(rsync_ops.RemoteKind.ABSENT)}
+
+        with patch.object(rsync_ops, "remote_file_states", return_value=remote_states) as states:
+            uploads, deletes, adopted = worker._build_plan(
+                {"file.txt"}, compact_remote_manifest=False,
+            )
+
+        states.assert_called_once_with(
+            worker.cfg, worker._conn, {"file.txt"}, compact=False, on_progress=None,
+        )
+        self.assertEqual(uploads, {"file.txt"})
+        self.assertEqual(deletes, [])
+        self.assertEqual(adopted, set())
 
     def test_push_tick_stops_at_cumulative_delete_limit_across_chunks(self) -> None:
         worker, watcher = self._make_push_worker_for_tick()
@@ -749,6 +770,20 @@ class RegressionTests(unittest.TestCase):
                 state.record_local(str(root), "report.txt")
                 (root / "report.txt").write_text("second", encoding="utf-8")
                 self.assertIn("report.txt", state.changed_paths(str(root)))
+
+    def test_persistent_state_queues_new_files_without_hashing_them_first(self) -> None:
+        with tempfile.TemporaryDirectory() as folder, tempfile.TemporaryDirectory() as state_dir:
+            root = Path(folder)
+            (root / "new.txt").write_text("new", encoding="utf-8")
+            cfg = type("Config", (), {"get": lambda _self, key: {
+                "nas_user": "user", "nas_lan": "nas", "remote_prefix": "/volume1/NASBox",
+            }.get(key, "")})()
+            with patch.object(paths, "sync_state_db_file", return_value=Path(state_dir) / "state.sqlite3"):
+                state = SyncStateStore(cfg)
+                with patch.object(state, "fingerprint", wraps=state.fingerprint) as fingerprint:
+                    self.assertEqual(state.changed_paths(str(root)), {"new.txt"})
+
+            fingerprint.assert_not_called()
 
     def test_persistent_state_batches_many_completed_paths(self) -> None:
         with tempfile.TemporaryDirectory() as folder, tempfile.TemporaryDirectory() as state_dir:

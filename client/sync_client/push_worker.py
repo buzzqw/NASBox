@@ -215,13 +215,17 @@ class PushWorker(TransferWorker):
                     deletes_committed = 0
                     aborted_for_delete_limit = False
                     remote_progress_done = 0
-                    for chunk_paths in chunks:
+                    for chunk_index, chunk_paths in enumerate(chunks):
                         chunk_set = set(chunk_paths)
                         chunk_run_ts = rsync_ops.new_run_ts()
                         upload_paths, delete_requests, adopted_paths = self._build_plan(
                             chunk_set,
                             remote_progress_offset=remote_progress_done,
                             remote_progress_total=len(ordered_paths),
+                            # The manifest is current before the first chunk. Later
+                            # chunks use live file states, so rebuilding the whole
+                            # manifest again would be pure repeated work.
+                            compact_remote_manifest=chunk_index == 0,
                         )
                         remote_progress_done += len(chunk_set)
 
@@ -397,8 +401,8 @@ class PushWorker(TransferWorker):
 
     def _build_plan(
         self, relative_paths: set[str],
-        remote_progress_offset: int = 0,
-        remote_progress_total: int = 0,
+        remote_progress_offset: int = 0, remote_progress_total: int = 0,
+        compact_remote_manifest: bool = True,
     ) -> tuple[set[str], list[tuple[str, str, int]], set[str]]:
         if not relative_paths:
             return set(), [], set()
@@ -409,7 +413,8 @@ class PushWorker(TransferWorker):
                 remote_progress_offset + done, remote_progress_total,
             )
         remote_states = rsync_ops.remote_file_states(
-            self.cfg, self._conn, relative_paths, on_progress=remote_progress,
+            self.cfg, self._conn, relative_paths,
+            compact=compact_remote_manifest, on_progress=remote_progress,
         )
         if remote_states is None or set(remote_states) != relative_paths:
             raise rsync_ops.RemoteLockError("impossibile verificare in batch lo stato dei file sul NAS")

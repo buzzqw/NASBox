@@ -255,8 +255,8 @@ class SyncStateStore:
             }
         candidates = set(current) | set(known)
         changed: set[str] = set()
-        # Files whose content actually needs reading -- everything else (matching
-        # mtime+size, or simply absent locally) is resolved below without any I/O.
+        # Files whose content actually needs reading. Matching metadata, missing
+        # files, and files without a common baseline are resolved without hashing.
         to_hash: list[str] = []
         for relative_path in candidates:
             known_fp = known.get(relative_path)
@@ -271,14 +271,18 @@ class SyncStateStore:
                     continue
                 changed.add(relative_path)
                 continue
+            if known_fp is None or known_fp.is_tombstone:
+                # New files and local recreations are candidates by definition.
+                # Their digest is needed for the per-chunk reconciliation, not to
+                # discover that they must be queued, so do not hash an entire bulk
+                # import before its first chunk can start transferring.
+                changed.add(relative_path)
+                continue
             to_hash.append(relative_path)
 
         if to_hash:
             # Hashing is I/O-bound (hashlib/file reads release the GIL), so a thread
-            # pool gives real wall-clock speedup on a first-time bulk import (e.g. a
-            # freshly copied-in folder with nothing in the baseline yet, so every
-            # file must be read once) -- the case that made this scan take 40+
-            # minutes single-threaded against a spinning/SSD-mixed real NASBox tree.
+            # pool speeds up reconciliation of existing files whose metadata changed.
             # Do not use ThreadPoolExecutor's default (min(32, cpu_count+4)) here:
             # a full-tree reconciliation is an exceptional path, not a reason to
             # consume every CPU core.
