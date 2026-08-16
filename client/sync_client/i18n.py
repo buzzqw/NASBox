@@ -518,7 +518,7 @@ STRINGS: dict[str, dict[str, str]] = {
     "transfers.waiting_for_lock": {"it": "{direction} in attesa del lock NAS: verifico che nessun altro client stia sincronizzando ({seconds}s trascorsi).", "en": "{direction} waiting for the NAS lock: checking that no other client is syncing ({seconds}s elapsed)."},
     "transfers.preparing": {"it": "{direction} in preparazione: sto analizzando i file e costruendo la lista ({seconds}s trascorsi).", "en": "{direction} preparing: analyzing files and building the list ({seconds}s elapsed)."},
     "transfers.queue_scan_running": {"it": "Sto verificando le differenze con il NAS ({seconds}s trascorsi)…", "en": "Checking for differences with the NAS ({seconds}s elapsed)…"},
-    "transfers.lock_unavailable": {"it": "Trasferimento rimandato: {detail}", "en": "Transfer deferred: {detail}"},
+    "transfers.lock_unavailable": {"it": "Sincronizzazione rimandata. {detail}", "en": "Synchronization deferred. {detail}"},
     "transfers.completed_batch": {"it": "{direction} completato: {count} operazioni eseguite. Il monitoraggio continua.", "en": "{direction} complete: {count} operations completed. Monitoring continues."},
     "transfers.failed_batch": {"it": "{direction} non completato: controlla il Log.", "en": "{direction} did not complete: check the Log."},
     "transfers.active_starting": {"it": "{direction} in corso: sto confrontando i file con il NAS; compariranno qui sotto appena rilevati ({seconds}s trascorsi).", "en": "{direction} in progress: comparing files with the NAS; they will appear below as detected ({seconds}s elapsed)."},
@@ -624,12 +624,22 @@ STRINGS: dict[str, dict[str, str]] = {
     "log.action.journal_error": {"it": "Errore del journal", "en": "Journal error"},
     "log.action.unsupported": {"it": "Elemento non supportato", "en": "Unsupported item"},
     "log.action.pull_deferred": {"it": "Scaricamento rimandato", "en": "Download deferred"},
+    "log.action.lock_deferred": {"it": "Sincronizzazione rimandata", "en": "Synchronization deferred"},
     "log.action.cancelled": {"it": "Trasferimento annullato", "en": "Transfer cancelled"},
     "log.action.server_down": {"it": "Server NAS non attivo", "en": "NAS server stopped"},
     "log.action.server_restarted": {"it": "Server NAS riavviato", "en": "NAS server restarted"},
     "log.action.server_outdated": {"it": "Server NAS da aggiornare", "en": "NAS server outdated"},
     "log.action.server_update_available": {"it": "Aggiornamento server disponibile", "en": "Server update available"},
     "log.action.error": {"it": "Errore", "en": "Error"},
+
+    "lock.busy_retry": {
+        "it": "Un altro PC sta sincronizzando con il NAS. Nessun dato è stato perso: NASBox riproverà automaticamente.",
+        "en": "Another PC is syncing with the NAS. No data was lost: NASBox will retry automatically.",
+    },
+    "lock.acquire_failed": {
+        "it": "Il lock di sincronizzazione del NAS non è disponibile per un problema inatteso: {detail}",
+        "en": "The NAS synchronization lock is unavailable because of an unexpected problem: {detail}",
+    },
 
     # --- history_tab.py ---
     "history.retention_title": {"it": "Quanto storico conservare", "en": "How much history to keep"},

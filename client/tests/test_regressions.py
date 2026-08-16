@@ -48,6 +48,37 @@ class _Watcher:
 
 
 class RegressionTests(unittest.TestCase):
+    def test_remote_lock_timeout_is_classified_as_normal_contention(self) -> None:
+        cfg = Mock()
+        cfg.get.side_effect = lambda key, default=None: {
+            "server_lock_file_remote": "/tmp/sync-transfer.lock",
+            "nas_user": "sync",
+        }.get(key, default)
+        process = Mock()
+        process.stdout.readline.return_value = ""
+        process.communicate.return_value = ("", "")
+
+        with patch("sync_client.rsync_ops.subprocess.Popen", return_value=process):
+            with self.assertRaises(rsync_ops.RemoteLockBusy):
+                with rsync_ops.RemoteLock(cfg, rsync_ops.NasConnection("nas.local")):
+                    pass
+
+    def test_remote_lock_ssh_failure_remains_an_error(self) -> None:
+        cfg = Mock()
+        cfg.get.side_effect = lambda key, default=None: {
+            "server_lock_file_remote": "/tmp/sync-transfer.lock",
+            "nas_user": "sync",
+        }.get(key, default)
+        process = Mock()
+        process.stdout.readline.return_value = ""
+        process.communicate.return_value = ("", "permission denied")
+
+        with patch("sync_client.rsync_ops.subprocess.Popen", return_value=process):
+            with self.assertRaises(rsync_ops.RemoteLockError) as raised:
+                with rsync_ops.RemoteLock(cfg, rsync_ops.NasConnection("nas.local")):
+                    pass
+        self.assertNotIsInstance(raised.exception, rsync_ops.RemoteLockBusy)
+
     def test_pull_worker_exposes_batch_size_signal(self) -> None:
         self.assertTrue(hasattr(pull_worker.PullWorker, "batch_size_known"))
 

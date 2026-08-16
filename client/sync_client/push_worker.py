@@ -23,6 +23,7 @@ from PyQt6.QtCore import pyqtSignal
 
 from . import rsync_ops
 from .config import Config
+from .i18n import t
 from .logger import EventLogger
 from .repository_safety import RepositorySafetyError
 from .reconcile import Action, RemoteKind, plan_path
@@ -318,11 +319,19 @@ class PushWorker(TransferWorker):
                     # path is adopted or the plan turns out empty. Always close
                     # the lifecycle so the GUI cannot remain stuck on "preparing".
                     self.transfer_finished.emit("upload", overall_ok)
+            except rsync_ops.RemoteLockBusy:
+                if watcher is not None:
+                    watcher.mark_dirty()
+                self._force_sync.set()
+                detail = t("lock.busy_retry")
+                self.transfer_lock_unavailable.emit("upload", detail)
+                self.transfer_finished.emit("upload", False)
+                self._log("LOCK_DEFERRED", "-", detail)
             except rsync_ops.RemoteLockError as exc:
                 if watcher is not None:
                     watcher.mark_dirty()
                 self._force_sync.set()
-                detail = f"lock di sincronizzazione sul NAS non acquisito: {exc}"
+                detail = t("lock.acquire_failed", detail=str(exc))
                 self.transfer_lock_unavailable.emit("upload", detail)
                 self.transfer_finished.emit("upload", False)
                 self._log("ERROR", "-", detail)

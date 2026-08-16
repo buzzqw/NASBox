@@ -165,6 +165,10 @@ class RemoteLockError(RuntimeError):
     """The NAS transaction lock could not be acquired safely."""
 
 
+class RemoteLockBusy(RemoteLockError):
+    """Another client held the NAS transaction lock for the whole wait."""
+
+
 class RemoteLock:
     """Exclusive lock held by a live SSH session for one full transfer.
 
@@ -206,7 +210,10 @@ class RemoteLock:
             if self.proc.stdout.readline().strip() == "NASBOX_LOCKED":
                 return self
             _stdout, stderr = self.proc.communicate(timeout=5)
-            raise RemoteLockError(_clean_ssh_stderr(stderr) or "lock remoto non disponibile")
+            detail = _clean_ssh_stderr(stderr)
+            if not detail:
+                raise RemoteLockBusy("lock occupato da un altro client")
+            raise RemoteLockError(detail)
         except (OSError, subprocess.TimeoutExpired) as exc:
             self.release()
             raise RemoteLockError(f"impossibile acquisire il lock remoto: {exc}") from exc

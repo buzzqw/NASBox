@@ -62,7 +62,7 @@ class UsabilityTests(unittest.TestCase):
     def test_log_filters_cover_produced_actions_and_keep_raw_codes(self) -> None:
         expected = {
             "UPLOAD", "DOWNLOAD", "DELETE_LOCAL", "DELETE_REMOTE", "PRUNE_LOCAL_TRASH",
-            "PRUNE_REMOTE_TRIGGER", "CANCELLED", "PULL_DEFERRED", "SERVER_DOWN",
+            "PRUNE_REMOTE_TRIGGER", "CANCELLED", "PULL_DEFERRED", "LOCK_DEFERRED", "SERVER_DOWN",
             "SERVER_RESTARTED", "SERVER_OUTDATED", "SERVER_UPDATE_AVAILABLE", "CONFLICT",
             "ERROR", "BROWSE_DOWNLOAD", "BROWSE_RENAME", "BROWSE_DELETE",
             "RESTORE_REMOTE_VERSION", "JOURNAL_BLOCK", "JOURNAL_ERROR", "SAFETY_BLOCK",

@@ -7,6 +7,14 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 - Sostituita la licenza proprietaria con la European Union Public Licence
   versione 1.2 (EUPL-1.2).
 
+## 1.11.1 - 2026-08-16
+
+- La normale attesa del lock NAS occupato da un altro PC non viene piu
+  presentata come errore: NASBox spiega che la sincronizzazione e stata
+  rimandata, che nessun dato e stato perso e che riprovera automaticamente.
+- Gli errori reali di SSH o del supporto lock restano distinti e visibili come
+  problemi da correggere.
+
 ## 1.11.0 - 2026-08-16
 
 - Aggiunto il wizard grafico completo sul PC per cartella locale, collegamento

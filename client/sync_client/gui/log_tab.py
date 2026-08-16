@@ -27,7 +27,7 @@ ACTION_FILTERS = [
     ("CONFLICT", "safety"), ("STALE_DELETE", "safety"),
     ("SAFETY_BLOCK", "safety"), ("JOURNAL_BLOCK", "safety"),
     ("JOURNAL_ERROR", "safety"), ("UNSUPPORTED", "safety"),
-    ("PULL_DEFERRED", "system"), ("CANCELLED", "system"),
+    ("PULL_DEFERRED", "system"), ("LOCK_DEFERRED", "system"), ("CANCELLED", "system"),
     ("SERVER_DOWN", "system"), ("SERVER_RESTARTED", "system"),
     ("SERVER_OUTDATED", "system"), ("SERVER_UPDATE_AVAILABLE", "system"),
     ("ERROR", "system"),
