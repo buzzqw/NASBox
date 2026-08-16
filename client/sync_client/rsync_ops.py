@@ -169,6 +169,9 @@ class RemoteLockBusy(RemoteLockError):
     """Another client held the NAS transaction lock for the whole wait."""
 
 
+REMOTE_LOCK_BUSY_EXIT_CODE = 75
+
+
 class RemoteLock:
     """Exclusive lock held by a live SSH session for one full transfer.
 
@@ -195,7 +198,7 @@ class RemoteLock:
         parent = lock_file.rsplit("/", 1)[0] or "."
         remote_cmd = (
             f"mkdir -p {shlex.quote(parent)} && "
-            f"exec flock -x -w {self.timeout} {shlex.quote(lock_file)} "
+            f"exec flock -E {REMOTE_LOCK_BUSY_EXIT_CODE} -x -w {self.timeout} {shlex.quote(lock_file)} "
             "sh -c 'printf \"NASBOX_LOCKED\\n\"; cat >/dev/null'"
         )
         user = self.cfg.get("nas_user")
@@ -211,8 +214,10 @@ class RemoteLock:
                 return self
             _stdout, stderr = self.proc.communicate(timeout=5)
             detail = _clean_ssh_stderr(stderr)
-            if not detail:
+            if self.proc.returncode == REMOTE_LOCK_BUSY_EXIT_CODE:
                 raise RemoteLockBusy("lock occupato da un altro client")
+            if not detail:
+                raise RemoteLockError("risposta inattesa durante l'acquisizione del lock remoto")
             raise RemoteLockError(detail)
         except (OSError, subprocess.TimeoutExpired) as exc:
             self.release()

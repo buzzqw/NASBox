@@ -7,6 +7,12 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 - Sostituita la licenza proprietaria con la European Union Public Licence
   versione 1.2 (EUPL-1.2).
 
+## 1.11.2 - 2026-08-16
+
+- Reso esplicito il codice di uscita usato da `flock` quando il lock NAS resta
+  occupato fino al timeout, evitando che la normale contesa venga interpretata
+  come errore tecnico.
+
 ## 1.11.1 - 2026-08-16
 
 - La normale attesa del lock NAS occupato da un altro PC non viene piu

@@ -57,6 +57,7 @@ class RegressionTests(unittest.TestCase):
         process = Mock()
         process.stdout.readline.return_value = ""
         process.communicate.return_value = ("", "")
+        process.returncode = rsync_ops.REMOTE_LOCK_BUSY_EXIT_CODE
 
         with patch("sync_client.rsync_ops.subprocess.Popen", return_value=process):
             with self.assertRaises(rsync_ops.RemoteLockBusy):
@@ -72,6 +73,7 @@ class RegressionTests(unittest.TestCase):
         process = Mock()
         process.stdout.readline.return_value = ""
         process.communicate.return_value = ("", "permission denied")
+        process.returncode = 255
 
         with patch("sync_client.rsync_ops.subprocess.Popen", return_value=process):
             with self.assertRaises(rsync_ops.RemoteLockError) as raised:
