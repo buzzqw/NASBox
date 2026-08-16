@@ -89,7 +89,18 @@ git -C /volume1/Varie/sync-daemon pull --ff-only
 /volume1/Varie/sync-daemon/server/sync-daemon-server.sh --restart
 ```
 
-Install the client on each Linux PC from a temporary copy of `client/`:
+Install the client on each Linux PC from the release page (recommended):
+
+```bash
+chmod +x NASBox-<version>-x86_64.AppImage
+./NASBox-<version>-x86_64.AppImage
+# Debian/Ubuntu alternative:
+sudo apt install ./nasbox-client_<version>_amd64.deb
+```
+
+The packaged client includes Python, PyQt6 and NASBox. `rsync` and OpenSSH
+remain system dependencies; `inotify-tools` is recommended. Alternatively,
+install from a temporary copy of `client/`:
 
 ```bash
 scp -r <user>@<nas>:/volume1/Varie/sync-daemon/client /tmp/nasbox-client
@@ -101,6 +112,12 @@ The installer creates or verifies SSH keys, configures the connection and
 registers the client as a user service when systemd is available. The client
 runtime is installed under `~/NASBox/sync-daemon`; it must not contain `.git`
 and must not be used as a source repository.
+
+Release tags and manual runs of the packaging workflow build both Linux
+packages and `nasbox-client-update-<version>.tar.gz`. That update bundle is
+generated only by `packaging/build-client-update.sh`; ignored `client-update/`
+directories are extracted runtime/deployment data and are never canonical
+source. The NAS remains shell-only: install only `server/` there.
 
 Useful checks:
 
@@ -234,8 +251,18 @@ git -C /volume1/Varie/sync-daemon pull --ff-only
 /volume1/Varie/sync-daemon/server/sync-daemon-server.sh --restart
 ```
 
-Installare il client su ogni PC Linux partendo da una copia temporanea di
-`client/`:
+Installare il client su ogni PC Linux dalla pagina release (consigliato):
+
+```bash
+chmod +x NASBox-<versione>-x86_64.AppImage
+./NASBox-<versione>-x86_64.AppImage
+# Alternativa Debian/Ubuntu:
+sudo apt install ./nasbox-client_<versione>_amd64.deb
+```
+
+Il pacchetto include Python, PyQt6 e NASBox. `rsync` e OpenSSH restano
+dipendenze di sistema; `inotify-tools` e consigliato. In alternativa usare una
+copia temporanea di `client/`:
 
 ```bash
 scp -r <utente>@<nas>:/volume1/Varie/sync-daemon/client /tmp/nasbox-client
@@ -247,6 +274,12 @@ L'installer crea o verifica le chiavi SSH, configura il collegamento e registra
 il client come servizio utente quando systemd e disponibile. Il runtime del
 client viene installato in `~/NASBox/sync-daemon`; non deve contenere `.git` e
 non deve essere usato come repository del sorgente.
+
+I tag release e le esecuzioni manuali del workflow di packaging generano anche
+`nasbox-client-update-<versione>.tar.gz`. Il bundle si crea esclusivamente con
+`packaging/build-client-update.sh`: le directory `client-update/` ignorate sono
+dati estratti di runtime/deploy, non sorgente canonico. Il NAS resta solo
+shell: installare li esclusivamente `server/`.
 
 Controlli utili:
 

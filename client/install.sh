@@ -104,7 +104,7 @@ msg() {
             done_header) echo "=== Fatto ===" ;;
             run_with) echo "Avvialo con:  %s" ;;
             find_in_launcher) echo "Oppure trova 'NASBox' nel tuo menu applicazioni." ;;
-            final_note) echo "Al primo avvio ti chiede dove mettere la cartella NASBox locale, poi configura la connessione al NAS dall'app stessa (tab 'Impostazioni'). La configurazione vive in %s." ;;
+            final_note) echo "Se la configurazione non è completa, al primo avvio un wizard grafico configura cartella locale, connessione SSH e rilevamento del server NAS. WAN e bastione restano nel tab 'Impostazioni'. La configurazione vive in %s." ;;
             *) echo "$key" ;;
         esac
     else
@@ -181,7 +181,7 @@ msg() {
             done_header) echo "=== Done ===" ;;
             run_with) echo "Run it with:  %s" ;;
             find_in_launcher) echo "Or find 'NASBox' in your application launcher." ;;
-            final_note) echo "First run asks where to put the local NASBox folder, then configure the NAS connection from the app itself (tab 'Settings'). Config lives at %s." ;;
+            final_note) echo "If setup is incomplete, first run opens a graphical wizard for the local folder, SSH connection, and NAS server detection. WAN and bastion remain in the 'Settings' tab. Config lives at %s." ;;
             *) echo "$key" ;;
         esac
     fi

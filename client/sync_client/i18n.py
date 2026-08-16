@@ -72,14 +72,71 @@ STRINGS: dict[str, dict[str, str]] = {
     },
     "dialogs.folder.browse_tooltip": {"it": "Scegli la cartella con il file manager.", "en": "Pick the folder using the file browser."},
 
+    # --- dialogs.py: FirstRunSetupWizard ---
+    "setup.title": {"it": "Configura NASBox su questo PC", "en": "Set up NASBox on this PC"},
+    "setup.local_title": {"it": "Cartella su questo PC", "en": "Folder on this PC"},
+    "setup.local_intro": {
+        "it": "Scegli la cartella locale che NASBox sincronizzerà. Verrà creata solo quando completi la configurazione.",
+        "en": "Choose the local folder NASBox will sync. It is created only after you finish setup.",
+    },
+    "setup.local_failed_title": {"it": "Cartella locale non valida", "en": "Invalid local folder"},
+    "setup.connection_title": {"it": "Connessione SSH al NAS", "en": "SSH connection to the NAS"},
+    "setup.connection_intro": {
+        "it": "Inserisci i dati SSH del NAS. Sul NAS non serve alcuna interfaccia grafica: basta l'accesso shell SSH.",
+        "en": "Enter the NAS SSH details. The NAS needs no graphical interface, only SSH shell access.",
+    },
+    "setup.test_connection": {"it": "Prova connessione SSH", "en": "Test SSH connection"},
+    "setup.testing": {"it": "Connessione in corso...", "en": "Connecting..."},
+    "setup.test_required": {"it": "Prova la connessione per continuare.", "en": "Test the connection to continue."},
+    "setup.connection_missing": {"it": "Inserisci host e utente SSH.", "en": "Enter the SSH host and user."},
+    "setup.test_ok": {"it": "Connessione SSH riuscita a {host}.", "en": "SSH connection to {host} succeeded."},
+    "setup.test_failed": {"it": "Connessione SSH non riuscita: {detail}", "en": "SSH connection failed: {detail}"},
+    "setup.advanced_later": {
+        "it": "Accesso WAN e bastione sono opzionali: puoi configurarli in Impostazioni dopo questa procedura.",
+        "en": "WAN access and a bastion are optional; configure them later in Settings.",
+    },
+    "setup.server_title": {"it": "Cartella NASBox sul NAS", "en": "NASBox folder on the NAS"},
+    "setup.server_intro": {
+        "it": "Rileva il demone dalla shell SSH per compilare percorso dello script e cartella remota. Se non è in esecuzione, puoi inserire i percorsi e completare comunque.",
+        "en": "Detect the daemon through the SSH shell to fill the script path and remote folder. If it is not running, enter the paths and finish anyway.",
+    },
+    "setup.detect_optional": {
+        "it": "Rilevamento consigliato ma non obbligatorio.",
+        "en": "Detection is recommended but optional.",
+    },
+    "setup.detect_ok": {
+        "it": "Configurazione server rilevata dal NAS.",
+        "en": "Server configuration detected from the NAS.",
+    },
+    "setup.detect_failed": {"it": "Rilevamento non riuscito: {detail}", "en": "Detection failed: {detail}"},
+
     # --- status_tab.py ---
     "status.group_title": {"it": "Stato", "en": "Status"},
     "status.starting": {"it": "In avvio…", "en": "Starting…"},
+    "status.sync_state_starting": {"it": "Sincronizzazione: stato in verifica.", "en": "Synchronization: checking status."},
+    "status.sync_state_not_configured": {"it": "Sincronizzazione non disponibile: completa la configurazione.", "en": "Synchronization unavailable: complete setup."},
+    "status.sync_state_offline": {"it": "Sincronizzazione non disponibile finché il NAS è offline.", "en": "Synchronization unavailable while the NAS is offline."},
+    "status.sync_state_paused_timed": {"it": "Sincronizzazione in pausa temporanea.", "en": "Synchronization is temporarily paused."},
+    "status.sync_state_paused": {"it": "Sincronizzazione in pausa.", "en": "Synchronization is paused."},
+    "status.sync_state_ready": {"it": "Sincronizzazione pronta: monitoraggio attivo, nessun trasferimento in corso.", "en": "Synchronization ready: monitoring is active, no transfer in progress."},
+    "status.sync_state_pending": {"it": "Sincronizzazione pronta: {count} in coda.", "en": "Synchronization ready: {count} queued."},
+    "status.sync_state_preparing": {"it": "Preparazione {direction} in corso…", "en": "Preparing {direction}…"},
+    "status.sync_state_waiting": {"it": "{direction}: in attesa del lock di sincronizzazione sul NAS.", "en": "{direction}: waiting for the NAS synchronization lock."},
+    "status.sync_state_active": {"it": "{direction} in corso.", "en": "{direction} in progress."},
+    "status.sync_state_file": {"it": "{direction} in corso: {path}", "en": "{direction} in progress: {path}"},
+    "status.direction_upload": {"it": "caricamento verso il NAS", "en": "upload to NAS"},
+    "status.direction_download": {"it": "scaricamento dal NAS", "en": "download from NAS"},
+    "status.last_sync_never": {"it": "Ultima sincronizzazione riuscita: nessun trasferimento registrato.", "en": "Last successful synchronization: no transfer recorded."},
+    "status.last_sync": {"it": "Ultima sincronizzazione riuscita: {time} ({direction}).", "en": "Last successful synchronization: {time} ({direction})."},
+    "status.last_problem_none": {"it": "Ultimo errore o blocco di sicurezza: nessuno registrato.", "en": "Last error or safety block: none recorded."},
+    "status.last_problem": {"it": "Ultimo errore o blocco: {time} [{action}] {detail}", "en": "Last error or block: {time} [{action}] {detail}"},
+    "status.problem_no_detail": {"it": "nessun dettaglio", "en": "no details"},
     "status.hash_progress": {
         "it": "Verifica file locali in corso: {done} di {total}…",
         "en": "Checking local files: {done} of {total}…",
     },
     "status.sync_now_btn": {"it": "Sincronizza tutto ora", "en": "Sync everything now"},
+    "status.sync_requested": {"it": "Richiesta ricevuta: controllo delle modifiche in corso.", "en": "Request received: checking for changes."},
     "status.pause_btn": {"it": "Pausa", "en": "Pause"},
     "status.resume_btn": {"it": "Riprendi", "en": "Resume"},
     "status.pause_for_btn": {"it": "Pausa per…", "en": "Pause for…"},
@@ -103,6 +160,7 @@ STRINGS: dict[str, dict[str, str]] = {
     },
     "status.paused_msg": {"it": "⏸ In pausa — connesso a {where}", "en": "⏸ Paused — connected to {where}"},
     "status.active_msg": {"it": "✅ Sincronizzazione attiva — connesso a {where}", "en": "✅ Syncing — connected to {where}"},
+    "status.connected_msg": {"it": "Connesso al NAS: {where}", "en": "Connected to NAS: {where}"},
     "status.version_tooltip": {"it": "Clicca per cercare aggiornamenti del client.", "en": "Click to check for client updates."},
     "status.update_available": {"it": "🔄 Aggiornamento {version} disponibile — clicca per installare e riavviare.", "en": "🔄 Update {version} available — click to install and restart."},
     "status.update_checking": {"it": "Controllo aggiornamenti in corso…", "en": "Checking for updates…"},
@@ -113,7 +171,8 @@ STRINGS: dict[str, dict[str, str]] = {
     "status.update_restart_body": {"it": "NASBox verrà riavviato con la nuova versione.", "en": "NASBox will restart with the new version."},
     "status.update_failed_title": {"it": "Aggiornamento fallito", "en": "Update failed"},
     "status.queue_unknown": {"it": "Prima verifica in corso: sto analizzando i file…", "en": "First check in progress: analyzing files…"},
-    "status.queue_empty": {"it": "Nessuna differenza rilevata: tutti i file sono sincronizzati con il NAS.", "en": "No differences detected: all files are synced with the NAS."},
+    "status.queue_empty": {"it": "Coda corrente: nessuna operazione in attesa nell'ultima verifica.", "en": "Current queue: no operations waiting in the latest check."},
+    "status.queue_offline": {"it": "Coda non disponibile: il NAS non è connesso.", "en": "Queue unavailable: the NAS is not connected."},
     "status.queue_summary": {
         "it": "In attesa: {uploads} caricamenti, {downloads} scaricamenti, {deletes} eliminazioni.",
         "en": "Waiting: {uploads} uploads, {downloads} downloads, {deletes} deletions.",
@@ -123,6 +182,7 @@ STRINGS: dict[str, dict[str, str]] = {
     "status.diagnostics_loading": {"it": "Lettura diagnostica NAS…", "en": "Reading NAS diagnostics…"},
     "status.diagnostics_offline": {"it": "Diagnostica NAS non disponibile: NAS non raggiungibile.", "en": "NAS diagnostics unavailable: NAS is unreachable."},
     "status.diagnostics_failed": {"it": "Diagnostica NAS non disponibile: {detail}", "en": "NAS diagnostics unavailable: {detail}"},
+    "status.diagnostics_invalid": {"it": "risposta NAS non valida", "en": "invalid NAS response"},
     "status.diagnostics_summary": {
         "it": "NAS: {free} liberi; storico {trash} in {count} versioni. Il server NAS è attivo e sta gestendo la retention.",
         "en": "NAS: {free} free; history {trash} across {count} versions. The NAS server is active and managing retention.",
@@ -149,6 +209,22 @@ STRINGS: dict[str, dict[str, str]] = {
         "it": "Cambia dove si trova la cartella NASBox su questo PC. Non sposta i file esistenti.",
         "en": "Changes where the NASBox folder lives on this PC. Doesn't move existing files.",
     },
+    "status.attention_title": {"it": "Richiede attenzione", "en": "Requires attention"},
+    "status.attention_action_settings": {"it": "Apri Impostazioni", "en": "Open Settings"},
+    "status.attention_action_log": {"it": "Apri Log", "en": "Open Log"},
+    "status.attention_action_history": {"it": "Apri Storico", "en": "Open History"},
+    "status.attention_action_transfers": {"it": "Apri Trasferimenti", "en": "Open Transfers"},
+    "status.config_local_folder": {"it": "cartella locale", "en": "local folder"},
+    "status.config_nas_host": {"it": "host NAS", "en": "NAS host"},
+    "status.config_nas_user": {"it": "utente SSH", "en": "SSH user"},
+    "status.problem_config": {"it": "Configurazione incompleta: {fields}.", "en": "Setup is incomplete: {fields}."},
+    "status.problem_unreachable": {"it": "Il NAS configurato non è raggiungibile. Controlla rete e parametri di connessione.", "en": "The configured NAS is unreachable. Check the network and connection settings."},
+    "status.problem_host_keys": {"it": "Le chiavi host SSH configurate non sono state verificate esplicitamente.", "en": "The configured SSH host keys have not been explicitly verified."},
+    "status.problem_repository": {"it": "Il repository NASBox remoto non è verificato. Rileva la configurazione dal NAS prima di sincronizzare.", "en": "The remote NASBox repository is not verified. Detect its configuration before synchronizing."},
+    "status.problem_journal_unavailable": {"it": "Il journal del repository NAS non risulta verificato o disponibile.", "en": "The NAS repository journal is not verified or available."},
+    "status.problem_journal": {"it": "Errore journal: {detail}", "en": "Journal error: {detail}"},
+    "status.problem_recent_event": {"it": "Evento recente {action}: {detail}", "en": "Recent {action} event: {detail}"},
+    "status.problem_low_space": {"it": "Spazio disponibile sul NAS basso: {free}. Controlla lo storico e libera spazio.", "en": "Low available NAS space: {free}. Review history and free space."},
 
     # --- settings_tab.py ---
     "settings.nas_box_title": {"it": "Connessione al NAS", "en": "NAS connection"},
@@ -242,15 +318,18 @@ STRINGS: dict[str, dict[str, str]] = {
         "it": "Se spenta, cancellare un file su un PC NON lo cancella sul NAS o sugli altri PC (resta lì). Se accesa, le cancellazioni si propagano -- protette comunque dal cestino/storico.",
         "en": "If off, deleting a file on one PC does NOT delete it on the NAS or other PCs (it stays there). If on, deletions propagate -- still protected by the trash/history.",
     },
-    "settings.save_nas_btn": {"it": "Salva connessione", "en": "Save connection"},
-    "settings.save_nas_tooltip": {"it": "Salva questi valori e li applica subito, senza riavviare l'app.", "en": "Saves these values and applies them right away, no app restart needed."},
+    "settings.save_all_btn": {"it": "Salva impostazioni", "en": "Save settings"},
+    "settings.save_all_tooltip": {
+        "it": "Salva insieme connessione, banda, frequenza, feedback, tray, lingua, esclusioni e cancellazioni.",
+        "en": "Saves connection, bandwidth, cadence, feedback, tray, language, exclusions, and deletion settings together.",
+    },
+    "settings.dirty_feedback": {"it": "Modifiche non ancora salvate.", "en": "Unsaved changes."},
+    "settings.saved_feedback": {"it": "Tutte le impostazioni sono salvate.", "en": "All settings are saved."},
 
     "settings.bandwidth_title": {"it": "Limite di banda (KB/s, 0 = illimitato)", "en": "Bandwidth limit (KB/s, 0 = unlimited)"},
     "settings.bandwidth_tooltip": {"it": "0 = nessun limite.", "en": "0 = no limit."},
-    "settings.apply_bandwidth_tooltip": {"it": "Applica i limiti al ciclo di sincronizzazione successivo.", "en": "Applies the limits starting with the next sync cycle."},
     "settings.upload_label": {"it": "↑ Carica:", "en": "↑ Upload:"},
     "settings.download_label": {"it": "↓ Scarica:", "en": "↓ Download:"},
-    "settings.apply_btn": {"it": "Applica", "en": "Apply"},
 
     "settings.cadence_title": {"it": "Frequenza sincronizzazione", "en": "Sync frequency"},
     "settings.poll_label": {"it": "Controlla il NAS per novità ogni:", "en": "Check the NAS for updates every:"},
@@ -260,7 +339,6 @@ STRINGS: dict[str, dict[str, str]] = {
         "en": "Local changes are sent to the NAS almost immediately (as soon as detected). "
               "This interval only affects downloading changes made by other PCs.",
     },
-    "settings.apply_poll_tooltip": {"it": "Applica il nuovo intervallo subito.", "en": "Applies the new interval right away."},
 
     "settings.feedback_title": {"it": "Feedback sincronizzazione", "en": "Sync feedback"},
     "settings.notify_sync_checkbox": {
@@ -272,8 +350,8 @@ STRINGS: dict[str, dict[str, str]] = {
         "en": "Shows a system notification after a successful transfer. The tray icon animation remains active during transfers.",
     },
     "settings.notify_sync_note": {
-        "it": "Entrambe le opzioni sono disattivate di default e possono essere cambiate subito.",
-        "en": "Both options are off by default and can be changed immediately.",
+        "it": "Le preferenze di feedback e tray vengono applicate con 'Salva impostazioni'.",
+        "en": "Feedback and tray preferences are applied with 'Save settings'.",
     },
     "settings.animate_sync_checkbox": {
         "it": "Anima l'icona nel tray durante i trasferimenti",
@@ -282,6 +360,13 @@ STRINGS: dict[str, dict[str, str]] = {
     "settings.animate_sync_tooltip": {
         "it": "Alterna il simbolo dell'icona mentre NASBox prepara o trasferisce file.",
         "en": "Alternates the tray icon symbol while NASBox prepares or transfers files.",
+    },
+    "settings.tray_click_label": {"it": "Un clic sull'icona:", "en": "Single-click tray icon:"},
+    "settings.tray_click_menu": {"it": "Mostra il menu", "en": "Show menu"},
+    "settings.tray_click_window": {"it": "Apri la finestra", "en": "Open window"},
+    "settings.tray_click_tooltip": {
+        "it": "Il clic destro mostra sempre il menu; il doppio clic apre sempre la finestra.",
+        "en": "Right-click always shows the menu; double-click always opens the window.",
     },
 
     "settings.exclude_title": {"it": "Escludi dalla sincronizzazione", "en": "Exclude from sync"},
@@ -349,9 +434,11 @@ STRINGS: dict[str, dict[str, str]] = {
     },
     "settings.detect_failed_title": {"it": "Rilevamento non riuscito", "en": "Detection failed"},
     "settings.detect_done_title": {"it": "Rilevamento completato", "en": "Detection complete"},
+    "settings.retention_never": {"it": "mai (nessuna eliminazione automatica)", "en": "never (no automatic deletion)"},
+    "settings.retention_days": {"it": "{days} giorni", "en": "{days} days"},
     "settings.detect_done_body": {
-        "it": "{status_line}.\nCartella NASBox sul NAS: {share_root}\nRetention sul NAS: {retention} giorni{version_line}",
-        "en": "{status_line}.\nNASBox folder on the NAS: {share_root}\nNAS retention: {retention} days{version_line}",
+        "it": "{status_line}.\nCartella NASBox sul NAS: {share_root}\nRetention sul NAS: {retention}{version_line}",
+        "en": "{status_line}.\nNASBox folder on the NAS: {share_root}\nNAS retention: {retention}{version_line}",
     },
     "settings.daemon_active": {"it": "✅ Demone server attivo sul NAS", "en": "✅ Server daemon active on the NAS"},
     "settings.daemon_inactive": {"it": "⚠️ Demone server NON in esecuzione sul NAS", "en": "⚠️ Server daemon NOT running on the NAS"},
@@ -385,11 +472,12 @@ STRINGS: dict[str, dict[str, str]] = {
     "settings.maint_conflict_note": {
         "it": "Quando due versioni di un file vengono modificate contemporaneamente su PC diversi, "
               "NASBox conserva entrambe: una resta al suo posto, l'altra viene rinominata con "
-              "\"(conflitto da ...)\" per non perdere dati. Questi file sopravvivono finché non "
-              "vengono cancellati a mano.",
+              "\"(conflitto da ...)\" per non perdere dati. Puoi rivederli qui e spostare nello "
+              "storico locale le copie che non servono.",
         "en": "When two versions of a file are modified at the same time on different PCs, "
               "NASBox keeps both: one stays in place, the other is renamed with "
-              "\"(conflitto da ...)\" to avoid data loss. These files persist until deleted by hand.",
+              "\"(conflitto da ...)\" to avoid data loss. Review them here and move unneeded "
+              "copies into local history.",
     },
     "settings.maint_conflict_count_unknown": {"it": "Clicca \"Cerca\" per trovare i file di conflitto.", "en": "Click \"Scan\" to find conflict files."},
     "settings.maint_conflict_scanning": {"it": "Scansione in corso…", "en": "Scanning…"},
@@ -399,32 +487,22 @@ STRINGS: dict[str, dict[str, str]] = {
     "settings.maint_conflict_no_folder": {"it": "Cartella NASBox non configurata.", "en": "NASBox folder not set up."},
     "settings.maint_scan_btn": {"it": "Cerca conflitti", "en": "Scan for conflicts"},
     "settings.maint_scan_tooltip": {"it": "Cerca nella cartella NASBox tutti i file con \"(conflitto da ...)\" nel nome.", "en": "Scans the NASBox folder for all files with \"(conflitto da ...)\" in their name."},
-    "settings.maint_delete_btn": {"it": "Elimina i conflitti trovati", "en": "Delete found conflicts"},
+    "settings.maint_review_btn": {"it": "Rivedi i conflitti…", "en": "Review conflicts…"},
     "settings.maint_delete_tooltip": {
-        "it": "Elimina definitivamente i file trovati dalla scansione. Verifica prima di procedere: l'operazione non è reversibile.",
-        "en": "Permanently deletes the files found by the scan. Verify before proceeding: this cannot be undone.",
+        "it": "Mostra tutti i conflitti e consente di spostare quelli selezionati nello storico locale.",
+        "en": "Shows every conflict and lets you move selected files into local history.",
     },
-    "settings.maint_delete_confirm_title": {"it": "⚠️ Eliminare i file di conflitto?", "en": "⚠️ Delete conflict files?"},
-    "settings.maint_delete_confirm_body": {
-        "it": "Stai per eliminare definitivamente {count} file di conflitto dalla cartella NASBox.\n\n"
-              "Prima di procedere, assicurati di aver controllato il contenuto di ogni file: "
-              "potrebbero esserci modifiche che vuoi conservare. Una volta eliminati, non potranno "
-              "essere recuperati (non passano dal cestino).\n\n"
-              "In futuro, i conflitti verranno gestiti automaticamente con retention configurabile; "
-              "per ora vanno rimossi a mano.\n\n"
-              "Procedere con l'eliminazione definitiva?",
-        "en": "You are about to permanently delete {count} conflict files from the NASBox folder.\n\n"
-              "Before proceeding, make sure you have checked the contents of each file: "
-              "they may contain changes you want to keep. Once deleted, they cannot be "
-              "recovered (they don't go through the trash).\n\n"
-              "In the future, conflicts will be handled automatically with configurable retention; "
-              "for now they must be removed by hand.\n\n"
-              "Proceed with permanent deletion?",
+    "settings.maint_review_title": {"it": "Rivedi i file di conflitto", "en": "Review conflict files"},
+    "settings.maint_review_note": {
+        "it": "Seleziona i file da rimuovere dalla cartella NASBox. Verranno spostati nello storico locale di questo PC e resteranno ripristinabili secondo la retention locale.",
+        "en": "Select files to remove from the NASBox folder. They will be moved into this PC's local history and remain restorable under local retention.",
     },
-    "settings.maint_delete_done_title": {"it": "Conflitti eliminati", "en": "Conflicts deleted"},
-    "settings.maint_delete_done_body": {"it": "Eliminati {count} file di conflitto.", "en": "Deleted {count} conflict files."},
-    "settings.maint_delete_partial_title": {"it": "Eliminazione parziale", "en": "Partial deletion"},
-    "settings.maint_delete_partial_body": {"it": "Eliminati {deleted} file, {failed} non eliminabili:\n{names}", "en": "Deleted {deleted} files, {failed} could not be deleted:\n{names}"},
+    "settings.maint_open_folder_btn": {"it": "Apri cartella", "en": "Open folder"},
+    "settings.maint_move_selected_btn": {"it": "Sposta selezionati nello storico", "en": "Move selected to history"},
+    "settings.maint_delete_done_title": {"it": "Conflitti spostati", "en": "Conflicts moved"},
+    "settings.maint_delete_done_body": {"it": "Spostati {count} file di conflitto nello storico locale.", "en": "Moved {count} conflict files into local history."},
+    "settings.maint_delete_partial_title": {"it": "Spostamento parziale", "en": "Partial move"},
+    "settings.maint_delete_partial_body": {"it": "Spostati {moved} file, {failed} non spostabili:\n{names}", "en": "Moved {moved} files, {failed} could not be moved:\n{names}"},
 
     # --- transfers_tab.py ---
     "transfers.speed_title": {"it": "Velocità", "en": "Speed"},
@@ -521,6 +599,37 @@ STRINGS: dict[str, dict[str, str]] = {
     "log.col_action": {"it": "Azione", "en": "Action"},
     "log.col_path": {"it": "Percorso", "en": "Path"},
     "log.col_detail": {"it": "Dettaglio", "en": "Detail"},
+    "log.filter_item": {"it": "{category}: {action}", "en": "{category}: {action}"},
+    "log.category.transfer": {"it": "Sincronizzazione", "en": "Sync"},
+    "log.category.browse": {"it": "Sfoglia NAS", "en": "Browse NAS"},
+    "log.category.history": {"it": "Storico", "en": "History"},
+    "log.category.safety": {"it": "Sicurezza", "en": "Safety"},
+    "log.category.system": {"it": "Sistema", "en": "System"},
+    "log.raw_action_tooltip": {"it": "Codice azione: {action}", "en": "Action code: {action}"},
+    "log.open_containing_folder": {"it": "Apri cartella contenente", "en": "Open containing folder"},
+    "log.action.upload": {"it": "Caricato sul NAS", "en": "Uploaded to NAS"},
+    "log.action.download": {"it": "Scaricato dal NAS", "en": "Downloaded from NAS"},
+    "log.action.delete_local": {"it": "Eliminato in locale", "en": "Deleted locally"},
+    "log.action.delete_remote": {"it": "Eliminato sul NAS", "en": "Deleted on NAS"},
+    "log.action.browse_download": {"it": "Scaricato da Sfoglia NAS", "en": "Downloaded from Browse NAS"},
+    "log.action.browse_rename": {"it": "Rinominato da Sfoglia NAS", "en": "Renamed in Browse NAS"},
+    "log.action.browse_delete": {"it": "Eliminato da Sfoglia NAS", "en": "Deleted in Browse NAS"},
+    "log.action.restore_remote_version": {"it": "Versione NAS ripristinata", "en": "NAS version restored"},
+    "log.action.prune_local_trash": {"it": "Storico locale ripulito", "en": "Local history cleaned"},
+    "log.action.prune_remote_trigger": {"it": "Pulizia storico NAS richiesta", "en": "NAS history cleanup requested"},
+    "log.action.conflict": {"it": "Conflitto conservato", "en": "Conflict preserved"},
+    "log.action.stale_delete": {"it": "Eliminazione obsoleta ignorata", "en": "Stale deletion ignored"},
+    "log.action.safety_block": {"it": "Blocco di sicurezza", "en": "Safety block"},
+    "log.action.journal_block": {"it": "Blocco del journal", "en": "Journal block"},
+    "log.action.journal_error": {"it": "Errore del journal", "en": "Journal error"},
+    "log.action.unsupported": {"it": "Elemento non supportato", "en": "Unsupported item"},
+    "log.action.pull_deferred": {"it": "Scaricamento rimandato", "en": "Download deferred"},
+    "log.action.cancelled": {"it": "Trasferimento annullato", "en": "Transfer cancelled"},
+    "log.action.server_down": {"it": "Server NAS non attivo", "en": "NAS server stopped"},
+    "log.action.server_restarted": {"it": "Server NAS riavviato", "en": "NAS server restarted"},
+    "log.action.server_outdated": {"it": "Server NAS da aggiornare", "en": "NAS server outdated"},
+    "log.action.server_update_available": {"it": "Aggiornamento server disponibile", "en": "Server update available"},
+    "log.action.error": {"it": "Errore", "en": "Error"},
 
     # --- history_tab.py ---
     "history.retention_title": {"it": "Quanto storico conservare", "en": "How much history to keep"},
@@ -535,30 +644,14 @@ STRINGS: dict[str, dict[str, str]] = {
     "history.local_trash_tooltip": {"it": "0 = non eliminare mai automaticamente le versioni storiche locali.", "en": "0 = never automatically delete local historical versions."},
     "history.save_local_btn": {"it": "Salva locale", "en": "Save locally"},
     "history.save_local_tooltip": {"it": "Salva il valore di retention locale.", "en": "Saves the local retention value."},
-    "history.note": {
-        "it": "Non sono la stessa cosa: lo storico sul NAS conserva le versioni sovrascritte quando "
-              "TU carichi una modifica (protegge gli altri PC dalle tue modifiche). Il cestino "
-              "locale conserva invece la TUA versione se uno scaricamento da un altro PC stava per "
-              "sovrascriverla mentre non era ancora stata caricata (protegge te da un conflitto). "
-              "La retention sul NAS è di competenza del pacchetto server (sync-daemon-server), che "
-              "continua a fare pulizia anche a client spenti; per aggiornarla qui usa 'Rileva dal NAS' "
-              "nel tab Impostazioni -- non è un valore che si imposta in questo client.",
-        "en": "These are not the same thing: history on the NAS keeps versions overwritten when "
-              "YOU upload a change (protects other PCs from your changes). Local trash instead "
-              "keeps YOUR version if a download from another PC was about to overwrite it while "
-              "it hadn't been uploaded yet (protects you from a conflict). Retention on the NAS "
-              "is handled by the server package (sync-daemon-server), which keeps cleaning up even "
-              "while clients are off; to refresh it here use 'Detect from NAS' in the Impostazioni "
-              "tab -- it's not a value you set in this client.",
-    },
+    "history.source_local_description": {"it": "Fonte: questo PC. Versioni locali protette prima di una sovrascrittura o rimosse dalla manutenzione conflitti.", "en": "Source: this PC. Local versions protected before overwrite or removed by conflict maintenance."},
+    "history.source_remote_description": {"it": "Fonte: NAS. Versioni conservate dal server quando un file sul NAS viene sostituito o eliminato.", "en": "Source: NAS. Versions kept by the server when a NAS file is replaced or deleted."},
     "history.prune_local_btn": {"it": "Pulisci storico locale ora", "en": "Clean local history now"},
     "history.prune_local_tooltip": {"it": "Rimuove subito le versioni locali più vecchie della retention impostata.", "en": "Immediately removes local versions older than the retention set above."},
     "history.prune_remote_btn": {"it": "Chiedi al NAS di pulire ora", "en": "Ask the NAS to clean now"},
     "history.prune_remote_tooltip": {
-        "it": "Chiede al demone sul NAS di eseguire subito un pass di pulizia sul SUO storico. "
-              "Non tocca l'elenco qui sotto, che mostra solo il cestino locale su questo PC.",
-        "en": "Asks the daemon on the NAS to run a cleanup pass on ITS OWN history right now. "
-              "Doesn't touch the list below, which only shows the local trash on this PC.",
+        "it": "Chiede al demone sul NAS di pulire subito lo storico remoto secondo la retention configurata sul NAS.",
+        "en": "Asks the NAS daemon to clean remote history now using the retention configured on the NAS.",
     },
     "history.prune_remote_running": {"it": "Pulizia in corso…", "en": "Cleaning…"},
     "history.search_label": {"it": "Cerca:", "en": "Search:"},
@@ -566,6 +659,8 @@ STRINGS: dict[str, dict[str, str]] = {
     "history.scope_label": {"it": "Mostra:", "en": "Show:"},
     "history.scope_local": {"it": "Cestino di questo PC", "en": "This PC's trash"},
     "history.scope_remote": {"it": "Storico sul NAS", "en": "History on NAS"},
+    "history.refresh_btn": {"it": "Aggiorna", "en": "Refresh"},
+    "history.refresh_tooltip": {"it": "Ricarica lo storico dalla fonte selezionata.", "en": "Reloads history from the selected source."},
     "history.list_scope_local": {
         "it": "Elenco mostrato: cestino locale di questo PC. Lo storico sul NAS non viene elencato qui.",
         "en": "Showing: this PC's local trash. History stored on the NAS is not listed here.",
@@ -578,6 +673,7 @@ STRINGS: dict[str, dict[str, str]] = {
     "history.list_scope_remote_offline": {"it": "Storico NAS non disponibile: NAS non raggiungibile.", "en": "NAS history unavailable: NAS is unreachable."},
     "history.list_scope_remote_failed": {"it": "Impossibile leggere lo storico NAS: {detail}", "en": "Couldn't read NAS history: {detail}"},
     "history.remote_restore_picker_title": {"it": "Scegli dove salvare la versione dal NAS", "en": "Choose where to save the NAS version"},
+    "history.remote_restore_many_picker_title": {"it": "Scegli la cartella in cui salvare le versioni dal NAS", "en": "Choose where to save the NAS versions"},
     "history.remote_restore_done_body": {"it": "Versione dal NAS ripristinata in '{path}'.", "en": "NAS version restored to '{path}'."},
     "history.remote_restore_one_title": {"it": "Scegli un file", "en": "Choose one file"},
     "history.remote_restore_one_body": {"it": "Dallo storico NAS puoi ripristinare un file alla volta, scegliendone la destinazione.", "en": "From NAS history you can restore one file at a time to a chosen destination."},
@@ -593,6 +689,7 @@ STRINGS: dict[str, dict[str, str]] = {
     "history.root_group_label": {"it": "(cartella radice)", "en": "(root folder)"},
     "history.group_label": {"it": "{name}  ({count} file)", "en": "{name}  ({count} files)"},
     "history.remote_retention_unknown": {"it": "non ancora rilevata", "en": "not detected yet"},
+    "history.remote_retention_never": {"it": "mai eliminare automaticamente", "en": "never auto-delete"},
     "history.remote_retention_value": {"it": "{days} giorni", "en": "{days} days"},
     "history.saved_title": {"it": "Salvato", "en": "Saved"},
     "history.saved_body": {"it": "Retention locale salvata.", "en": "Local retention saved."},
@@ -609,14 +706,13 @@ STRINGS: dict[str, dict[str, str]] = {
               "setting. To delete specific files regardless of age, select them in the list and use "
               "'Delete permanently'.",
     },
+    "history.prune_local_disabled_body": {"it": "La retention locale è 0: la pulizia automatica è disattivata e nessuna versione è stata rimossa.", "en": "Local retention is 0: automatic cleanup is disabled and no versions were removed."},
     "history.nas_unreachable_title": {"it": "NAS non raggiungibile", "en": "NAS unreachable"},
     "history.nas_unreachable_body": {"it": "Impossibile contattare il NAS in questo momento.", "en": "Couldn't reach the NAS right now."},
     "history.prune_remote_title": {"it": "Pulizia remota", "en": "Remote cleanup"},
     "history.prune_remote_body": {
-        "it": "Il NAS ha eseguito la pulizia del SUO storico. L'elenco qui sotto è quello locale su questo "
-              "PC e non cambia: se non è cambiato nulla è normale, non è un errore.",
-        "en": "The NAS ran a cleanup of ITS OWN history. The list below is the local one on this PC and "
-              "doesn't change: if nothing looks different here, that's expected, not a bug.",
+        "it": "Il NAS ha eseguito la pulizia del proprio storico secondo la retention remota.",
+        "en": "The NAS cleaned its history according to remote retention.",
     },
     "history.prune_remote_failed_title": {"it": "Pulizia remota non riuscita", "en": "Remote cleanup failed"},
     "history.not_configured_title": {"it": "Cartella NASBox non configurata", "en": "NASBox folder not set up"},
@@ -776,6 +872,9 @@ STRINGS: dict[str, dict[str, str]] = {
     "browse.up_btn": {"it": "↑ Su", "en": "↑ Up"},
     "browse.refresh_btn": {"it": "Aggiorna", "en": "Refresh"},
     "browse.path_label": {"it": "Percorso: {path}", "en": "Path: {path}"},
+    "browse.search_label": {"it": "Cerca:", "en": "Search:"},
+    "browse.search_placeholder": {"it": "nome nella cartella corrente…", "en": "name in current folder…"},
+    "browse.filtered_count": {"it": "{shown} di {total} elementi", "en": "{shown} of {total} items"},
     "browse.col_name": {"it": "Nome", "en": "Name"},
     "browse.col_size": {"it": "Dimensione", "en": "Size"},
     "browse.col_modified": {"it": "Modificato", "en": "Modified"},
@@ -805,11 +904,13 @@ STRINGS: dict[str, dict[str, str]] = {
         "en": "Moves into the NAS trash (same retention as sync), never a direct deletion.",
     },
     "browse.confirm_delete_title": {"it": "Confermi l'eliminazione?", "en": "Confirm deletion?"},
+    "browse.retention_never": {"it": "senza eliminazione automatica", "en": "with no automatic deletion"},
+    "browse.retention_days": {"it": "per {days} giorni", "en": "for {days} days"},
     "browse.confirm_delete_body": {
-        "it": "{names}\n\nVerrà spostato nel cestino del NAS, recuperabile dal tab Storico per "
-              "{days} giorni. Procedere?",
+        "it": "{names}\n\nVerrà spostato nel cestino del NAS, recuperabile dal tab Storico "
+              "{retention}. Procedere?",
         "en": "{names}\n\nThis will move into the NAS trash, recoverable from the History tab "
-              "for {days} days. Proceed?",
+              "{retention}. Proceed?",
     },
     "browse.deleting": {"it": "Eliminazione in corso…", "en": "Deleting…"},
     "browse.delete_failed_title": {"it": "Eliminazione fallita", "en": "Deletion failed"},

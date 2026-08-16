@@ -134,6 +134,22 @@ def restore_version(version: TrashVersion, destination_root: str) -> bool:
     return True
 
 
+def move_to_local_trash(source: Path, local_root: str) -> bool:
+    """Move a file from the synced tree into restorable local history."""
+    root = Path(local_root)
+    try:
+        relative = source.relative_to(root)
+    except ValueError:
+        return False
+    destination = paths.local_trash_dir() / relative.parent / f"{relative.name}-{rsync_ops.new_run_ts()}"
+    try:
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(source), destination)
+    except (OSError, shutil.Error):
+        return False
+    return True
+
+
 def delete_version(version: TrashVersion) -> bool:
     """Permanently removes one historical version from local trash, regardless
     of its age. This is deliberately separate from prune_local(): that one

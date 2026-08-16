@@ -23,7 +23,7 @@ from ..i18n import t
 from ..watcher import WatcherHandle
 from .async_utils import run_in_background
 from . import icons
-from .dialogs import FolderSetupDialog
+from .dialogs import FirstRunSetupWizard, FolderSetupDialog
 from ..repository_safety import RepositorySafetyError, initialize_local_root
 from .browse_tab import BrowseTab
 from .history_tab import HistoryTab
@@ -40,7 +40,7 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(f"{APP_NAME} {APP_VERSION}")
         self.setWindowIcon(icons.app_icon())
         self.resize(1280, 760)
-        self.setMinimumSize(1000, 620)
+        self.setMinimumSize(720, 520)
         self._is_shutting_down = False
         self._shutdown_thread: threading.Thread | None = None
         self._shutdown_dialog: QProgressDialog | None = None
@@ -109,7 +109,10 @@ class MainWindow(QMainWindow):
         tabs = QTabWidget()
         tabs.setObjectName("mainTabs")
         tabs.setDocumentMode(True)
-        self.status_tab = StatusTab(self.cfg, self.engine, self.scan_worker)
+        self.tabs = tabs
+        self.status_tab = StatusTab(
+            self.cfg, self.engine, self.scan_worker, logger=self.logger,
+        )
         self.settings_tab = SettingsTab(self.cfg, self.engine)
         self.transfers_tab = TransfersTab()
         self.log_tab = LogTab(self.logger)
@@ -132,6 +135,7 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(shell)
 
         self.engine.status_changed.connect(self.status_tab.on_status_changed)
+        self.status_tab.attention_action_requested.connect(self._open_status_action)
         self.engine.connection_changed.connect(self.scan_worker.set_connection)
         self.engine.connection_changed.connect(self.push_worker.set_connection)
         self.engine.connection_changed.connect(self.pull_worker.set_connection)
@@ -142,20 +146,29 @@ class MainWindow(QMainWindow):
 
         for worker in (self.push_worker, self.pull_worker):
             worker.transfer_preparing.connect(self.transfers_tab.on_transfer_preparing)
+            worker.transfer_preparing.connect(self.status_tab.on_transfer_preparing)
             worker.transfer_waiting_for_lock.connect(self.transfers_tab.on_transfer_waiting_for_lock)
+            worker.transfer_waiting_for_lock.connect(self.status_tab.on_transfer_waiting_for_lock)
             worker.transfer_lock_unavailable.connect(self.transfers_tab.on_transfer_lock_unavailable)
+            worker.transfer_lock_unavailable.connect(self.status_tab.on_transfer_lock_unavailable)
             worker.transfer_started.connect(self.transfers_tab.on_transfer_started)
+            worker.transfer_started.connect(self.status_tab.on_transfer_started)
             worker.transfer_item_started.connect(self.transfers_tab.on_item_started)
+            worker.transfer_item_started.connect(self.status_tab.on_transfer_item_started)
             worker.transfer_item_progress.connect(self.transfers_tab.on_item_progress)
             worker.transfer_item_done.connect(self.transfers_tab.on_item_done)
+            worker.transfer_item_done.connect(self.status_tab.on_transfer_item_done)
             worker.transfer_speed.connect(self.transfers_tab.on_speed_update)
             worker.transfer_finished.connect(self.transfers_tab.on_transfer_finished)
+            worker.transfer_finished.connect(self.status_tab.on_transfer_finished)
             worker.log_event.connect(self.log_tab.on_log_event)
+            worker.log_event.connect(self.status_tab.on_log_event)
         self.push_worker.hash_progress.connect(self.status_tab.on_hash_progress)
         self.push_worker.hash_progress.connect(self.transfers_tab.on_preflight_progress)
         self.push_worker.batch_size_known.connect(self.transfers_tab.on_batch_size_known)
         self.push_worker.queue_items_known.connect(self.transfers_tab.on_queue_items_known)
         self.engine.log_event.connect(self.log_tab.on_log_event)
+        self.engine.log_event.connect(self.status_tab.on_log_event)
 
         self.tray = TrayIcon(self.cfg, self.engine, self.logger, self)
         for direction, worker in (("upload", self.push_worker), ("download", self.pull_worker)):
@@ -179,21 +192,34 @@ class MainWindow(QMainWindow):
         self.push_worker.start()
         self.pull_worker.start()
 
+    def _open_status_action(self, action: str) -> None:
+        destination = {
+            "settings": self.settings_tab,
+            "log": self.log_tab,
+            "history": self.history_tab,
+            "transfers": self.transfers_tab,
+        }.get(action)
+        if destination is not None:
+            self.tabs.setCurrentWidget(destination)
+
     def _run_first_time_setup(self) -> None:
-        """First launch, no NASBox folder chosen yet: ask for it right away instead
-        of starting the engine with nothing to sync -- there is no "add a folder
-        later" step anymore, this is the only place that ever runs."""
-        dlg = FolderSetupDialog(self)
-        if dlg.exec():
-            chosen = dlg.chosen_path()
-            try:
-                initialize_local_root(chosen, str(self.cfg.get("repository_id") or ""))
-            except RepositorySafetyError as exc:
-                self.logger.log("ERROR", "-", detail=f"verifica cartella locale fallita: {exc}")
-                return
-            self.cfg.set_local_root(chosen)
-        # If the user cancels, local_root stays "" -- the app still starts (Stato
-        # tab shows "non configurata" and offers "Cambia percorso…" to try again).
+        """Collect the complete PC-side setup before starting any workers."""
+        wizard = FirstRunSetupWizard(self.cfg, self)
+        if not wizard.exec():
+            return
+        values = wizard.setup_values()
+        chosen = Path(values.pop("local_root")).expanduser().resolve()
+        try:
+            chosen.mkdir(parents=True, exist_ok=True)
+            initialize_local_root(str(chosen), str(values.get("repository_id") or ""))
+        except (OSError, RepositorySafetyError) as exc:
+            self.logger.log("ERROR", "-", detail=f"verifica cartella locale fallita: {exc}")
+            QMessageBox.warning(self, t("setup.local_failed_title"), str(exc))
+            return
+        for key, value in values.items():
+            self.cfg.set(key, value, persist=False)
+        self.cfg.set("local_root", str(chosen), persist=False)
+        self.cfg.save()
 
     def _on_server_outdated(self, message: str) -> None:
         self.tray.showMessage(

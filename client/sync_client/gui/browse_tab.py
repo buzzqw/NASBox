@@ -20,7 +20,8 @@ from pathlib import Path
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QAbstractItemView, QFileDialog, QHBoxLayout, QHeaderView, QInputDialog, QLabel,
-    QMessageBox, QPushButton, QStyle, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
+    QLineEdit, QMenu, QMessageBox, QPushButton, QStyle, QTreeWidget, QTreeWidgetItem,
+    QVBoxLayout, QWidget,
 )
 
 from .. import rsync_ops
@@ -58,13 +59,22 @@ class BrowseTab(QWidget):
         self.up_btn = QPushButton(t("browse.up_btn"))
         self.up_btn.clicked.connect(self._go_up)
         path_row.addWidget(self.up_btn)
-        self.path_label = QLabel()
-        self.path_label.setObjectName("browsePath")
-        path_row.addWidget(self.path_label, 1)
+        self.breadcrumb_layout = QHBoxLayout()
+        self.breadcrumb_layout.setContentsMargins(0, 0, 0, 0)
+        path_row.addLayout(self.breadcrumb_layout, 1)
         refresh_btn = QPushButton(t("browse.refresh_btn"))
         refresh_btn.clicked.connect(self.refresh)
         path_row.addWidget(refresh_btn)
         root.addLayout(path_row)
+
+        search_row = QHBoxLayout()
+        search_row.addWidget(QLabel(t("browse.search_label")))
+        self.search_edit = QLineEdit()
+        self.search_edit.setPlaceholderText(t("browse.search_placeholder"))
+        self.search_edit.setClearButtonEnabled(True)
+        self.search_edit.textChanged.connect(self._populate)
+        search_row.addWidget(self.search_edit, 1)
+        root.addLayout(search_row)
 
         cols = [t("browse.col_name"), t("browse.col_size"), t("browse.col_modified")]
         self.tree = QTreeWidget()
@@ -73,6 +83,8 @@ class BrowseTab(QWidget):
         self.tree.header().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self.tree.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.tree.itemDoubleClicked.connect(lambda item, _col: self._open_item(item))
+        self.tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.tree.customContextMenuRequested.connect(self._show_context_menu)
         root.addWidget(self.tree, 1)
 
         buttons_row = QHBoxLayout()
@@ -105,14 +117,39 @@ class BrowseTab(QWidget):
     def _go_up(self) -> None:
         if not self._path:
             return
-        self._path = os.path.dirname(self._path)
+        self._navigate(os.path.dirname(self._path))
+
+    def _navigate(self, path: str) -> None:
+        if self._busy or path == self._path:
+            return
+        self._path = path
+        self.tree.clearSelection()
         self.refresh()
+
+    def _update_breadcrumbs(self) -> None:
+        while self.breadcrumb_layout.count():
+            item = self.breadcrumb_layout.takeAt(0)
+            if item.widget() is not None:
+                item.widget().deleteLater()
+        parts = [part for part in self._path.split("/") if part]
+        targets = [""] + ["/".join(parts[:index]) for index in range(1, len(parts) + 1)]
+        labels = ["/"] + parts
+        self._breadcrumb_buttons = []
+        for label, target in zip(labels, targets):
+            button = QPushButton(label)
+            button.setFlat(True)
+            button.setEnabled(not self._busy and target != self._path)
+            button.clicked.connect(lambda _checked=False, value=target: self._navigate(value))
+            self.breadcrumb_layout.addWidget(button)
+            self._breadcrumb_buttons.append(button)
+            if target != targets[-1]:
+                self.breadcrumb_layout.addWidget(QLabel("/"))
+        self.breadcrumb_layout.addStretch(1)
 
     def _open_item(self, item: QTreeWidgetItem) -> None:
         entry: rsync_ops.BrowseEntry = item.data(0, ENTRY_ROLE)
         if entry.kind == "DIR":
-            self._path = f"{self._path}/{entry.name}" if self._path else entry.name
-            self.refresh()
+            self._navigate(f"{self._path}/{entry.name}" if self._path else entry.name)
         elif entry.kind == "FILE":
             self._download_one(entry)
 
@@ -120,7 +157,7 @@ class BrowseTab(QWidget):
         if self._busy:
             return
         conn = self.engine.connection
-        self.path_label.setText(t("browse.path_label", path=self._path or "/"))
+        self._update_breadcrumbs()
         self.up_btn.setEnabled(bool(self._path))
         if conn is None:
             self.status_label.setText(t("browse.nas_unreachable"))
@@ -146,16 +183,26 @@ class BrowseTab(QWidget):
         self._populate()
 
     def _populate(self) -> None:
+        selected_names = {
+            entry.name for entry in self._selected_entries() if entry is not None
+        }
         self.tree.clear()
         style = self.style()
         dir_icon = style.standardIcon(QStyle.StandardPixmap.SP_DirIcon)
         file_icon = style.standardIcon(QStyle.StandardPixmap.SP_FileIcon)
-        for entry in sorted(self._entries, key=lambda e: (e.kind != "DIR", e.name.lower())):
+        needle = self.search_edit.text().strip().lower()
+        entries = [entry for entry in self._entries if not needle or needle in entry.name.lower()]
+        for entry in sorted(entries, key=lambda e: (e.kind != "DIR", e.name.lower())):
             size_text = "" if entry.kind == "DIR" else human_size(entry.size)
             item = QTreeWidgetItem([entry.name, size_text, self._format_mtime(entry.mtime)])
             item.setIcon(0, dir_icon if entry.kind == "DIR" else file_icon)
             item.setData(0, ENTRY_ROLE, entry)
             self.tree.addTopLevelItem(item)
+            item.setSelected(entry.name in selected_names)
+        if needle:
+            self.status_label.setText(t("browse.filtered_count", shown=len(entries), total=len(self._entries)))
+        else:
+            self.status_label.setText(t("browse.entry_count", count=len(self._entries)))
 
     @staticmethod
     def _format_mtime(epoch_seconds: int) -> str:
@@ -173,9 +220,29 @@ class BrowseTab(QWidget):
             widget.setEnabled(not self._busy)
         if message is not None:
             self.status_label.setText(message)
+        self._update_breadcrumbs()
 
     def _selected_entries(self) -> list[rsync_ops.BrowseEntry]:
         return [item.data(0, ENTRY_ROLE) for item in self.tree.selectedItems()]
+
+    def _show_context_menu(self, position) -> None:
+        item = self.tree.itemAt(position)
+        if item is not None and not item.isSelected():
+            self.tree.clearSelection()
+            item.setSelected(True)
+        entries = self._selected_entries()
+        if not entries:
+            return
+        menu = QMenu(self)
+        download = menu.addAction(t("browse.download_btn"))
+        download.setEnabled(any(entry.kind == "FILE" for entry in entries))
+        download.triggered.connect(self._download_selected)
+        rename = menu.addAction(t("browse.rename_btn"))
+        rename.setEnabled(len(entries) == 1)
+        rename.triggered.connect(self._rename_selected)
+        delete = menu.addAction(t("browse.delete_btn"))
+        delete.triggered.connect(self._delete_selected)
+        menu.exec(self.tree.viewport().mapToGlobal(position))
 
     # --- download (read-only, no restrictions) ---
 
@@ -296,11 +363,12 @@ class BrowseTab(QWidget):
         if conn is None:
             QMessageBox.warning(self, t("browse.nas_unreachable_title"), t("browse.nas_unreachable"))
             return
-        retention = self.cfg.get("retention_days_remote") or 30
+        retention = self.cfg.get("retention_days_remote")
+        retention_text = _retention_description(retention)
         names = ", ".join(e.name for e in entries)
         if QMessageBox.question(
             self, t("browse.confirm_delete_title"),
-            t("browse.confirm_delete_body", names=names, days=retention),
+            t("browse.confirm_delete_body", names=names, retention=retention_text),
         ) != QMessageBox.StandardButton.Yes:
             return
         device_id = self.sync_state.device_id()
@@ -328,3 +396,9 @@ class BrowseTab(QWidget):
         self.refresh()
         if failed:
             QMessageBox.warning(self, t("browse.delete_failed_title"), t("browse.delete_partial_body", names=", ".join(failed)))
+
+
+def _retention_description(value) -> str:
+    if str(value) == "0":
+        return t("browse.retention_never")
+    return t("browse.retention_days", days=30 if value is None or value == "" else value)

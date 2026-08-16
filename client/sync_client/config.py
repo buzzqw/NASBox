@@ -32,6 +32,7 @@ DEFAULTS: dict[str, Any] = {
     "debounce_seconds": 2,     # seconds of local quiet before pushing a change
     "notify_sync_completion": False,  # show a tray notification after completed file transfers
     "animate_sync_icon": False,  # animate the tray icon while files are transferred
+    "tray_single_click": "menu",  # "menu" (compatibility default) or "window"
     "delete_enabled": False,
     "max_delete_files": 1000,       # safety stop for unexpectedly large delete batches
     "bandwidth_upload_kbps": 0,    # 0 = unlimited -- applies to push (this client -> NAS)

@@ -7,6 +7,25 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 - Sostituita la licenza proprietaria con la European Union Public Licence
   versione 1.2 (EUPL-1.2).
 
+## 1.11.0 - 2026-08-16
+
+- Aggiunto il wizard grafico completo sul PC per cartella locale, collegamento
+  SSH e rilevamento del server su NAS amministrati anche solo da shell.
+- La home distingue connessione, coda e trasferimenti, mostra l'ultima
+  sincronizzazione e raccoglie i problemi con azioni correttive.
+- Unificato il salvataggio delle impostazioni e reso il layout utilizzabile su
+  finestre e schermi piu piccoli.
+- La pulizia dei conflitti permette di rivedere e selezionare i file e li sposta
+  nello storico locale recuperabile invece di eliminarli direttamente.
+- Semplificato lo Storico, aggiunti aggiornamento esplicito e distinzione piu
+  chiara tra versioni locali e NAS.
+- Resi leggibili e completi i filtri del Log; aggiunti ricerca, breadcrumb e
+  menu contestuale a Sfoglia NAS.
+- Corretto il significato della retention remota `0`: le versioni non vengono
+  eliminate automaticamente.
+- Aggiunti workflow GitHub per AppImage, pacchetto Debian e bundle di
+  aggiornamento client riproducibile.
+
 ## 1.10.35 - 2026-08-09
 
 - Ignorate dalla coda le cancellazioni locali di percorsi già inesistenti.

@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=NASBox
+Comment=Synchronize files with a NAS over SSH and rsync
+Exec=nasbox
+Icon=nasbox
+Terminal=false
+Categories=Utility;Network;

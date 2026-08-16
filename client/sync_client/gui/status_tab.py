@@ -4,11 +4,11 @@ import os
 import sys
 import time
 
-from PyQt6.QtCore import Qt, QTimer, QUrl
+from PyQt6.QtCore import Qt, QTimer, QUrl, pyqtSignal
 from PyQt6.QtGui import QDesktopServices
 from PyQt6.QtWidgets import (
     QGroupBox, QHBoxLayout, QLabel, QMessageBox, QPushButton, QSizePolicy,
-    QVBoxLayout, QWidget,
+    QScrollArea, QVBoxLayout, QWidget,
 )
 
 from ..config import Config
@@ -26,6 +26,10 @@ from .format_utils import human_size
 
 UPDATE_CHECK_INITIAL_DELAY_MS = 10_000
 UPDATE_CHECK_INTERVAL_MS = 60 * 60 * 1000
+RECENT_PROBLEM_SECONDS = 24 * 60 * 60
+RECENT_EVENT_SCAN_LIMIT = 20_000
+LOW_NAS_SPACE_BYTES = 5 * 1024 * 1024 * 1024
+PROBLEM_ACTIONS = {"ERROR", "SAFETY_BLOCK", "JOURNAL_BLOCK"}
 
 
 class StatusTab(QWidget):
@@ -34,7 +38,12 @@ class StatusTab(QWidget):
     (NAS connection, bandwidth, retention...) lives in the Impostazioni tab
     instead -- keeping this one uncluttered is the whole point of it."""
 
-    def __init__(self, cfg: Config, engine: SyncEngine, scan_worker: ScanWorker, parent=None) -> None:
+    attention_action_requested = pyqtSignal(str)
+
+    def __init__(
+        self, cfg: Config, engine: SyncEngine, scan_worker: ScanWorker,
+        parent=None, logger=None,
+    ) -> None:
         super().__init__(parent)
         self.cfg = cfg
         self.engine = engine
@@ -42,8 +51,33 @@ class StatusTab(QWidget):
         self._update_check_busy = False
         self._update_auto_checked = False
         self._update_candidate = None
+        self._status_known = False
+        self._connected = False
+        self._connected_observations = 0
+        self._diagnostics_auto_loaded = False
+        self._diagnostics_busy = False
+        self._diagnostics_available = False
+        self._nas_available_bytes: int | None = None
+        self._queue_items = None
+        self._transfer_phases: dict[str, str] = {}
+        self._current_paths: dict[str, str] = {}
+        self._last_success: tuple[float, str] | None = None
+        self._last_problem: tuple[float, str, str] | None = None
+        self._recent_problem_events: dict[str, tuple[float, str]] = {}
+        self.attention_problems: list[tuple[str, str, str]] = []
 
-        root = QVBoxLayout(self)
+        if logger is not None:
+            self._load_recent_events(logger.tail(limit=RECENT_EVENT_SCAN_LIMIT))
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        content = QWidget()
+        scroll.setWidget(content)
+        outer.addWidget(scroll)
+        root = QVBoxLayout(content)
         root.setContentsMargins(4, 8, 4, 4)
         root.setSpacing(14)
 
@@ -56,9 +90,18 @@ class StatusTab(QWidget):
         self.status_label.setWordWrap(True)
         self.status_label.setProperty("state", "starting")
         status_layout.addWidget(self.status_label)
+        self.sync_state_label = QLabel(t("status.sync_state_starting"))
+        self.sync_state_label.setWordWrap(True)
+        status_layout.addWidget(self.sync_state_label)
         self.queue_label = QLabel(t("status.queue_unknown"))
         self.queue_label.setObjectName("statusQueue")
         status_layout.addWidget(self.queue_label)
+        self.last_sync_label = QLabel(self._last_sync_text())
+        self.last_sync_label.setWordWrap(True)
+        status_layout.addWidget(self.last_sync_label)
+        self.last_problem_label = QLabel(self._last_problem_text())
+        self.last_problem_label.setWordWrap(True)
+        status_layout.addWidget(self.last_problem_label)
         # Keep the update status on the same row as the version: showing a
         # separate label here changes the card height while the check runs.
         version_row = QHBoxLayout()
@@ -122,6 +165,14 @@ class StatusTab(QWidget):
         self.sync_feedback_label.hide()
         status_layout.addWidget(self.sync_feedback_label)
         root.addWidget(status_box)
+
+        # Hidden when healthy: day-to-day users only see this card when there is
+        # a concrete problem and every row points at the existing place to fix it.
+        self.attention_box = QGroupBox(t("status.attention_title"))
+        self.attention_box.setObjectName("attentionCard")
+        self.attention_layout = QVBoxLayout(self.attention_box)
+        root.addWidget(self.attention_box)
+        self._refresh_attention()
 
         # --- the NASBox folder ---
         folder_box = QGroupBox(t("status.folder_group_title"))
@@ -229,10 +280,22 @@ class StatusTab(QWidget):
         via_jump = status.get("via_jump", False)
         connected = status.get("connected", False)
         configured = status.get("configured", True)
+        connection_configured = bool(
+            configured and (self.cfg.get("nas_lan") or self.cfg.get("nas_wan"))
+            and self.cfg.get("nas_user")
+        )
+
+        was_connected = self._connected
+        self._status_known = True
+        self._connected = bool(connected and connection_configured)
+        if self._connected:
+            self._connected_observations = self._connected_observations + 1 if was_connected else 1
+        else:
+            self._connected_observations = 0
 
         where = f"{host} {t('status.via_bastion')}" if via_jump else str(host)
 
-        if not configured:
+        if not connection_configured:
             text = t("status.not_configured_msg")
             state = "warning"
         elif not connected:
@@ -247,7 +310,7 @@ class StatusTab(QWidget):
             text = t("status.paused_msg", where=where)
             state = "paused"
         else:
-            text = t("status.active_msg", where=where)
+            text = t("status.connected_msg", where=where)
             state = "active"
 
         self.status_label.setText(text)
@@ -256,6 +319,12 @@ class StatusTab(QWidget):
             self.status_label.style().unpolish(self.status_label)
             self.status_label.style().polish(self.status_label)
         self._refresh_pause_button()
+        self._refresh_sync_state(paused, remaining)
+        self._refresh_queue_label()
+        self._refresh_attention()
+        if self._connected and not self._diagnostics_auto_loaded:
+            self._diagnostics_auto_loaded = True
+            self._refresh_diagnostics()
         if not self._update_auto_checked and connected and configured and not paused:
             self._update_auto_checked = True
             self._update_timer.start(UPDATE_CHECK_INITIAL_DELAY_MS)
@@ -268,40 +337,275 @@ class StatusTab(QWidget):
         self.hash_progress_label.show()
 
     def on_queue_updated(self, items) -> None:
-        if not items:
+        self._queue_items = list(items)
+        self._refresh_queue_label()
+        self._refresh_sync_state()
+
+    def _refresh_queue_label(self) -> None:
+        if not self._status_known or self._queue_items is None:
+            self.queue_label.setText(t("status.queue_unknown"))
+            return
+        if not self._connected:
+            self.queue_label.setText(t("status.queue_offline"))
+            return
+        if not self._queue_items:
             self.queue_label.setText(t("status.queue_empty"))
             return
+        items = self._queue_items
         uploads = sum(1 for item in items if item.direction == "upload")
         downloads = sum(1 for item in items if item.direction == "download")
         deletes = sum(1 for item in items if item.direction.startswith("delete_"))
         self.queue_label.setText(t("status.queue_summary", uploads=uploads, downloads=downloads, deletes=deletes))
 
+    def on_transfer_preparing(self, direction: str) -> None:
+        self._transfer_phases[direction] = "preparing"
+        self._refresh_sync_state()
+
+    def on_transfer_waiting_for_lock(self, direction: str) -> None:
+        self._transfer_phases[direction] = "waiting"
+        self._refresh_sync_state()
+
+    def on_transfer_started(self, direction: str) -> None:
+        self._transfer_phases[direction] = "active"
+        self._refresh_sync_state()
+
+    def on_transfer_item_started(self, direction: str, path: str, _size: int = 0) -> None:
+        transfer_direction = "upload" if direction in ("upload", "delete_remote") else "download"
+        self._transfer_phases[transfer_direction] = "active"
+        self._current_paths[transfer_direction] = path
+        self._refresh_sync_state()
+
+    def on_transfer_item_done(self, direction: str, path: str) -> None:
+        if self._queue_items is None:
+            return
+        self._queue_items = [
+            item for item in self._queue_items
+            if (item.direction, item.path) != (direction, path)
+        ]
+        self._refresh_queue_label()
+
+    def on_transfer_finished(self, direction: str, ok: bool) -> None:
+        self._transfer_phases.pop(direction, None)
+        self._current_paths.pop(direction, None)
+        if ok:
+            self._last_success = (time.time(), direction)
+            self.last_sync_label.setText(self._last_sync_text())
+        self._refresh_sync_state()
+
+    def _refresh_sync_state(self, paused: bool | None = None, remaining=None) -> None:
+        if paused is None:
+            paused = self.cfg.is_paused()
+            remaining = self.cfg.pause_remaining_seconds()
+        if not self._status_known:
+            text = t("status.sync_state_starting")
+        elif not self.cfg.is_configured():
+            text = t("status.sync_state_not_configured")
+        elif not self._connected:
+            text = t("status.sync_state_offline")
+        elif paused and remaining:
+            text = t("status.sync_state_paused_timed")
+        elif paused:
+            text = t("status.sync_state_paused")
+        elif self._transfer_phases:
+            direction = next(iter(self._transfer_phases))
+            phase = self._transfer_phases[direction]
+            direction_text = t(f"status.direction_{direction}")
+            path = self._current_paths.get(direction, "")
+            if path:
+                text = t("status.sync_state_file", direction=direction_text, path=path)
+            else:
+                text = t(f"status.sync_state_{phase}", direction=direction_text)
+        elif self._queue_items:
+            text = t("status.sync_state_pending", count=len(self._queue_items))
+        else:
+            text = t("status.sync_state_ready")
+        self.sync_state_label.setText(text)
+
+    def on_transfer_lock_unavailable(self, direction: str, _detail: str) -> None:
+        self._transfer_phases.pop(direction, None)
+        self._current_paths.pop(direction, None)
+        self._refresh_sync_state()
+
+    def on_log_event(self, action: str, _path: str, detail: str) -> None:
+        if action not in PROBLEM_ACTIONS:
+            return
+        now = time.time()
+        detail = detail or t("status.problem_no_detail")
+        self._last_problem = (now, action, detail)
+        self._recent_problem_events[action] = (now, detail)
+        self.last_problem_label.setText(self._last_problem_text())
+        self._refresh_attention()
+
+    def _load_recent_events(self, events) -> None:
+        for event in events:
+            if event.action in ("UPLOAD", "DELETE_REMOTE"):
+                candidate = (event.ts, "upload")
+                if self._last_success is None or event.ts > self._last_success[0]:
+                    self._last_success = candidate
+            elif event.action in ("DOWNLOAD", "DELETE_LOCAL"):
+                candidate = (event.ts, "download")
+                if self._last_success is None or event.ts > self._last_success[0]:
+                    self._last_success = candidate
+            if event.action in PROBLEM_ACTIONS:
+                detail = event.detail or t("status.problem_no_detail")
+                self._recent_problem_events[event.action] = (event.ts, detail)
+                if self._last_problem is None or event.ts > self._last_problem[0]:
+                    self._last_problem = (event.ts, event.action, detail)
+
+    def _last_sync_text(self) -> str:
+        if self._last_success is None:
+            return t("status.last_sync_never")
+        timestamp, direction = self._last_success
+        return t(
+            "status.last_sync",
+            time=time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(timestamp)),
+            direction=t(f"status.direction_{direction}"),
+        )
+
+    def _last_problem_text(self) -> str:
+        if self._last_problem is None:
+            return t("status.last_problem_none")
+        timestamp, action, detail = self._last_problem
+        return t(
+            "status.last_problem",
+            time=time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(timestamp)),
+            action=action,
+            detail=self._compact_detail(detail),
+        )
+
+    @staticmethod
+    def _compact_detail(detail: str) -> str:
+        compact = " ".join(str(detail).split())
+        return compact if len(compact) <= 180 else compact[:177] + "..."
+
+    def _refresh_attention(self) -> None:
+        problems = self._collect_problems()
+        if problems == self.attention_problems:
+            self.attention_box.setVisible(bool(problems))
+            return
+        self.attention_problems = problems
+        while self.attention_layout.count():
+            item = self.attention_layout.takeAt(0)
+            if item.widget() is not None:
+                item.widget().deleteLater()
+        for problem_id, message, action in problems:
+            row = QWidget(self.attention_box)
+            row.setObjectName(f"attention_{problem_id}")
+            layout = QHBoxLayout(row)
+            layout.setContentsMargins(0, 0, 0, 0)
+            label = QLabel(message)
+            label.setWordWrap(True)
+            layout.addWidget(label, 1)
+            button = QPushButton(t(f"status.attention_action_{action}"))
+            button.clicked.connect(
+                lambda _checked=False, destination=action: self.attention_action_requested.emit(destination)
+            )
+            layout.addWidget(button)
+            self.attention_layout.addWidget(row)
+        self.attention_box.setVisible(bool(problems))
+
+    def _collect_problems(self) -> list[tuple[str, str, str]]:
+        if not self._status_known:
+            return []
+        problems: list[tuple[str, str, str]] = []
+        missing = []
+        if not self.cfg.local_root():
+            missing.append(t("status.config_local_folder"))
+        if not (self.cfg.get("nas_lan") or self.cfg.get("nas_wan")):
+            missing.append(t("status.config_nas_host"))
+        if not self.cfg.get("nas_user"):
+            missing.append(t("status.config_nas_user"))
+        if missing:
+            problems.append(("configuration", t("status.problem_config", fields=", ".join(missing)), "settings"))
+        elif not self._connected:
+            problems.append(("unreachable", t("status.problem_unreachable"), "settings"))
+
+        if not missing and not self.cfg.get("ssh_host_key_pinned"):
+            problems.append(("host_keys", t("status.problem_host_keys"), "settings"))
+
+        remote_state_known = self._connected and self._connected_observations >= 2
+        if remote_state_known and (
+            not self.cfg.get("remote_repository_ready") or not self.cfg.get("repository_id")
+        ):
+            problems.append(("repository", t("status.problem_repository"), "settings"))
+        repository_verified = bool(
+            self.cfg.get("remote_repository_ready") and self.cfg.get("repository_id")
+        )
+        if remote_state_known and repository_verified and not self.cfg.get("remote_journal_ready"):
+            problems.append(("journal_ready", t("status.problem_journal_unavailable"), "settings"))
+
+        journal_error = str(self.cfg.get("journal_error") or "").strip()
+        if journal_error:
+            problems.append((
+                "journal_error",
+                t("status.problem_journal", detail=self._compact_detail(journal_error)),
+                "log",
+            ))
+
+        cutoff = time.time() - RECENT_PROBLEM_SECONDS
+        for action in ("SAFETY_BLOCK", "JOURNAL_BLOCK", "ERROR"):
+            event = self._recent_problem_events.get(action)
+            if event is None or event[0] < cutoff:
+                continue
+            # A persisted journal error already carries the same actionable fact.
+            if action == "JOURNAL_BLOCK" and journal_error:
+                continue
+            problems.append((
+                f"event_{action.lower()}",
+                t("status.problem_recent_event", action=action, detail=self._compact_detail(event[1])),
+                "log",
+            ))
+
+        if (
+            self._diagnostics_available and self._nas_available_bytes is not None
+            and self._nas_available_bytes < LOW_NAS_SPACE_BYTES
+        ):
+            problems.append((
+                "low_space",
+                t("status.problem_low_space", free=human_size(self._nas_available_bytes)),
+                "history",
+            ))
+        return problems
+
     def _refresh_diagnostics(self) -> None:
+        if self._diagnostics_busy:
+            return
         conn = self.engine.connection
         if conn is None:
             self.diagnostics_label.setText(t("status.diagnostics_offline"))
             return
+        self._diagnostics_busy = True
         self.diagnostics_label.setText(t("status.diagnostics_loading"))
         run_in_background(
             self, "_diagnostics_call", lambda: trash.fetch_remote_diagnostics(self.cfg, conn), self._on_diagnostics_done,
         )
 
     def _on_diagnostics_done(self, result, exc: Exception | None) -> None:
+        self._diagnostics_busy = False
+        self._diagnostics_available = False
+        self._nas_available_bytes = None
         if exc is not None:
             self.diagnostics_label.setText(t("status.diagnostics_failed", detail=str(exc)))
+            self._refresh_attention()
             return
         ok, values, detail = result
         if not ok:
             self.diagnostics_label.setText(t("status.diagnostics_failed", detail=detail))
+            self._refresh_attention()
             return
         try:
-            free = human_size(int(values.get("SHARE_AVAILABLE_BYTES", "0")))
+            available_bytes = int(values.get("SHARE_AVAILABLE_BYTES", "0"))
+            free = human_size(available_bytes)
             trash_size = human_size(int(values.get("TRASH_DISK_BYTES", "0")))
             count = int(values.get("TRASH_FILE_COUNT", "0"))
-        except ValueError:
-            self.diagnostics_label.setText(t("status.diagnostics_failed", detail="risposta NAS non valida"))
+        except (TypeError, ValueError):
+            self.diagnostics_label.setText(t("status.diagnostics_failed", detail=t("status.diagnostics_invalid")))
+            self._refresh_attention()
             return
+        self._diagnostics_available = True
+        self._nas_available_bytes = available_bytes
         self.diagnostics_label.setText(t("status.diagnostics_summary", free=free, trash=trash_size, count=count))
+        self._refresh_attention()
 
     def _check_integrity(self) -> None:
         conn = self.engine.connection

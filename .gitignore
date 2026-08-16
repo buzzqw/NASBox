@@ -27,9 +27,10 @@ dist/
 *.sqlite3-*
 client.json
 
-# Client update bundles are deployment data, not source files.
+# Generated client update bundles are runtime/release data. client/ is canonical.
 client-update/
 client/.update/
+nasbox-client-update-*.tar.gz*
 
 # Editor and operating-system files
 .DS_Store

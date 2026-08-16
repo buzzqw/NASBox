@@ -197,28 +197,21 @@ class TrayIcon(QSystemTrayIcon):
         self._open_path(target)
 
     def _on_activated(self, reason) -> None:
-        # Deliberately NOT relying on setContextMenu()'s native right-click
-        # handling alone -- several Linux/Wayland tray hosts (seen on this
-        # very setup) either don't distinguish a secondary click from a
-        # primary one, or never dispatch a native context-menu request at
-        # all, so a menu built that way is simply unreachable there: right-
-        # click just re-triggers whatever the primary action does, and
-        # "Esci" becomes unreachable since closing the window only hides it
-        # (see MainWindow.closeEvent). Popping the menu ourselves on every
-        # single-click activation (left or right; whichever the host does
-        # report) works everywhere, at the cost of the window not reopening
-        # on a plain single click -- double-click still does that below.
         if reason == QSystemTrayIcon.ActivationReason.DoubleClick:
             self._show_window()
             return
+        if reason == QSystemTrayIcon.ActivationReason.Trigger:
+            if self.cfg.get("tray_single_click", "menu") == "window":
+                self._show_window()
+            else:
+                self._menu.popup(QCursor.pos())
+            return
         if reason in (
-            QSystemTrayIcon.ActivationReason.Trigger,
             QSystemTrayIcon.ActivationReason.Context,
             QSystemTrayIcon.ActivationReason.MiddleClick,
         ):
-            # popup() itself emits aboutToShow, which is what actually
-            # rebuilds the menu's contents (see the connection in __init__) --
-            # no need to call _rebuild_menu() here too.
+            # Explicit popup keeps the menu reachable on tray hosts that do
+            # not reliably dispatch their native context-menu request.
             self._menu.popup(QCursor.pos())
 
     def _show_window(self) -> None:

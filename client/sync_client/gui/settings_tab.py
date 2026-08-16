@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QUrl
+from PyQt6.QtGui import QDesktopServices
 from PyQt6.QtWidgets import (
-    QCheckBox, QComboBox, QFormLayout, QGroupBox, QHBoxLayout, QLabel,
-    QLineEdit, QListWidget, QMessageBox, QPushButton, QScrollArea, QSpinBox,
-    QVBoxLayout, QWidget,
+    QAbstractItemView, QBoxLayout, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout,
+    QGroupBox, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem,
+    QMessageBox, QPushButton, QScrollArea, QSpinBox, QVBoxLayout, QWidget,
 )
 
-import os
 from pathlib import Path
 
 from .. import paths, rsync_ops, trash
@@ -22,6 +22,11 @@ LANGUAGE_OPTIONS = [
     ("auto", "settings.language_auto"),
     ("it", "settings.language_it"),
     ("en", "settings.language_en"),
+]
+
+TRAY_CLICK_OPTIONS = [
+    ("menu", "settings.tray_click_menu"),
+    ("window", "settings.tray_click_window"),
 ]
 
 
@@ -39,6 +44,8 @@ class SettingsTab(QWidget):
         self._restart_busy = False
         self._verify_keys_busy = False
         self._conflict_files: list[Path] = []
+        self._dirty = False
+        self._single_column = False
 
         # This tab stacks a lot of group boxes -- without a scroll area, Qt's
         # layout system reports their combined minimum height as *this tab's*
@@ -65,6 +72,7 @@ class SettingsTab(QWidget):
         # QLineEdit to stretch edge-to-edge across the whole window for a
         # value like a port number.
         columns = QHBoxLayout()
+        self._columns = columns
         left_col = QVBoxLayout()
         right_col = QVBoxLayout()
         columns.addLayout(left_col, 1)
@@ -145,12 +153,7 @@ class SettingsTab(QWidget):
         self.max_delete_spin.setValue(int(cfg.get("max_delete_files") or 1000))
         self.max_delete_spin.setToolTip(t("settings.max_delete_tooltip"))
         nas_form.addRow(t("settings.max_delete_label"), self.max_delete_spin)
-        save_nas_btn = QPushButton(t("settings.save_nas_btn"))
-        save_nas_btn.setToolTip(t("settings.save_nas_tooltip"))
-        save_nas_btn.clicked.connect(self._save_nas)
-        nas_form.addRow(save_nas_btn)
         left_col.addWidget(nas_box)
-        left_col.addStretch(1)
 
         # --- bandwidth ---
         bw_box = QGroupBox(t("settings.bandwidth_title"))
@@ -169,10 +172,6 @@ class SettingsTab(QWidget):
         self.bw_download_spin.setValue(int(cfg.get("bandwidth_download_kbps") or 0))
         self.bw_download_spin.setToolTip(t("settings.bandwidth_tooltip"))
         bw_layout.addWidget(self.bw_download_spin)
-        apply_bw_btn = QPushButton(t("settings.apply_btn"))
-        apply_bw_btn.setToolTip(t("settings.apply_bandwidth_tooltip"))
-        apply_bw_btn.clicked.connect(self._apply_bandwidth)
-        bw_layout.addWidget(apply_bw_btn)
         right_col.addWidget(bw_box)
 
         # --- sync cadence ---
@@ -187,10 +186,6 @@ class SettingsTab(QWidget):
         cadence_note = QLabel(t("settings.cadence_note"))
         cadence_note.setWordWrap(True)
         cadence_form.addRow(cadence_note)
-        apply_poll_btn = QPushButton(t("settings.apply_btn"))
-        apply_poll_btn.setToolTip(t("settings.apply_poll_tooltip"))
-        apply_poll_btn.clicked.connect(self._apply_poll_interval)
-        cadence_form.addRow(apply_poll_btn)
         right_col.addWidget(cadence_box)
 
         # --- sync feedback ---
@@ -199,13 +194,22 @@ class SettingsTab(QWidget):
         self.notify_sync_checkbox = QCheckBox(t("settings.notify_sync_checkbox"))
         self.notify_sync_checkbox.setChecked(bool(cfg.get("notify_sync_completion")))
         self.notify_sync_checkbox.setToolTip(t("settings.notify_sync_tooltip"))
-        self.notify_sync_checkbox.toggled.connect(self._on_notify_sync_changed)
         feedback_layout.addWidget(self.notify_sync_checkbox)
         self.animate_sync_checkbox = QCheckBox(t("settings.animate_sync_checkbox"))
         self.animate_sync_checkbox.setChecked(bool(cfg.get("animate_sync_icon")))
         self.animate_sync_checkbox.setToolTip(t("settings.animate_sync_tooltip"))
-        self.animate_sync_checkbox.toggled.connect(self._on_animate_sync_changed)
         feedback_layout.addWidget(self.animate_sync_checkbox)
+        tray_click_row = QHBoxLayout()
+        tray_click_row.addWidget(QLabel(t("settings.tray_click_label")))
+        self.tray_click_combo = QComboBox()
+        current_tray_click = cfg.get("tray_single_click", "menu")
+        for index, (value, label_key) in enumerate(TRAY_CLICK_OPTIONS):
+            self.tray_click_combo.addItem(t(label_key), userData=value)
+            if value == current_tray_click:
+                self.tray_click_combo.setCurrentIndex(index)
+        self.tray_click_combo.setToolTip(t("settings.tray_click_tooltip"))
+        tray_click_row.addWidget(self.tray_click_combo, 1)
+        feedback_layout.addLayout(tray_click_row)
         feedback_note = QLabel(t("settings.notify_sync_note"))
         feedback_note.setWordWrap(True)
         feedback_layout.addWidget(feedback_note)
@@ -221,7 +225,6 @@ class SettingsTab(QWidget):
             if code == current_lang:
                 self.language_combo.setCurrentIndex(index)
         self.language_combo.setToolTip(t("settings.language_note"))
-        self.language_combo.currentIndexChanged.connect(self._on_language_changed)
         language_form.addRow(t("settings.language_label"), self.language_combo)
         language_note = QLabel(t("settings.language_note"))
         language_note.setWordWrap(True)
@@ -257,7 +260,7 @@ class SettingsTab(QWidget):
         self.maint_scan_btn.setToolTip(t("settings.maint_scan_tooltip"))
         self.maint_scan_btn.clicked.connect(self._scan_conflicts)
         conflict_row.addWidget(self.maint_scan_btn)
-        self.maint_delete_btn = QPushButton(t("settings.maint_delete_btn"))
+        self.maint_delete_btn = QPushButton(t("settings.maint_review_btn"))
         self.maint_delete_btn.setToolTip(t("settings.maint_delete_tooltip"))
         self.maint_delete_btn.setEnabled(False)
         self.maint_delete_btn.clicked.connect(self._delete_conflicts)
@@ -265,8 +268,6 @@ class SettingsTab(QWidget):
         conflict_row.addStretch(1)
         maint_layout.addLayout(conflict_row)
         right_col.addWidget(maint_box)
-        right_col.addStretch(1)
-
         # --- selective sync (full width: the list benefits from it, and it
         #     doesn't pair well height-wise with anything above) ---
         exclude_box = QGroupBox(t("settings.exclude_title"))
@@ -289,10 +290,11 @@ class SettingsTab(QWidget):
         add_exclude_btn.setToolTip(t("settings.exclude_add_tooltip"))
         add_exclude_btn.clicked.connect(self._add_exclude)
         exclude_add_row.addWidget(add_exclude_btn)
-        remove_exclude_btn = QPushButton(t("settings.exclude_remove_btn"))
-        remove_exclude_btn.setToolTip(t("settings.exclude_remove_tooltip"))
-        remove_exclude_btn.clicked.connect(self._remove_exclude)
-        exclude_add_row.addWidget(remove_exclude_btn)
+        self.remove_exclude_btn = QPushButton(t("settings.exclude_remove_btn"))
+        self.remove_exclude_btn.setToolTip(t("settings.exclude_remove_tooltip"))
+        self.remove_exclude_btn.setEnabled(False)
+        self.remove_exclude_btn.clicked.connect(self._remove_exclude)
+        exclude_add_row.addWidget(self.remove_exclude_btn)
         exclude_layout.addLayout(exclude_add_row)
 
         # Read-only, separate from the editable list above: this one isn't a
@@ -309,54 +311,82 @@ class SettingsTab(QWidget):
 
         root.addWidget(exclude_box)
 
+        save_row = QHBoxLayout()
+        self.save_feedback = QLabel(t("settings.saved_feedback"))
+        self.save_feedback.setObjectName("settingsSaveFeedback")
+        self.save_feedback.setWordWrap(True)
+        save_row.addWidget(self.save_feedback, 1)
+        self.save_btn = QPushButton(t("settings.save_all_btn"))
+        self.save_btn.setObjectName("primaryButton")
+        self.save_btn.setToolTip(t("settings.save_all_tooltip"))
+        self.save_btn.clicked.connect(self._save_settings)
+        self.save_btn.setEnabled(False)
+        save_row.addWidget(self.save_btn)
+        outer.addLayout(save_row)
+
         root.addStretch(1)
+        self._connect_dirty_signals()
+        self._update_column_layout(self.width())
 
     # --- actions ---
 
+    def _connect_dirty_signals(self) -> None:
+        for edit in (
+            self.nas_lan, self.nas_wan, self.nas_user, self.jump_host,
+            self.jump_user, self.remote_server_script, self.remote_prefix,
+        ):
+            edit.textChanged.connect(self._mark_dirty)
+        for spin in (
+            self.ssh_port, self.jump_port, self.max_delete_spin,
+            self.bw_upload_spin, self.bw_download_spin, self.poll_spin,
+        ):
+            spin.valueChanged.connect(self._mark_dirty)
+        for checkbox in (
+            self.delete_enabled, self.notify_sync_checkbox, self.animate_sync_checkbox,
+        ):
+            checkbox.toggled.connect(self._mark_dirty)
+        self.language_combo.currentIndexChanged.connect(self._mark_dirty)
+        self.tray_click_combo.currentIndexChanged.connect(self._mark_dirty)
+        self.exclude_list.itemSelectionChanged.connect(
+            lambda: self.remove_exclude_btn.setEnabled(self.exclude_list.currentRow() >= 0)
+        )
+
+    def _mark_dirty(self, *_args) -> None:
+        self._dirty = True
+        self.save_btn.setEnabled(True)
+        self.save_feedback.setText(t("settings.dirty_feedback"))
+
     def _apply_bandwidth(self) -> None:
         self.cfg.set("bandwidth_upload_kbps", self.bw_upload_spin.value(), persist=False)
-        self.cfg.set("bandwidth_download_kbps", self.bw_download_spin.value())
-        self.engine.wake()
+        self.cfg.set("bandwidth_download_kbps", self.bw_download_spin.value(), persist=False)
 
     def _apply_poll_interval(self) -> None:
-        self.cfg.set("poll_interval", self.poll_spin.value())
-        self.engine.wake()
-
-    def _on_notify_sync_changed(self, enabled: bool) -> None:
-        self.cfg.set("notify_sync_completion", enabled)
-
-    def _on_animate_sync_changed(self, enabled: bool) -> None:
-        self.cfg.set("animate_sync_icon", enabled)
-
-    def _on_language_changed(self, index: int) -> None:
-        code = self.language_combo.itemData(index)
-        if code:
-            self.cfg.set_language(code)
+        self.cfg.set("poll_interval", self.poll_spin.value(), persist=False)
 
     def _add_exclude(self) -> None:
         pattern = self.exclude_input.text().strip()
         if not pattern:
             return
-        patterns = self.cfg.exclude_patterns()
+        patterns = [self.exclude_list.item(i).text() for i in range(self.exclude_list.count())]
         if pattern in patterns:
             self.exclude_input.clear()
+            self.exclude_list.setCurrentRow(patterns.index(pattern))
             return
-        patterns.append(pattern)
-        self.cfg.set_exclude_patterns(patterns)
         self.exclude_list.addItem(pattern)
+        self.exclude_list.setCurrentRow(self.exclude_list.count() - 1)
         self.exclude_input.clear()
-        self.engine.wake()
+        self._mark_dirty()
 
     def _remove_exclude(self) -> None:
         row = self.exclude_list.currentRow()
         if row < 0:
             return
-        item = self.exclude_list.takeItem(row)
-        patterns = [p for p in self.cfg.exclude_patterns() if p != item.text()]
-        self.cfg.set_exclude_patterns(patterns)
-        self.engine.wake()
+        self.exclude_list.takeItem(row)
+        if self.exclude_list.count():
+            self.exclude_list.setCurrentRow(min(row, self.exclude_list.count() - 1))
+        self._mark_dirty()
 
-    def _save_nas(self) -> None:
+    def _save_settings(self) -> None:
         self.cfg.set("nas_lan", self.nas_lan.text().strip(), persist=False)
         self.cfg.set("nas_wan", self.nas_wan.text().strip(), persist=False)
         self.cfg.set("nas_user", self.nas_user.text().strip(), persist=False)
@@ -366,10 +396,24 @@ class SettingsTab(QWidget):
         self.cfg.set("jump_user", self.jump_user.text().strip(), persist=False)
         self.cfg.set("remote_server_script", self.remote_server_script.text().strip(), persist=False)
         self.cfg.set("remote_prefix", self.remote_prefix.text().strip(), persist=False)
-        self.cfg.set("delete_enabled", self.delete_enabled.isChecked())
-        self.cfg.set("max_delete_files", self.max_delete_spin.value())
+        self.cfg.set("delete_enabled", self.delete_enabled.isChecked(), persist=False)
+        self.cfg.set("max_delete_files", self.max_delete_spin.value(), persist=False)
+        self._apply_bandwidth()
+        self._apply_poll_interval()
+        self.cfg.set("notify_sync_completion", self.notify_sync_checkbox.isChecked(), persist=False)
+        self.cfg.set("animate_sync_icon", self.animate_sync_checkbox.isChecked(), persist=False)
+        self.cfg.set("tray_single_click", self.tray_click_combo.currentData() or "menu", persist=False)
+        code = self.language_combo.currentData()
+        if code:
+            self.cfg.set("language", code, persist=False)
+        patterns = [self.exclude_list.item(i).text() for i in range(self.exclude_list.count())]
+        self.cfg.set("exclude_patterns", patterns, persist=False)
+        self.cfg.save()
         self.engine.wake()
         self._refresh_auto_exclude_label()
+        self._dirty = False
+        self.save_btn.setEnabled(False)
+        self.save_feedback.setText(t("settings.saved_feedback"))
 
     def _verify_host_keys(self) -> None:
         if self._verify_keys_busy:
@@ -388,7 +432,7 @@ class SettingsTab(QWidget):
             QMessageBox.warning(self, t("settings.verify_keys_title"), t("settings.verify_keys_no_host"))
             return
 
-        self._save_nas()
+        self._save_settings()
         self._verify_keys_busy = True
         run_in_background(
             self, "_verify_keys_call",
@@ -440,7 +484,7 @@ class SettingsTab(QWidget):
     def _detect_from_nas(self) -> None:
         if self._detect_busy:
             return  # already running -- ignore a repeat click instead of overlapping calls
-        self._save_nas()  # use whatever is currently typed, not the last-saved values
+        self._save_settings()  # use whatever is currently typed, not the last-saved values
 
         # Everything below is SSH: resolve_connection alone can take ~7s
         # (probing LAN/WAN/bastion in turn), discover_remote_scripts up to
@@ -506,7 +550,7 @@ class SettingsTab(QWidget):
             self._refresh_auto_exclude_label()
         if retention:
             try:
-                self.cfg.set("retention_days_remote", int(retention))
+                self.cfg.set("retention_days_remote", int(retention), persist=False)
             except ValueError:
                 pass
         if repository_id:
@@ -527,8 +571,7 @@ class SettingsTab(QWidget):
         if state_dir:
             self.cfg.set("server_state_dir_remote", state_dir, persist=False)
         self.cfg.set("server_lock_file_remote", values.get("SYNC_LOCK_FILE", ""), persist=False)
-        self.cfg.save()
-        self.engine.wake()
+        self._save_settings()
 
         status_line = t("settings.daemon_active") if running else t("settings.daemon_inactive")
         version = values.get("VERSION", "")
@@ -541,10 +584,25 @@ class SettingsTab(QWidget):
                 "settings.detect_done_body",
                 status_line=status_line,
                 share_root=share_root or t("settings.not_set_placeholder"),
-                retention=retention or "?",
+                retention=t("settings.retention_never") if retention == "0" else t("settings.retention_days", days=retention or "?"),
                 version_line=version_line,
             ),
         )
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._update_column_layout(event.size().width())
+
+    def _update_column_layout(self, width: int) -> None:
+        single_column = width < 900
+        if single_column == self._single_column:
+            return
+        self._single_column = single_column
+        direction = (
+            QBoxLayout.Direction.TopToBottom if single_column
+            else QBoxLayout.Direction.LeftToRight
+        )
+        self._columns.setDirection(direction)
 
     def _restart_daemon(self) -> None:
         if self._restart_busy:
@@ -560,6 +618,7 @@ class SettingsTab(QWidget):
         ) != QMessageBox.StandardButton.Yes:
             return
 
+        self._save_settings()
         # Not setEnabled(False) -- see _detect_from_nas's comment: it steals
         # keyboard focus to the next tab-order widget the instant the button
         # holding it gets disabled, which looks like a random UI glitch.
@@ -619,43 +678,84 @@ class SettingsTab(QWidget):
 
     def _delete_conflicts(self) -> None:
         count = len(self._conflict_files)
-        if count == 0 or not self.cfg.local_root():
-            return
-        answer = QMessageBox.warning(
-            self,
-            t("settings.maint_delete_confirm_title"),
-            t("settings.maint_delete_confirm_body", count=count),
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        )
-        if answer != QMessageBox.StandardButton.Yes:
-            return
-        deleted = 0
-        failed: list[str] = []
         local_root = self.cfg.local_root()
-        for file_path in self._conflict_files:
+        if count == 0 or not local_root:
+            return
+        dialog = ConflictReviewDialog(self._conflict_files, local_root, self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        selected = dialog.selected_files()
+        if not selected:
+            return
+        moved = 0
+        failed: list[str] = []
+        for file_path in selected:
             try:
                 relative = str(file_path.relative_to(local_root))
             except ValueError:
                 relative = str(file_path)
-            try:
-                file_path.unlink()
-                deleted += 1
-            except OSError:
+            if trash.move_to_local_trash(file_path, local_root):
+                moved += 1
+            else:
                 failed.append(relative)
         if failed:
             QMessageBox.warning(
                 self,
                 t("settings.maint_delete_partial_title"),
-                t("settings.maint_delete_partial_body", deleted=deleted, failed=len(failed), names="\n".join(failed[:10])),
+                t("settings.maint_delete_partial_body", moved=moved, failed=len(failed), names="\n".join(failed[:10])),
             )
         else:
             QMessageBox.information(
-                self, t("settings.maint_delete_done_title"), t("settings.maint_delete_done_body", count=deleted),
+                self, t("settings.maint_delete_done_title"), t("settings.maint_delete_done_body", count=moved),
             )
-        self._conflict_files = []
-        self.conflict_count_label.setText(t("settings.maint_conflict_count_none"))
-        self.maint_delete_btn.setEnabled(False)
+        self._conflict_files = [path for path in self._conflict_files if path.exists()]
+        self._on_conflict_scan_done(self._conflict_files, None)
+
+
+class ConflictReviewDialog(QDialog):
+    def __init__(self, files: list[Path], local_root: str, parent=None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle(t("settings.maint_review_title"))
+        self.resize(650, 400)
+        layout = QVBoxLayout(self)
+        note = QLabel(t("settings.maint_review_note"))
+        note.setWordWrap(True)
+        layout.addWidget(note)
+        self.list = QListWidget()
+        self.list.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+        root = Path(local_root)
+        for file_path in files:
+            try:
+                label = str(file_path.relative_to(root))
+            except ValueError:
+                label = str(file_path)
+            item = QListWidgetItem(label)
+            item.setData(Qt.ItemDataRole.UserRole, file_path)
+            self.list.addItem(item)
+        self.list.itemSelectionChanged.connect(self._selection_changed)
+        layout.addWidget(self.list)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Cancel)
+        self.open_btn = buttons.addButton(t("settings.maint_open_folder_btn"), QDialogButtonBox.ButtonRole.ActionRole)
+        self.move_btn = buttons.addButton(t("settings.maint_move_selected_btn"), QDialogButtonBox.ButtonRole.AcceptRole)
+        self.open_btn.clicked.connect(self._open_containing_folder)
+        self.move_btn.clicked.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+        self._selection_changed()
+
+    def selected_files(self) -> list[Path]:
+        return [item.data(Qt.ItemDataRole.UserRole) for item in self.list.selectedItems()]
+
+    def _selection_changed(self) -> None:
+        selected = bool(self.list.selectedItems())
+        self.open_btn.setEnabled(selected)
+        self.move_btn.setEnabled(selected)
+
+    def _open_containing_folder(self) -> None:
+        selected = self.selected_files()
+        if selected:
+            QDesktopServices.openUrl(QUrl.fromLocalFile(str(selected[0].parent)))
 
 
 def _detect_worker(cfg: Config, script_path_hint: str) -> dict:

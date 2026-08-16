@@ -1,0 +1,72 @@
+name: Package Linux client
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Check release version
+        if: startsWith(github.ref, 'refs/tags/')
+        run: test "${GITHUB_REF_NAME#v}" = "$(packaging/version.sh)"
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libegl1
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt -r packaging/requirements-build.txt
+      - name: Download appimagetool
+        run: |
+          curl --fail --location --retry 3 \
+            --output "$RUNNER_TEMP/appimagetool" \
+            https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-x86_64.AppImage
+          echo "ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0  $RUNNER_TEMP/appimagetool" | sha256sum --check
+          chmod +x "$RUNNER_TEMP/appimagetool"
+          curl --fail --location --retry 3 \
+            --output "$RUNNER_TEMP/appimage-runtime" \
+            https://github.com/AppImage/type2-runtime/releases/download/20251108/runtime-x86_64
+          echo "2fca8b443c92510f1483a883f60061ad09b46b978b2631c807cd873a47ec260d  $RUNNER_TEMP/appimage-runtime" | sha256sum --check
+      - name: Build release artifacts
+        env:
+          APPIMAGETOOL: ${{ runner.temp }}/appimagetool
+          APPIMAGE_RUNTIME_FILE: ${{ runner.temp }}/appimage-runtime
+        run: |
+          packaging/build-appimage.sh
+          packaging/build-deb.sh
+          packaging/build-client-update.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nasbox-linux-client
+          path: |
+            dist/*.AppImage
+            dist/*.deb
+            dist/nasbox-client-update-*.tar.gz
+            dist/nasbox-client-update-*.tar.gz.sha256
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: nasbox-linux-client
+          path: dist
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*

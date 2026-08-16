@@ -52,9 +52,10 @@ class HistoryTab(QWidget):
         retention_layout.addWidget(save_btn)
         root.addWidget(retention_box)
 
-        note = QLabel(t("history.note"))
-        note.setWordWrap(True)
-        root.addWidget(note)
+        self.source_description = QLabel(t("history.source_local_description"))
+        self.source_description.setWordWrap(True)
+        self.source_description.setStyleSheet("font-weight: bold;")
+        root.addWidget(self.source_description)
 
         action_row = QHBoxLayout()
         prune_local_btn = QPushButton(t("history.prune_local_btn"))
@@ -81,10 +82,14 @@ class HistoryTab(QWidget):
         self.scope_combo.addItem(t("history.scope_remote"), userData=True)
         self.scope_combo.currentIndexChanged.connect(self._change_scope)
         search_row.addWidget(self.scope_combo)
+        self.refresh_btn = QPushButton(t("history.refresh_btn"))
+        self.refresh_btn.setToolTip(t("history.refresh_tooltip"))
+        self.refresh_btn.clicked.connect(self.refresh)
+        search_row.addWidget(self.refresh_btn)
         root.addLayout(search_row)
 
-        # This tree only reads paths.local_trash_dir(). The NAS has its own
-        # retention area, but it is not downloaded or listed by this view.
+        # The tree shows one source at a time: local history is read directly,
+        # while NAS history is requested only when that scope is selected.
         self.scope_label = QLabel(t("history.list_scope_local"))
         self.scope_label.setObjectName("historyScope")
         self.scope_label.setWordWrap(True)
@@ -135,9 +140,11 @@ class HistoryTab(QWidget):
         self._showing_remote = bool(self.scope_combo.currentData())
         self.delete_btn.setVisible(not self._showing_remote)
         if self._showing_remote:
+            self.source_description.setText(t("history.source_remote_description"))
             self.scope_label.setText(t("history.list_scope_remote_loading"))
             self._refresh_remote()
         else:
+            self.source_description.setText(t("history.source_local_description"))
             self.scope_label.setText(t("history.list_scope_local"))
             self.refresh()
 
@@ -209,8 +216,10 @@ class HistoryTab(QWidget):
 
     def _remote_retention_text(self) -> str:
         value = self.cfg.get("retention_days_remote")
-        if not value:
+        if value is None or value == "":
             return t("history.remote_retention_unknown")
+        if str(value) == "0":
+            return t("history.remote_retention_never")
         return t("history.remote_retention_value", days=value)
 
     def _save_retention(self) -> None:
@@ -229,7 +238,8 @@ class HistoryTab(QWidget):
             # looks broken. See _delete_selected for "I want this gone now,
             # regardless of age".
             retention = int(self.cfg.get("retention_days_local") or 0)
-            QMessageBox.information(self, t("history.prune_local_title"), t("history.prune_local_none_body", days=retention))
+            body = t("history.prune_local_disabled_body") if retention == 0 else t("history.prune_local_none_body", days=retention)
+            QMessageBox.information(self, t("history.prune_local_title"), body)
         else:
             QMessageBox.information(self, t("history.prune_local_title"), t("history.prune_local_body", count=removed))
 
@@ -268,6 +278,8 @@ class HistoryTab(QWidget):
             return
         ok, detail = result
         if ok:
+            if self._showing_remote:
+                self._refresh_remote()
             QMessageBox.information(self, t("history.prune_remote_title"), t("history.prune_remote_body"))
         else:
             QMessageBox.warning(self, t("history.prune_remote_failed_title"), detail)
@@ -366,6 +378,8 @@ class HistoryTab(QWidget):
         run_in_background(self, "_restore_remote_many_call", restore_all, self._on_restore_remote_many_done)
 
     def _on_restore_remote_many_done(self, result, exc: Exception | None) -> None:
+        if self._showing_remote:
+            self._refresh_remote()
         if exc is not None:
             QMessageBox.warning(self, t("history.restore_failed_title"), str(exc))
             return
@@ -376,6 +390,8 @@ class HistoryTab(QWidget):
         self._show_batch_result(restored, len(result) - restored)
 
     def _on_restore_remote_done(self, version, destination: str, result, exc: Exception | None) -> None:
+        if self._showing_remote:
+            self._refresh_remote()
         if exc is not None:
             QMessageBox.warning(self, t("history.restore_failed_title"), str(exc))
             return

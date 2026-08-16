@@ -734,6 +734,72 @@ class RegressionTests(unittest.TestCase):
         self.assertIsNotNone(trash._parse_suffix(f"report.txt-{new_suffix}"))
         self.assertIsNotNone(trash._parse_suffix("report.txt-2025-05-01--10-31-57"))
 
+    def test_zero_remote_retention_is_never_auto_delete_in_history_and_browse(self) -> None:
+        from sync_client.gui.browse_tab import _retention_description
+        from sync_client.gui.history_tab import HistoryTab
+        from sync_client.i18n import t
+
+        fake_tab = type("History", (), {
+            "cfg": type("Config", (), {"get": lambda _self, _key: 0})(),
+        })()
+
+        self.assertEqual(HistoryTab._remote_retention_text(fake_tab), t("history.remote_retention_never"))
+        self.assertEqual(_retention_description(0), t("browse.retention_never"))
+        self.assertEqual(_retention_description("0"), t("browse.retention_never"))
+        self.assertNotIn("30", _retention_description(0))
+
+    def test_conflict_file_moves_into_restorable_local_history(self) -> None:
+        with tempfile.TemporaryDirectory() as folder, tempfile.TemporaryDirectory() as state:
+            root = Path(folder)
+            conflict = root / "docs" / "report (conflitto da laptop).txt"
+            conflict.parent.mkdir()
+            conflict.write_text("losing version", encoding="utf-8")
+            trash_root = Path(state) / "trash"
+
+            with patch.object(paths, "local_trash_dir", return_value=trash_root):
+                self.assertTrue(trash.move_to_local_trash(conflict, folder))
+                versions = trash.list_local_versions()
+
+            self.assertFalse(conflict.exists())
+            self.assertEqual(len(versions), 1)
+            self.assertEqual(versions[0].relative_path, "docs/report (conflitto da laptop).txt")
+            restored = root / "restored"
+            self.assertTrue(trash.restore_version(versions[0], str(restored)))
+            self.assertEqual(
+                (restored / versions[0].relative_path).read_text(encoding="utf-8"),
+                "losing version",
+            )
+
+    def test_conflict_review_requires_and_supports_multi_selection(self) -> None:
+        from PyQt6.QtWidgets import QApplication
+        from sync_client.gui.settings_tab import ConflictReviewDialog
+
+        app = QApplication.instance() or QApplication([])
+        files = [Path("/tmp/root/one.txt"), Path("/tmp/root/two.txt")]
+        dialog = ConflictReviewDialog(files, "/tmp/root")
+        self.assertFalse(dialog.move_btn.isEnabled())
+        dialog.list.item(0).setSelected(True)
+        dialog.list.item(1).setSelected(True)
+        self.assertEqual(dialog.selected_files(), files)
+        self.assertTrue(dialog.move_btn.isEnabled())
+        dialog.deleteLater()
+
+    def test_remote_restore_completion_refreshes_remote_history(self) -> None:
+        from sync_client.gui.history_tab import HistoryTab
+
+        fake_tab = type("History", (), {
+            "_showing_remote": True,
+            "_refresh_remote": Mock(),
+            "logger": Mock(),
+        })()
+        version = trash.RemoteTrashVersion("file.txt", "timestamp", "remote", 1)
+        with patch("sync_client.gui.history_tab.QMessageBox.information"):
+            HistoryTab._on_restore_remote_done(
+                fake_tab, version, "/tmp/file.txt", (True, ""), None,
+            )
+
+        fake_tab._refresh_remote.assert_called_once_with()
+
     def test_startup_update_finds_newer_local_bundle(self) -> None:
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)

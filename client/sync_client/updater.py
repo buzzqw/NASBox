@@ -152,6 +152,8 @@ def _remote_version(cfg: Any, connection: rsync_ops.NasConnection, remote_root: 
 
 def find_update(cfg: Any, current_root: Path, startup_path: str) -> UpdateCandidate | None:
     """Find the newest candidate from local startup paths or the configured NAS."""
+    if os.environ.get("NASBOX_DISABLE_CLIENT_UPDATE") == "1":
+        return None
     current_root = current_root.expanduser().resolve()
     local_paths: list[Path] = []
     for raw in (

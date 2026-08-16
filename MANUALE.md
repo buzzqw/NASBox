@@ -91,6 +91,23 @@ problema semplicemente non può più presentarsi.
 
 ## 3. Installazione del client (PC)
 
+Il metodo consigliato e scaricare una release Linux. L'AppImage non richiede
+installazione; su Debian/Ubuntu e disponibile anche il pacchetto `.deb`:
+
+```bash
+chmod +x NASBox-<versione>-x86_64.AppImage
+./NASBox-<versione>-x86_64.AppImage
+sudo apt install ./nasbox-client_<versione>_amd64.deb  # alternativa
+```
+
+I pacchetti includono Python e PyQt6, ma usano `rsync` e OpenSSH del sistema.
+Le release pacchettizzate si aggiornano installando una release successiva.
+Il bundle sorgente per l'updater e generato in modo riproducibile da
+`packaging/build-client-update.sh`; una directory locale `client-update/` e
+solo output estratto/di deploy ignorato da Git, mai una copia canonica.
+
+Per installare direttamente dal sorgente:
+
 ```bash
 cd client
 ./install.sh
@@ -134,10 +151,12 @@ sincronizzare, non solo installato. Nell'ordine:
    systemctl --user disable sync-daemon-client.service    # disattiva l'avvio automatico
    ```
 
-Se salti la configurazione guidata (o il NAS non era raggiungibile in quel
-momento), il primo avvio dell'app chiede comunque dove mettere la cartella
-NASBox (non parte mai senza), e il resto (connessione NAS, banda, retention,
-esclusioni) si sistema dal tab **Impostazioni** con calma.
+Se salti la configurazione testuale, il primo avvio apre un wizard grafico sul
+PC: sceglie la cartella locale, verifica davvero la connessione SSH e prova a
+rilevare script server e cartella remota. Sul NAS non serve alcuna interfaccia
+grafica. WAN e bastione, insieme a banda, retention ed esclusioni, restano nel
+tab **Impostazioni**. Annullando il wizard non viene salvata una configurazione
+parziale e l'app resta utilizzabile per riprovare.
 
 Ripeti questa installazione su **ogni PC** che vuoi far partecipare alla
 sincronizzazione — puntandolo alla stessa cartella NASBox sul NAS.
@@ -443,10 +462,10 @@ quando entrambe le parti hanno modificato lo stesso file.
 ## 9. Limite di banda
 
 Tab Impostazioni → riquadro "Limite di banda": due valori **separati**, ↑
-Carica e ↓ Scarica, in KB/s (`0` = illimitato ciascuno). Premendo "Applica" i
-nuovi limiti vengono usati dal ciclo di sincronizzazione successivo, senza
-riavviare l'app — puoi ad esempio lasciare libero lo scaricamento e limitare
-solo il caricamento (o viceversa).
+Carica e ↓ Scarica, in KB/s (`0` = illimitato ciascuno). Premendo "Salva
+impostazioni" i nuovi limiti vengono usati dal ciclo di sincronizzazione
+successivo, senza riavviare l'app — puoi ad esempio lasciare libero lo
+scaricamento e limitare solo il caricamento (o viceversa).
 
 ## 10. Frequenza di sincronizzazione
 
@@ -700,8 +719,8 @@ cancella `server.conf` né i log.
 
 **"Cartella NASBox non configurata" nel tab Stato**
 - Premi "Cambia percorso…" nel riquadro "Cartella NASBox" e scegline una:
-  succede solo se hai saltato la configurazione guidata di `install.sh` e poi
-  chiuso senza scegliere nulla anche al primo avvio dell'app.
+  succede se hai saltato la configurazione guidata di `install.sh` e annullato
+  anche il wizard grafico del primo avvio.
 
 **"Rileva dal NAS" fallisce**
 - Verifica che "Script server sul NAS" punti al percorso esatto di
