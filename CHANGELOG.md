@@ -4,6 +4,10 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+- La sincronizzazione non si blocca piu quando una cartella cancellata lascia
+  una directory vuota sul NAS: quei percorsi vengono ignorati invece di
+  interrompere l'intero ciclo con un errore "non e un file regolare".
+
 - Sostituita la licenza proprietaria con la European Union Public Licence
   versione 1.2 (EUPL-1.2).
 

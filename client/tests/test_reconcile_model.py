@@ -80,5 +80,37 @@ class ReconcileModelTests(unittest.TestCase):
         self.assertEqual(decision.action, Action.REMOTE_WINS)
 
 
+    def test_unmanaged_remote_directory_is_ignored_not_blocked(self) -> None:
+        # A deleted folder leaves empty directories behind on the NAS (the file
+        # model only removes regular files). The bare folder path must never halt
+        # the whole sync with a "not a regular file" error.
+        decision = plan_path(
+            None, None, remote(RemoteKind.OTHER), delete_enabled=True,
+        )
+        self.assertEqual(decision.action, Action.NOTHING)
+
+    def test_unmanaged_remote_directory_is_ignored_after_local_tombstone(self) -> None:
+        decision = plan_path(
+            Fingerprint("", -1, -1), None, remote(RemoteKind.OTHER), delete_enabled=True,
+        )
+        self.assertEqual(decision.action, Action.NOTHING)
+
+    def test_remote_directory_still_blocks_delete_of_expected_file(self) -> None:
+        # The client tracked a regular file here: never silently delete the
+        # directory that replaced it.
+        decision = plan_path(
+            fp("a", 10), None, remote(RemoteKind.OTHER), delete_enabled=True,
+        )
+        self.assertEqual(decision.action, Action.BLOCK)
+
+    def test_remote_directory_still_blocks_upload_over_it(self) -> None:
+        # A local file appearing where the NAS has a directory must not be
+        # pushed over it (that would delete the directory).
+        decision = plan_path(
+            None, fp("a", 10), remote(RemoteKind.OTHER), delete_enabled=True,
+        )
+        self.assertEqual(decision.action, Action.BLOCK)
+
+
 if __name__ == "__main__":
     unittest.main()

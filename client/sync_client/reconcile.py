@@ -67,6 +67,16 @@ def plan_path(
 ) -> Decision:
     """Choose one convergent action from the common base and both live states."""
     if remote.kind == RemoteKind.OTHER:
+        # The NAS path exists but is not a regular file (a directory, symlink or
+        # other special entry). The sync model only manages regular files, so a
+        # bare path that neither side ever tracked as a file is simply an
+        # unmanaged directory (empty directories survive on the NAS after every
+        # contained file is deleted) and must not halt the whole sync. When
+        # either side actually expected a regular file here, keep blocking:
+        # reconciling would require deleting or overwriting a directory, which
+        # the file model must never do silently.
+        if (baseline is None or baseline.is_tombstone) and local is None:
+            return Decision(Action.NOTHING, "il percorso NAS non e' un file regolare: ignorato")
         return Decision(Action.BLOCK, "sul NAS il percorso non e' un file regolare")
 
     local_absent = local is None
