@@ -24,6 +24,7 @@ problema semplicemente non può più presentarsi.
 6. [Connessione al NAS (tab Impostazioni)](#6-connessione-al-nas-tab-impostazioni)
 7. [Il caso del bastione (NAS non raggiungibile da fuori)](#7-il-caso-del-bastione-nas-non-raggiungibile-da-fuori)
 8. [La cartella NASBox](#8-la-cartella-nasbox)
+   - [Cartelle esterne (mirror)](#cartelle-esterne-mirror)
 9. [Limite di banda](#9-limite-di-banda)
 10. [Frequenza di sincronizzazione](#10-frequenza-di-sincronizzazione)
 11. [Pausa e pausa a tempo](#11-pausa-e-pausa-a-tempo)
@@ -400,6 +401,34 @@ successivi. Per esempio, `.git/` esclude i repository Git e `.venv/` gli
 ambienti virtuali Python, anche se si trovano dentro una sottocartella di
 NASBox. Se erano già stati sincronizzati, l'esclusione non li rimuove dal NAS
 o dagli altri PC: per eliminarne una copia esistente serve farlo manualmente.
+
+### Cartelle esterne (mirror)
+
+Puoi tenere dentro NASBox la copia sincronizzata di una o più cartelle che si
+trovano FUORI dalla cartella NASBox — per esempio la tua cartella di lavoro —
+senza spostarle. Tab **Cartelle esterne** → **Aggiungi cartella…**: scegli la
+cartella sorgente (deve essere un percorso assoluto sul disco) e il nome della
+sottocartella dentro NASBox dove vuoi la copia (di default il nome della
+cartella sorgente). Da lì la copia viene propagata al NAS e agli altri PC dal
+normale ciclo di sincronizzazione.
+
+- È un mirror a **senso unico**: la cartella sorgente resta autorevole.
+  Qualunque modifica fatta altrove alla copia dentro NASBox viene sovrascritta
+  (o eliminata, se la cartella sorgente non contiene più quel file) alla
+  passata successiva.
+- La copia si aggiorna quasi subito dopo ogni modifica della sorgente
+  (rilevamento inotify, come per la cartella NASBox), con un re-sync periodico
+  di sicurezza ogni 5 minuti che recupera anche le modifiche avvenute col PC
+  spento o sospeso.
+- La colonna **Attiva** mette in pausa il mirror senza rimuoverlo;
+  **Sincronizza ora** forza una copia immediata. La tab mostra anche l'ultima
+  sincronizzazione e gli eventuali errori (es. cartella sorgente non trovata).
+- I pattern di esclusione (vedi sotto) valgono anche per le copie mirror: ciò
+  che escludi dalla sincronizzazione non finisce nelle copie, e le copie non
+  esportano le cartelle interne di NASBox (`.sync-trash`, `.sync-partial`,
+  `.nasbox-root`).
+- Le cancellazioni della copia seguono l'impostazione globale **Propaga le
+  cancellazioni** della cartella NASBox.
 
 ### Marker del repository e volume locale
 

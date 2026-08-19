@@ -60,6 +60,12 @@ DEFAULTS: dict[str, Any] = {
     "exclude_patterns": [],       # rsync-style patterns (e.g. "node_modules/", "*.tmp") never synced
                                    # in either direction -- NASBox's answer to Dropbox's "selective sync",
                                    # but scoped to patterns instead of whole subfolders.
+    "mirrors": [],                # external folders mirrored ONE-WAY into local_root (see mirrors.py):
+                                   # each entry is {"source": str (absolute path), "dest": str (relative
+                                   # subfolder name inside NASBox), "enabled": bool,
+                                   # "last_sync": float|None (epoch seconds), "error": str}.
+                                   # The local source is authoritative: the copy inside NASBox (and so
+                                   # what ends up on the NAS and on other PCs) always matches it.
     "language": "auto",           # "auto" (guess from the OS locale), "it", or "en" -- see i18n.py.
                                    # Takes effect on next start: widgets read translated strings once,
                                    # at construction time, there's no live re-translation.
@@ -131,6 +137,34 @@ class Config:
 
     def set_exclude_patterns(self, patterns: list[str]) -> None:
         self.set("exclude_patterns", list(patterns))
+
+    # --- external folder mirrors ---
+
+    def mirrors(self) -> list[dict]:
+        with self._lock:
+            return json.loads(json.dumps(self._data.get("mirrors", [])))
+
+    def set_mirrors(self, mirrors: list[dict]) -> None:
+        self.set("mirrors", list(mirrors))
+
+    def mirror_by_source(self, source: str) -> Optional[dict]:
+        for entry in self.mirrors():
+            if entry.get("source") == source:
+                return entry
+        return None
+
+    def update_mirror(self, source: str, **updates: Any) -> None:
+        """Merge updates into the mirror entry identified by its source path.
+        A no-op if that entry no longer exists (e.g. it was removed from the
+        GUI while a background watcher was still finishing a transfer)."""
+        mirrors = self.mirrors()
+        changed = False
+        for entry in mirrors:
+            if entry.get("source") == source:
+                entry.update(updates)
+                changed = True
+        if changed:
+            self.set_mirrors(mirrors)
 
     def language(self) -> str:
         with self._lock:

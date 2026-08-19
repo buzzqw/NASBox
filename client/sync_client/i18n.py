@@ -823,6 +823,108 @@ STRINGS: dict[str, dict[str, str]] = {
         "en": "{direction}: {count} operations completed.",
     },
 
+    # --- mirrors.py / mirrors_tab.py (external folder mirrors) ---
+    "mirrors.note": {
+        "it": "Qui puoi elencare cartelle che stanno FUORI dalla cartella NASBox (es. la tua "
+              "cartella di lavoro): NASBox ne tiene automaticamente una copia sincronizzata "
+              "dentro di sé, e da lì la ritrovi sul NAS e su tutti gli altri PC collegati. "
+              "⚠️ È un mirror a senso unico: la cartella sorgente è quella autorevole, le "
+              "modifiche fatte altrove alla copia in NASBox vengono sovrascritte.",
+        "en": "List folders that live OUTSIDE the NASBox folder (e.g. your work folder): "
+              "NASBox automatically keeps a synced copy of them inside itself, so they show "
+              "up on the NAS and on every other connected PC too. ⚠️ This is a one-way "
+              "mirror: the source folder is authoritative, edits made elsewhere to the copy "
+              "inside NASBox get overwritten.",
+    },
+    "mirrors.col_enabled": {"it": "Attiva", "en": "On"},
+    "mirrors.col_source": {"it": "Cartella sorgente", "en": "Source folder"},
+    "mirrors.col_dest": {"it": "Copia in NASBox", "en": "Copy into NASBox"},
+    "mirrors.col_last_sync": {"it": "Ultima sincronizzazione", "en": "Last sync"},
+    "mirrors.col_status": {"it": "Stato", "en": "Status"},
+    "mirrors.col_enabled_tooltip": {
+        "it": "Spunta per far sì che NASBox tenga aggiornata la copia. Togli la spunta per mettere in pausa il mirror senza rimuoverlo.",
+        "en": "Check to keep the copy updated. Uncheck to pause the mirror without removing it.",
+    },
+    "mirrors.dest_tooltip": {
+        "it": "Nome della sottocartella dentro NASBox in cui viene replicata la cartella sorgente.",
+        "en": "Name of the subfolder inside NASBox where the source folder is replicated.",
+    },
+    "mirrors.add_btn": {"it": "Aggiungi cartella…", "en": "Add folder…"},
+    "mirrors.add_tooltip": {
+        "it": "Scegli una cartella esterna e un nome di destinazione dentro NASBox.",
+        "en": "Pick an external folder and a destination name inside NASBox.",
+    },
+    "mirrors.remove_btn": {"it": "Rimuovi selezionata", "en": "Remove selected"},
+    "mirrors.remove_tooltip": {
+        "it": "Rimuove la cartella scelta dall'elenco. La copia già presente in NASBox non viene eliminata automaticamente.",
+        "en": "Removes the selected folder from the list. The copy already inside NASBox is not deleted automatically.",
+    },
+    "mirrors.sync_now_btn": {"it": "Sincronizza ora", "en": "Sync now"},
+    "mirrors.sync_now_tooltip": {
+        "it": "Copia subito la cartella selezionata in NASBox, senza aspettare il prossimo controllo.",
+        "en": "Immediately copies the selected folder into NASBox, without waiting for the next check.",
+    },
+    "mirrors.add_title": {"it": "Aggiungi cartella esterna", "en": "Add external folder"},
+    "mirrors.choose_source": {"it": "Scegli la cartella sorgente", "en": "Choose the source folder"},
+    "mirrors.dest_prompt": {
+        "it": "Nome della cartella dentro NASBox in cui tenerne la copia:",
+        "en": "Name of the folder inside NASBox to keep the copy in:",
+    },
+    "mirrors.error_title": {"it": "Cartella esterna", "en": "External folder"},
+    "mirrors.no_nasbox_body": {
+        "it": "Configura prima la cartella NASBox (tab Stato) per poter aggiungere cartelle esterne.",
+        "en": "Set up the NASBox folder first (Status tab) before adding external folders.",
+    },
+    "mirrors.remove_confirm_title": {"it": "Rimuovi cartella esterna", "en": "Remove external folder"},
+    "mirrors.remove_confirm_body": {
+        "it": "Rimuovere '{source}' dall'elenco delle cartelle esterne?\n\nLa copia già in NASBox resta dov'è.",
+        "en": "Remove '{source}' from the external folders list?\n\nThe copy already in NASBox stays where it is.",
+    },
+    "mirrors.state_idle": {"it": "Sincronizzato", "en": "Synced"},
+    "mirrors.state_syncing": {"it": "Sincronizzazione…", "en": "Syncing…"},
+    "mirrors.state_error": {"it": "Errore", "en": "Error"},
+    "mirrors.state_disabled": {"it": "Disattivata", "en": "Disabled"},
+    "mirrors.state_unconfigured": {"it": "NASBox non configurata", "en": "NASBox not set up"},
+    "mirrors.last_sync_never": {"it": "mai", "en": "never"},
+    "mirrors.err_source_required": {"it": "Indicare una cartella sorgente.", "en": "Pick a source folder."},
+    "mirrors.err_dest_required": {
+        "it": "Indicare il nome della cartella di destinazione dentro NASBox.",
+        "en": "Pick a destination folder name inside NASBox.",
+    },
+    "mirrors.err_source_absolute": {
+        "it": "La cartella sorgente deve essere un percorso assoluto.",
+        "en": "The source folder must be an absolute path.",
+    },
+    "mirrors.err_source_missing": {"it": "Cartella sorgente non trovata: {source}", "en": "Source folder not found: {source}"},
+    "mirrors.err_dest_invalid": {
+        "it": "Il nome di destinazione deve essere un semplice nome di cartella dentro NASBox.",
+        "en": "The destination name must be a simple folder name inside NASBox.",
+    },
+    "mirrors.err_dest_reserved": {
+        "it": "Questo nome è riservato alle cartelle interne di NASBox.",
+        "en": "This name is reserved for NASBox's internal folders.",
+    },
+    "mirrors.err_nasbox_not_configured": {
+        "it": "Cartella NASBox non ancora configurata.",
+        "en": "The NASBox folder has not been set up yet.",
+    },
+    "mirrors.err_source_inside_nasbox": {
+        "it": "La cartella sorgente è già dentro la cartella NASBox (e quindi già sincronizzata).",
+        "en": "The source folder is already inside the NASBox folder (and therefore already synced).",
+    },
+    "mirrors.err_dest_taken": {
+        "it": "Un'altra cartella esterna usa già questo nome di destinazione.",
+        "en": "Another external folder already uses this destination name.",
+    },
+    "mirrors.err_source_taken": {
+        "it": "Questa cartella sorgente è già presente nell'elenco.",
+        "en": "This source folder is already in the list.",
+    },
+    "mirrors.err_invalid_entry": {
+        "it": "Sorgente o destinazione non valida.",
+        "en": "Source or destination is invalid.",
+    },
+
     # --- main_window.py ---
     "main_window.brand_tagline": {
         "it": "Sincronizzazione privata, sempre sotto controllo",
@@ -833,6 +935,7 @@ STRINGS: dict[str, dict[str, str]] = {
     "main_window.tab_history": {"it": "Storico / Cestino", "en": "History / Trash"},
     "main_window.tab_browse": {"it": "Sfoglia NAS", "en": "Browse NAS"},
     "main_window.tab_log": {"it": "Log", "en": "Log"},
+    "main_window.tab_mirrors": {"it": "Cartelle esterne", "en": "External folders"},
     "main_window.tab_settings": {"it": "Impostazioni", "en": "Settings"},
     "main_window.tab_status_tooltip": {"it": "Stato attuale, pausa, cartella NASBox.", "en": "Current status, pause, NASBox folder."},
     "main_window.tab_transfers_tooltip": {"it": "File in coda di caricamento/scaricamento in questo momento.", "en": "Files currently queued to upload/download."},
@@ -842,6 +945,10 @@ STRINGS: dict[str, dict[str, str]] = {
         "en": "Browse the NAS folder as it is right now, download, rename, or delete files and folders.",
     },
     "main_window.tab_log_tooltip": {"it": "Cronologia di ogni upload, download, cancellazione ed errore.", "en": "History of every upload, download, deletion, and error."},
+    "main_window.tab_mirrors_tooltip": {
+        "it": "Cartelle esterne replicate dentro NASBox: la sorgente locale resta dov'è, la copia viene sincronizzata e propagata agli altri PC.",
+        "en": "External folders replicated inside NASBox: the local source stays where it is, the copy is kept in sync and propagated to the other PCs.",
+    },
     "main_window.tab_settings_tooltip": {"it": "Connessione al NAS, banda, esclusioni, lingua.", "en": "NAS connection, bandwidth, exclusions, language."},
     "main_window.server_outdated_suffix": {"it": "aggiornamento NAS richiesto", "en": "NAS update required"},
     "main_window.server_update_available_title": {"it": "Aggiornamento server NAS", "en": "NAS server update"},

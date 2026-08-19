@@ -12,6 +12,7 @@ import shutil
 import subprocess
 import threading
 import time
+from pathlib import Path
 from typing import Callable, Optional
 
 from . import paths
@@ -31,10 +32,16 @@ class FolderWatcher:
         self, local_path: str,
         on_error: Optional[Callable[[str], None]] = None,
         is_excluded: Optional[Callable[[str], bool]] = None,
+        stamp_path: Optional[str] = None,
     ) -> None:
         self.path = local_path
         self._on_error = on_error
         self._is_excluded = is_excluded
+        # The polling fallback compares "files newer than a stamp file" to spot
+        # changes when inotifywait isn't available. The main NASBox watcher uses
+        # a shared default stamp; extra watchers (external-folder mirrors) must
+        # bring their own so they don't rotate each other's watermark.
+        self._stamp_path = stamp_path
         self.dirty_ts: float | None = None
         # Which specific relative path(s) are behind the current dirty state. Lets
         # PullWorker tell "this dirty mark is just my own in-flight pull writing a
@@ -169,7 +176,7 @@ class FolderWatcher:
         self._run_poll()
 
     def _run_poll(self) -> None:
-        stamp = paths.watch_stamp_file()
+        stamp = Path(self._stamp_path) if self._stamp_path else paths.watch_stamp_file()
         stamp.parent.mkdir(parents=True, exist_ok=True)
         stamp.touch(exist_ok=True)
         # `find -newer` (below) only ever catches additions/modifications -- a file

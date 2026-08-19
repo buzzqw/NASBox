@@ -11,6 +11,17 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 - Sostituita la licenza proprietaria con la European Union Public Licence
   versione 1.2 (EUPL-1.2).
 
+## 1.12.0 - 2026-08-19
+
+- Aggiunta la tab **Cartelle esterne**: cartelle che vivono FUORI dalla
+  cartella NASBox (es. la cartella di lavoro) vengono replicate
+  automaticamente dentro NASBox, e da lì finiscono sul NAS e sugli altri PC
+  tramite il normale ciclo di sincronizzazione.
+- Il mirror è a senso unico: la cartella sorgente resta autorevole e le
+  modifiche alla copia fatte altrove vengono sovrascritte alla passata
+  successiva. Le copie si aggiornano quasi subito (rilevamento inotify) con
+  un re-sync periodico di sicurezza ogni 5 minuti.
+
 ## 1.11.2 - 2026-08-16
 
 - Reso esplicito il codice di uscita usato da `flock` quando il lock NAS resta

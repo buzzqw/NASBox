@@ -12,8 +12,8 @@ from PyQt6.QtWidgets import (
 
 from .. import config as config_module
 from .. import logger as logger_module
-from .. import updater
 from ..engine import SyncEngine
+from ..mirrors import MirrorManager
 from ..version import APP_NAME, APP_VERSION
 from ..pull_worker import PullWorker
 from ..push_worker import PushWorker
@@ -28,6 +28,7 @@ from ..repository_safety import RepositorySafetyError, initialize_local_root
 from .browse_tab import BrowseTab
 from .history_tab import HistoryTab
 from .log_tab import LogTab
+from .mirrors_tab import MirrorsTab
 from .settings_tab import SettingsTab
 from .status_tab import StatusTab
 from .transfers_tab import TransfersTab
@@ -76,6 +77,7 @@ class MainWindow(QMainWindow):
             push_worker=self.push_worker, pull_worker=self.pull_worker,
             sync_state=sync_state,
         )
+        self.mirror_manager = MirrorManager(self.cfg, self.logger)
 
         shell = QWidget()
         shell_layout = QVBoxLayout(shell)
@@ -118,19 +120,22 @@ class MainWindow(QMainWindow):
         self.log_tab = LogTab(self.logger)
         self.history_tab = HistoryTab(self.cfg, self.engine, self.logger)
         self.browse_tab = BrowseTab(self.cfg, self.engine, self.logger, self.sync_state)
+        self.mirrors_tab = MirrorsTab(self.cfg, self.mirror_manager)
 
         tabs.addTab(self.status_tab, t("main_window.tab_status"))
         tabs.addTab(self.transfers_tab, t("main_window.tab_transfers"))
         tabs.addTab(self.history_tab, t("main_window.tab_history"))
         tabs.addTab(self.browse_tab, t("main_window.tab_browse"))
         tabs.addTab(self.log_tab, t("main_window.tab_log"))
+        tabs.addTab(self.mirrors_tab, t("main_window.tab_mirrors"))
         tabs.addTab(self.settings_tab, t("main_window.tab_settings"))
         tabs.setTabToolTip(0, t("main_window.tab_status_tooltip"))
         tabs.setTabToolTip(1, t("main_window.tab_transfers_tooltip"))
         tabs.setTabToolTip(2, t("main_window.tab_history_tooltip"))
         tabs.setTabToolTip(3, t("main_window.tab_browse_tooltip"))
         tabs.setTabToolTip(4, t("main_window.tab_log_tooltip"))
-        tabs.setTabToolTip(5, t("main_window.tab_settings_tooltip"))
+        tabs.setTabToolTip(5, t("main_window.tab_mirrors_tooltip"))
+        tabs.setTabToolTip(6, t("main_window.tab_settings_tooltip"))
         shell_layout.addWidget(tabs, 1)
         self.setCentralWidget(shell)
 
@@ -169,6 +174,9 @@ class MainWindow(QMainWindow):
         self.push_worker.queue_items_known.connect(self.transfers_tab.on_queue_items_known)
         self.engine.log_event.connect(self.log_tab.on_log_event)
         self.engine.log_event.connect(self.status_tab.on_log_event)
+        self.mirror_manager.status_changed.connect(self.mirrors_tab.on_status_changed)
+        self.mirror_manager.log_event.connect(self.log_tab.on_log_event)
+        self.mirror_manager.log_event.connect(self.status_tab.on_log_event)
 
         self.tray = TrayIcon(self.cfg, self.engine, self.logger, self)
         for direction, worker in (("upload", self.push_worker), ("download", self.pull_worker)):
@@ -191,6 +199,7 @@ class MainWindow(QMainWindow):
         self.scan_worker.start()
         self.push_worker.start()
         self.pull_worker.start()
+        self.mirror_manager.start()
 
     def _open_status_action(self, action: str) -> None:
         destination = {
@@ -361,7 +370,7 @@ class MainWindow(QMainWindow):
         # Stop the workers that actually move files first, then the coordinator
         # (which would otherwise keep reconciling/stopping the watcher while a
         # transfer might still be winding down), then the queue-preview scanner.
-        for worker in (self.push_worker, self.pull_worker, self.engine, self.scan_worker):
+        for worker in (self.push_worker, self.pull_worker, self.engine, self.mirror_manager, self.scan_worker):
             try:
                 worker.stop()
             except Exception as exc:
