@@ -36,3 +36,6 @@ nasbox-client-update-*.tar.gz*
 .DS_Store
 .idea/
 .vscode/
+
+# AI/agent working notes (contengono info di accesso al NAS)
+CLAUDE.md
