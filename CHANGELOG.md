@@ -11,6 +11,11 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 - Sostituita la licenza proprietaria con la European Union Public Licence
   versione 1.2 (EUPL-1.2).
 
+## 1.12.1 - 2026-08-19
+
+- Corretto l'errore `name 'updater' is not defined` al click sulla versione
+  nell'intestazione: mancava l'import di `updater` in `main_window.py`.
+
 ## 1.12.0 - 2026-08-19
 
 - Aggiunta la tab **Cartelle esterne**: cartelle che vivono FUORI dalla

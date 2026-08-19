@@ -12,6 +12,7 @@ from PyQt6.QtWidgets import (
 
 from .. import config as config_module
 from .. import logger as logger_module
+from .. import updater
 from ..engine import SyncEngine
 from ..mirrors import MirrorManager
 from ..version import APP_NAME, APP_VERSION
