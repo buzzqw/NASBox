@@ -155,6 +155,16 @@ class SyncEngine(QThread):
             self.connection_changed.emit(self._conn)
 
         paused = self.cfg.is_paused()
+        watcher = self.watchers.get()
+        watcher_mode, watcher_detail = "disabled", ""
+        if watcher is not None:
+            try:
+                candidate_status = watcher.status()
+                if isinstance(candidate_status, tuple) and len(candidate_status) == 2:
+                    watcher_mode, watcher_detail = candidate_status
+            except (AttributeError, TypeError, ValueError):
+                # Keep status reporting compatible with lightweight test doubles.
+                watcher_mode, watcher_detail = "starting", ""
         self.status_changed.emit({
             "paused": paused,
             "pause_remaining": self.cfg.pause_remaining_seconds(),
@@ -165,6 +175,8 @@ class SyncEngine(QThread):
             "server_lock_held": self.cfg.get("server_lock_held", False),
             "server_lock_age_seconds": self.cfg.get("server_lock_age_seconds", 0),
             "server_lock_owner_pid": self.cfg.get("server_lock_owner_pid", ""),
+            "watcher_mode": watcher_mode,
+            "watcher_detail": watcher_detail,
             "cycle_ts": now,
         })
 

@@ -11,6 +11,14 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 - Sostituita la licenza proprietaria con la European Union Public Licence
   versione 1.2 (EUPL-1.2).
 
+## 1.15.0 - 2026-08-21
+
+- La scheda Stato mostra se il rilevamento modifiche usa `inotify` o la
+  scansione periodica, evidenziando il possibile impatto sulle prestazioni.
+- I trasferimenti rimandati per contesa del lock NAS sono distinti dagli errori
+  inattesi del lock; gli errori vengono inoltre presentati come connessione SSH
+  o trasferimento rsync quando il dettaglio lo consente.
+
 ## 1.14.1 - 2026-08-21
 
 - Il servizio systemd mantiene il client non interattivo anche quando eredita

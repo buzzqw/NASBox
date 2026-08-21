@@ -53,6 +53,8 @@ class FolderWatcher:
         self._state_lock = threading.Lock()
         self._stop = threading.Event()
         self._proc: subprocess.Popen | None = None
+        self._mode = "starting"
+        self._mode_detail = ""
         self._thread = threading.Thread(target=self._run, daemon=True)
 
     def start(self) -> None:
@@ -83,6 +85,16 @@ class FolderWatcher:
         i.e. as possibly-external, rather than assuming it's explainable)."""
         with self._state_lock:
             return set(self._dirty_paths)
+
+    def status(self) -> tuple[str, str]:
+        """Return the active change-detection mode and an optional detail."""
+        with self._state_lock:
+            return self._mode, self._mode_detail
+
+    def _set_mode(self, mode: str, detail: str = "") -> None:
+        with self._state_lock:
+            self._mode = mode
+            self._mode_detail = detail
 
     def consume_if_ready(self, debounce_seconds: float) -> bool:
         """True (and clears the flag) once the folder has been quiet for debounce_seconds."""
@@ -127,8 +139,10 @@ class FolderWatcher:
 
     def _run(self) -> None:
         if has_inotify():
+            self._set_mode("inotify")
             self._run_inotify()
         else:
+            self._set_mode("polling")
             self._run_poll()
 
     def _run_inotify(self) -> None:
@@ -143,6 +157,7 @@ class FolderWatcher:
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
             )
         except OSError:
+            self._set_mode("polling", "inotifywait non disponibile; uso il controllo periodico")
             self._run_poll()
             return
         assert self._proc.stdout is not None
@@ -169,10 +184,13 @@ class FolderWatcher:
             stderr = self._proc.stderr.read().strip()
         if self._on_error:
             reason = stderr or f"inotifywait terminato inaspettatamente (uscita {self._proc.returncode})"
+            self._set_mode("polling", reason)
             self._on_error(
                 f"controllo modifiche via inotify interrotto per '{self.path}', "
                 f"passo al controllo periodico ogni {POLL_FALLBACK_SECONDS}s: {reason}"
             )
+        else:
+            self._set_mode("polling", stderr or "inotifywait terminato inaspettatamente")
         self._run_poll()
 
     def _run_poll(self) -> None:

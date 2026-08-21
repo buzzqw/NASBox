@@ -96,6 +96,10 @@ class StatusTab(QWidget):
         self.remote_lock_label = QLabel(t("status.remote_lock_free"))
         self.remote_lock_label.setWordWrap(True)
         status_layout.addWidget(self.remote_lock_label)
+        self.watcher_label = QLabel(t("status.watcher_starting"))
+        self.watcher_label.setObjectName("statusWatcher")
+        self.watcher_label.setWordWrap(True)
+        status_layout.addWidget(self.watcher_label)
         self.queue_label = QLabel(t("status.queue_unknown"))
         self.queue_label.setObjectName("statusQueue")
         status_layout.addWidget(self.queue_label)
@@ -324,6 +328,7 @@ class StatusTab(QWidget):
         self._refresh_pause_button()
         self._refresh_sync_state(paused, remaining)
         self._refresh_remote_lock(status)
+        self._refresh_watcher(status)
         self._refresh_queue_label()
         self._refresh_attention()
         if self._connected and not self._diagnostics_auto_loaded:
@@ -352,6 +357,29 @@ class StatusTab(QWidget):
         age = f"{minutes}m {seconds:02d}s" if minutes else f"{seconds}s"
         owner = str(status.get("server_lock_owner_pid") or "sconosciuto")
         self.remote_lock_label.setText(t("status.remote_lock_held", age=age, owner=owner))
+
+    def _refresh_watcher(self, status: dict) -> None:
+        mode = status.get("watcher_mode", "disabled")
+        detail = self._compact_detail(status.get("watcher_detail", ""))
+        if mode == "inotify":
+            text = t("status.watcher_inotify")
+            state = "active"
+        elif mode == "polling":
+            text = t("status.watcher_polling", detail=detail)
+            state = "warning"
+        elif mode == "starting":
+            text = t("status.watcher_starting")
+            state = "starting"
+        else:
+            text = t("status.watcher_disabled")
+            state = "disabled"
+        if detail and mode == "polling":
+            text = t("status.watcher_polling_detail", detail=detail)
+        self.watcher_label.setText(text)
+        if self.watcher_label.property("state") != state:
+            self.watcher_label.setProperty("state", state)
+            self.watcher_label.style().unpolish(self.watcher_label)
+            self.watcher_label.style().polish(self.watcher_label)
 
     def on_queue_updated(self, items) -> None:
         self._queue_items = list(items)
@@ -407,6 +435,7 @@ class StatusTab(QWidget):
         if ok:
             self._last_success = (time.time(), direction)
             self.last_sync_label.setText(self._last_sync_text())
+            self.sync_feedback_label.hide()
         self._refresh_sync_state()
 
     def _refresh_sync_state(self, paused: bool | None = None, remaining=None) -> None:
@@ -438,9 +467,19 @@ class StatusTab(QWidget):
             text = t("status.sync_state_ready")
         self.sync_state_label.setText(text)
 
-    def on_transfer_lock_unavailable(self, direction: str, _detail: str) -> None:
+    def on_transfer_lock_unavailable(self, direction: str, detail: str) -> None:
         self._transfer_phases.pop(direction, None)
         self._current_paths.pop(direction, None)
+        normalized = str(detail).lower()
+        if "altro pc" in normalized or "another pc" in normalized:
+            feedback = t(
+                "status.sync_deferred_lock",
+                direction=t(f"status.direction_{direction}"),
+            )
+        else:
+            feedback = t("status.sync_lock_error", detail=self._compact_detail(detail))
+        self.sync_feedback_label.setText(feedback)
+        self.sync_feedback_label.show()
         self._refresh_sync_state()
 
     def on_log_event(self, action: str, _path: str, detail: str) -> None:
@@ -486,9 +525,24 @@ class StatusTab(QWidget):
         return t(
             "status.last_problem",
             time=time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(timestamp)),
-            action=action,
+            action=self._problem_category(action, detail),
             detail=self._compact_detail(detail),
         )
+
+    @staticmethod
+    def _problem_category(action: str, detail: str) -> str:
+        if action in ("SAFETY_BLOCK", "JOURNAL_BLOCK"):
+            return t(f"status.problem_category_{action.lower()}")
+        normalized = str(detail).lower()
+        connection_terms = (
+            "ssh", "timeout", "timed out", "connection refused", "connection reset",
+            "no route to host", "host key", "nome host", "connessione",
+        )
+        if any(term in normalized for term in connection_terms):
+            return t("status.problem_category_connection")
+        if action == "ERROR":
+            return t("status.problem_category_transfer")
+        return t("status.problem_category_generic", action=action)
 
     @staticmethod
     def _compact_detail(detail: str) -> str:
@@ -569,7 +623,11 @@ class StatusTab(QWidget):
                 continue
             problems.append((
                 f"event_{action.lower()}",
-                t("status.problem_recent_event", action=action, detail=self._compact_detail(event[1])),
+                t(
+                    "status.problem_recent_event",
+                    action=self._problem_category(action, event[1]),
+                    detail=self._compact_detail(event[1]),
+                ),
                 "log",
             ))
 

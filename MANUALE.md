@@ -374,6 +374,14 @@ sempre e solo quella.
 
 **Tab Stato:**
 
+- La riga **Controllo modifiche** indica se il client usa `inotify` (rilevamento
+  immediato) oppure la scansione periodica ogni 2 secondi. Se compare la
+  scansione periodica, installa `inotify-tools` per ridurre I/O e CPU sugli
+  alberi locali grandi; il client continua comunque a funzionare.
+- Un trasferimento rimandato per **lock NAS occupato** è una contesa normale e
+  viene ritentato automaticamente. Un errore del lock, della connessione SSH o
+  del trasferimento rsync viene invece indicato separatamente e resta visibile
+  nel riepilogo degli ultimi problemi.
 - Il riquadro "Cartella NASBox" mostra il percorso attuale, con **Apri
   cartella** (la apre nel file manager) e **Cambia percorso…**.
 - **Cambia percorso…** aggiorna solo *dove il client guarda* sul disco — **non

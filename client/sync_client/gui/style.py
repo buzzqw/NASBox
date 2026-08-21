@@ -66,6 +66,15 @@ QLabel#statusQueue {
     border-radius: 6px;
     padding: 7px 9px;
 }
+QLabel#statusWatcher {
+    background-color: #f8fafc;
+    color: #667085;
+    border-radius: 6px;
+    padding: 7px 9px;
+}
+QLabel#statusWatcher[state="active"] { color: #087443; }
+QLabel#statusWatcher[state="warning"] { color: #9a6200; background-color: #fff8e6; }
+QLabel#statusWatcher[state="disabled"] { color: #98a2b3; }
 QLabel#historyScope {
     background-color: #eef5ff;
     color: #175cd3;
