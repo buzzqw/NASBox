@@ -11,6 +11,12 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 - Sostituita la licenza proprietaria con la European Union Public Licence
   versione 1.2 (EUPL-1.2).
 
+## 1.14.1 - 2026-08-21
+
+- Il servizio systemd mantiene il client non interattivo anche quando eredita
+  una sessione grafica: la finestra principale resta nascosta e gli errori di
+  avvio vengono registrati senza aprire dialoghi modali.
+
 ## 1.14.0 - 2026-08-21
 
 - Il servizio systemd del client non mostra dialoghi interattivi durante
