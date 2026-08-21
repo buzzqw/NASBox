@@ -30,7 +30,7 @@
 #
 set -uo pipefail
 
-VERSION="3.10.0"
+VERSION="3.11.0"
 SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -122,6 +122,7 @@ load_config() {
     # is intentionally no longer used.
     SYNC_LOCK_MAX_AGE_MINUTES=0
     CHECK_INTERVAL_MINUTES=60
+    PRUNE_MAX_FILES_PER_PASS=500
     LOG_MAX_BYTES=5242880
     JOURNAL_MAX_BYTES=10485760
     local key value
@@ -133,6 +134,7 @@ load_config() {
             TOMBSTONE_TTL_DAYS) TOMBSTONE_TTL_DAYS="$value" ;;
             SYNC_LOCK_MAX_AGE_MINUTES) SYNC_LOCK_MAX_AGE_MINUTES="$value" ;;
             CHECK_INTERVAL_MINUTES) CHECK_INTERVAL_MINUTES="$value" ;;
+            PRUNE_MAX_FILES_PER_PASS) PRUNE_MAX_FILES_PER_PASS="$value" ;;
             LOG_MAX_BYTES)
                 # Numeric values may carry an explanatory inline comment in
                 # server.conf.example. Remove it and every surrounding space
@@ -153,6 +155,7 @@ load_config() {
     [[ "$TOMBSTONE_TTL_DAYS" =~ ^[0-9]+$ ]] || { log ERROR "TOMBSTONE_TTL_DAYS deve essere un intero >= 0"; exit 1; }
     [[ "$SYNC_LOCK_MAX_AGE_MINUTES" =~ ^[0-9]+$ ]] || { log ERROR "SYNC_LOCK_MAX_AGE_MINUTES deve essere un intero >= 0"; exit 1; }
     [[ "$CHECK_INTERVAL_MINUTES" =~ ^[1-9][0-9]*$ ]] || { log ERROR "CHECK_INTERVAL_MINUTES deve essere un intero >= 1"; exit 1; }
+    [[ "$PRUNE_MAX_FILES_PER_PASS" =~ ^[1-9][0-9]*$ ]] || { log ERROR "PRUNE_MAX_FILES_PER_PASS deve essere un intero >= 1"; exit 1; }
     [[ "$LOG_MAX_BYTES" =~ ^[1-9][0-9]*$ ]] || { log ERROR "LOG_MAX_BYTES deve essere un intero >= 1"; exit 1; }
     [[ "$JOURNAL_MAX_BYTES" =~ ^[1-9][0-9]*$ ]] || { log ERROR "JOURNAL_MAX_BYTES deve essere un intero >= 1"; exit 1; }
 
@@ -1000,7 +1003,7 @@ prune_root() {
         return 0
     fi
 
-    local now retention_seconds
+    local now retention_seconds processed=0
     now=$(date '+%s')
     retention_seconds=$(( RETENTION_DAYS * 86400 ))
 
@@ -1022,6 +1025,11 @@ prune_root() {
                 else
                     log ERROR "Impossibile rimuovere versione storica: $rel"
                 fi
+            fi
+            (( processed++ ))
+            if (( processed >= PRUNE_MAX_FILES_PER_PASS )); then
+                log INFO "Pass di pruning limitato a $PRUNE_MAX_FILES_PER_PASS versioni; continuera' al prossimo intervallo."
+                break
             fi
         fi
     done < <(find "$trash" -type f -print0 2>/dev/null)
@@ -1169,6 +1177,30 @@ human_size() {
     du -sh "$1" 2>/dev/null | cut -f1
 }
 
+read_sync_lock_diagnostics() {
+    SYNC_LOCK_HELD="false"
+    SYNC_LOCK_AGE_SECONDS="0"
+    SYNC_LOCK_OWNER_PID=""
+    exec 8>"$SYNC_LOCK_FILE" || return 0
+    if flock -n 8; then
+        flock -u 8
+        exec 8>&-
+        return 0
+    fi
+    SYNC_LOCK_HELD="true"
+    while read -r pid elapsed args; do
+        case "$args" in
+            *"$SYNC_LOCK_FILE"*)
+                SYNC_LOCK_OWNER_PID="$pid"
+                [[ "$elapsed" =~ ^[0-9]+$ ]] && SYNC_LOCK_AGE_SECONDS="$elapsed"
+                break
+                ;;
+        esac
+    done < <(ps -eo pid=,etimes=,args= 2>/dev/null)
+    flock -u 8
+    exec 8>&-
+}
+
 cmd_status() {
     echo "sync-daemon-server v$VERSION"
     printf '%-18s %s\n' "Script:" "$SCRIPT_PATH"
@@ -1204,6 +1236,13 @@ cmd_status() {
     printf '%-18s %s\n' "Storico (spazio):" "$size"
     printf '%-18s %s\n' "Journal (spazio):" "$(wc -c < "$JOURNAL_FILE" 2>/dev/null || echo 0) byte"
     printf '%-18s %s\n' "Manifest (spazio):" "$(wc -c < "$MANIFEST_FILE" 2>/dev/null || echo 0) byte"
+    read_sync_lock_diagnostics
+    if [[ "$SYNC_LOCK_HELD" == "true" ]]; then
+        printf '%-18s occupato (PID %s, età %s secondi)\n' \
+            "Lock trasferimenti:" "${SYNC_LOCK_OWNER_PID:-sconosciuto}" "$SYNC_LOCK_AGE_SECONDS"
+    else
+        printf '%-18s libero\n' "Lock trasferimenti:"
+    fi
 }
 
 cmd_print_config() {
@@ -1228,7 +1267,12 @@ cmd_print_config() {
     echo "RETENTION_DAYS=$RETENTION_DAYS"
     echo "TOMBSTONE_TTL_DAYS=$TOMBSTONE_TTL_DAYS"
     echo "SYNC_LOCK_MAX_AGE_MINUTES=0"
+    read_sync_lock_diagnostics
+    echo "SYNC_LOCK_HELD=$SYNC_LOCK_HELD"
+    echo "SYNC_LOCK_AGE_SECONDS=$SYNC_LOCK_AGE_SECONDS"
+    echo "SYNC_LOCK_OWNER_PID=$SYNC_LOCK_OWNER_PID"
     echo "CHECK_INTERVAL_MINUTES=$CHECK_INTERVAL_MINUTES"
+    echo "PRUNE_MAX_FILES_PER_PASS=$PRUNE_MAX_FILES_PER_PASS"
     echo "JOURNAL_MAX_BYTES=$JOURNAL_MAX_BYTES"
     if [[ -f "$JOURNAL_FILE" ]]; then echo "JOURNAL_READY=true"; else echo "JOURNAL_READY=false"; fi
     # Own runtime state dir (PID file, lock, log) -- self-reported so clients whose

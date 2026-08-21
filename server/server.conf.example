@@ -24,5 +24,9 @@ RETENTION_DAYS=90
 # no cron/Task Scheduler involved. This just controls that internal sleep.
 CHECK_INTERVAL_MINUTES=60
 
+# --- Limit each pruning pass so a large history does not monopolize sync ---
+# Older versions continue at the next CHECK_INTERVAL_MINUTES pass.
+PRUNE_MAX_FILES_PER_PASS=500
+
 # --- Housekeeping ---
 LOG_MAX_BYTES=5242880   # rotate server.log past this size (bytes)

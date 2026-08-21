@@ -162,6 +162,9 @@ class SyncEngine(QThread):
             "via_jump": self._conn.via_jump if self._conn else False,
             "connected": self._conn is not None,
             "configured": self.cfg.is_configured(),
+            "server_lock_held": self.cfg.get("server_lock_held", False),
+            "server_lock_age_seconds": self.cfg.get("server_lock_age_seconds", 0),
+            "server_lock_owner_pid": self.cfg.get("server_lock_owner_pid", ""),
             "cycle_ts": now,
         })
 
@@ -232,6 +235,18 @@ class SyncEngine(QThread):
         lock_file = values.get("SYNC_LOCK_FILE", "")
         if lock_file != self.cfg.get("server_lock_file_remote"):
             self.cfg.set("server_lock_file_remote", lock_file)
+        lock_held = values.get("SYNC_LOCK_HELD", "").lower() == "true"
+        if lock_held != self.cfg.get("server_lock_held"):
+            self.cfg.set("server_lock_held", lock_held)
+        try:
+            lock_age = int(values.get("SYNC_LOCK_AGE_SECONDS", "0") or 0)
+        except ValueError:
+            lock_age = 0
+        if lock_age != self.cfg.get("server_lock_age_seconds"):
+            self.cfg.set("server_lock_age_seconds", lock_age)
+        owner_pid = values.get("SYNC_LOCK_OWNER_PID", "")
+        if owner_pid != self.cfg.get("server_lock_owner_pid"):
+            self.cfg.set("server_lock_owner_pid", owner_pid)
 
         repository_id = values.get("REPOSITORY_ID", "")
         if repository_id != self.cfg.get("repository_id"):

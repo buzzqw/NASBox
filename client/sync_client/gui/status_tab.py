@@ -93,6 +93,9 @@ class StatusTab(QWidget):
         self.sync_state_label = QLabel(t("status.sync_state_starting"))
         self.sync_state_label.setWordWrap(True)
         status_layout.addWidget(self.sync_state_label)
+        self.remote_lock_label = QLabel(t("status.remote_lock_free"))
+        self.remote_lock_label.setWordWrap(True)
+        status_layout.addWidget(self.remote_lock_label)
         self.queue_label = QLabel(t("status.queue_unknown"))
         self.queue_label.setObjectName("statusQueue")
         status_layout.addWidget(self.queue_label)
@@ -320,6 +323,7 @@ class StatusTab(QWidget):
             self.status_label.style().polish(self.status_label)
         self._refresh_pause_button()
         self._refresh_sync_state(paused, remaining)
+        self._refresh_remote_lock(status)
         self._refresh_queue_label()
         self._refresh_attention()
         if self._connected and not self._diagnostics_auto_loaded:
@@ -335,6 +339,19 @@ class StatusTab(QWidget):
             return
         self.hash_progress_label.setText(t("status.hash_progress", done=done, total=total))
         self.hash_progress_label.show()
+
+    def _refresh_remote_lock(self, status: dict) -> None:
+        if not status.get("connected") or not status.get("server_lock_held"):
+            self.remote_lock_label.setText(t("status.remote_lock_free"))
+            return
+        try:
+            age_seconds = max(0, int(status.get("server_lock_age_seconds") or 0))
+        except (TypeError, ValueError):
+            age_seconds = 0
+        minutes, seconds = divmod(age_seconds, 60)
+        age = f"{minutes}m {seconds:02d}s" if minutes else f"{seconds}s"
+        owner = str(status.get("server_lock_owner_pid") or "sconosciuto")
+        self.remote_lock_label.setText(t("status.remote_lock_held", age=age, owner=owner))
 
     def on_queue_updated(self, items) -> None:
         self._queue_items = list(items)

@@ -45,6 +45,9 @@ DEFAULTS: dict[str, Any] = {
                                    # read-only here, self-reported by the daemon via --print-config so
                                     # rsync_ops can exclude it if it falls inside the synced tree
     "server_lock_file_remote": "", # authoritative NAS-side transaction lock, reported by server >= 3.2.0
+    "server_lock_held": False,      # best-effort diagnostics from --print-config
+    "server_lock_age_seconds": 0,
+    "server_lock_owner_pid": "",
     "repository_id": "",           # UUID-like ID read from the NAS-side .nasbox-root marker
     "remote_repository_ready": False,
     "remote_journal_ready": False,

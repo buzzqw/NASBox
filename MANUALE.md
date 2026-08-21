@@ -140,17 +140,23 @@ sincronizzare, non solo installato. Nell'ordine:
 4. installa un lanciatore in `~/.local/bin/sync-daemon-gui`;
 5. crea una voce nel menu applicazioni ("NASBox");
 6. installa e abilita un **servizio systemd utente**
-   (`~/.config/systemd/user/sync-daemon-client.service`), così il client parte
-   da solo ad ogni login senza doverlo aprire a mano. Se `systemctl` non è
-   disponibile sul sistema, questo passaggio viene saltato con un avviso (il
-   lanciatore e la voce di menu restano comunque installati). Comandi utili:
+    (`~/.config/systemd/user/sync-daemon-client.service`), così il client parte
+    da solo ad ogni login senza doverlo aprire a mano. Se `systemctl` non è
+    disponibile sul sistema, questo passaggio viene saltato con un avviso (il
+    lanciatore e la voce di menu restano comunque installati). Comandi utili:
 
    ```bash
    systemctl --user start sync-daemon-client.service     # avvialo subito
    systemctl --user status sync-daemon-client.service    # stato
-   journalctl --user -u sync-daemon-client.service -f     # log del servizio
-   systemctl --user disable sync-daemon-client.service    # disattiva l'avvio automatico
-   ```
+    journalctl --user -u sync-daemon-client.service -f     # log del servizio
+    systemctl --user disable sync-daemon-client.service    # disattiva l'avvio automatico
+    ```
+
+    Il servizio segnala a NASBox di essere un avvio in background: non mostra
+    finestre di conferma per gli aggiornamenti e, se parte prima della sessione
+    grafica, usa automaticamente Qt in modalità `offscreen` invece di andare in
+    crash per il plugin X11. L'avvio dal menu applicazioni resta invece il
+    percorso GUI interattivo.
 
 Se salti la configurazione testuale, il primo avvio apre un wizard grafico sul
 PC: sceglie la cartella locale, verifica davvero la connessione SSH e prova a
@@ -722,7 +728,13 @@ client la leggono con "Rileva dal NAS" invece di duplicarla:
 SHARE_ROOT=/volume1/NASBox      # la cartella NASBox lato NAS
 RETENTION_DAYS=90                # retention, in giorni (0 = non eliminare mai)
 CHECK_INTERVAL_MINUTES=60        # ogni quanto il demone ricontrolla da solo
+PRUNE_MAX_FILES_PER_PASS=500     # limite per passata, per non monopolizzare il lock
 ```
+
+Il comando `--status` e `--print-config` mostrano anche se il lock globale di
+trasferimento è occupato, da quanto tempo e, quando il sistema lo consente, il
+PID del processo che lo possiede. Questo aiuta a distinguere una sincronizzazione
+lunga da un problema di connessione.
 
 Durante l'installazione viene creato anche `SHARE_ROOT/.nasbox-root`. Il
 comando `--print-config` espone `REPOSITORY_ID` e `REPOSITORY_READY`; i client

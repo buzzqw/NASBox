@@ -124,6 +124,11 @@ STRINGS: dict[str, dict[str, str]] = {
     "status.sync_state_waiting": {"it": "{direction}: in attesa del lock di sincronizzazione sul NAS.", "en": "{direction}: waiting for the NAS synchronization lock."},
     "status.sync_state_active": {"it": "{direction} in corso.", "en": "{direction} in progress."},
     "status.sync_state_file": {"it": "{direction} in corso: {path}", "en": "{direction} in progress: {path}"},
+    "status.remote_lock_free": {"it": "Lock NAS: libero.", "en": "NAS lock: free."},
+    "status.remote_lock_held": {
+        "it": "Lock NAS: occupato da circa {age}; proprietario {owner}.",
+        "en": "NAS lock: held for about {age}; owner {owner}.",
+    },
     "status.direction_upload": {"it": "caricamento verso il NAS", "en": "upload to NAS"},
     "status.direction_download": {"it": "scaricamento dal NAS", "en": "download from NAS"},
     "status.last_sync_never": {"it": "Ultima sincronizzazione riuscita: nessun trasferimento registrato.", "en": "Last successful synchronization: no transfer recorded."},

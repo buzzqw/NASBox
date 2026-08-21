@@ -11,10 +11,17 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 - Sostituita la licenza proprietaria con la European Union Public Licence
   versione 1.2 (EUPL-1.2).
 
-## 1.12.1 - 2026-08-19
+## 1.14.0 - 2026-08-21
 
-- Corretto l'errore `name 'updater' is not defined` al click sulla versione
-  nell'intestazione: mancava l'import di `updater` in `main_window.py`.
+- Il servizio systemd del client non mostra dialoghi interattivi durante
+  l'avvio e usa automaticamente il backend Qt offscreen quando parte prima
+  della sessione grafica.
+- Gli aggiornamenti automatici del servizio vengono installati senza conferma
+  interattiva e il lock NAS viene mostrato con durata e proprietario quando
+  disponibili.
+- Il pruning server e' limitato a un numero massimo di versioni per passata,
+  evitando che uno storico molto grande monopolizzi il lock per troppo tempo.
+- Aggiornato il protocollo server richiesto alla versione 3.11.0.
 
 ## 1.13.0 - 2026-08-21
 
@@ -30,6 +37,11 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 - Le importazioni push rilasciano il lock remoto tra i blocchi e i retry dopo
   contesa usano backoff con jitter.
 - Aggiornato il protocollo server richiesto alla versione 3.10.0.
+
+## 1.12.1 - 2026-08-19
+
+- Corretto l'errore `name 'updater' is not defined` al click sulla versione
+  nell'intestazione: mancava l'import di `updater` in `main_window.py`.
 
 ## 1.12.0 - 2026-08-19
 

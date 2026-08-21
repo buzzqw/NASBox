@@ -12,8 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from PyQt6.QtCore import QLibraryInfo, QLocale, QTranslator
 from PyQt6.QtWidgets import QApplication, QMessageBox
 
-from sync_client import config as config_module
-from sync_client import i18n, paths, updater
+from sync_client import config as config_module, i18n, logger as logger_module, paths, updater
 from sync_client.i18n import t
 from sync_client.version import APP_NAME, APP_VERSION
 
@@ -101,11 +100,27 @@ def main() -> int:
     cfg = config_module.shared()
     i18n.set_language(_resolve_language(cfg))
 
+    service_mode = os.environ.get("NASBOX_SERVICE") == "1"
+    if service_mode and not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
     app.setApplicationVersion(APP_VERSION)
     _load_qt_base_translations(app, i18n.current_language())
-    if _offer_update(cfg, Path(__file__).resolve().parent):
+    if service_mode:
+        candidate = updater.find_update(cfg, Path(__file__).resolve().parent, sys.argv[0])
+        if candidate is not None:
+            try:
+                source_root = candidate.materialize()
+                updater.install_update(source_root, Path(__file__).resolve().parent)
+                candidate.cleanup()
+                os.execv(sys.executable, [sys.executable, str(Path(__file__).resolve()), *sys.argv[1:]])
+            except Exception as exc:
+                candidate.cleanup()
+                logger_module.shared().log(
+                    "ERROR", "-", f"aggiornamento automatico client fallito: {exc}",
+                )
+    elif _offer_update(cfg, Path(__file__).resolve().parent):
         return 0
 
     from sync_client.gui import icons

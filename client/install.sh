@@ -511,6 +511,7 @@ After=graphical-session.target
 
 [Service]
 Type=simple
+Environment=NASBOX_SERVICE=1
 ExecStart="$LAUNCHER"
 Restart=on-failure
 RestartSec=5
