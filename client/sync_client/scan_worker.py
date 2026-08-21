@@ -149,9 +149,24 @@ class ScanWorker(QThread):
         if watcher is None:
             return None
 
-        snapshot = rsync_ops.remote_manifest_snapshot(
-            self.cfg, self._conn, self._manifest_revision,
-        )
+        try:
+            # Preview is optional and must never queue behind another PC's long
+            # transfer. Use a zero-wait NAS lock for the manifest operation;
+            # the dry-run fallback below remains safe if the lock is busy.
+            lock_file = self.cfg.get("server_lock_file_remote")
+            if isinstance(lock_file, str) and lock_file.strip().endswith("sync-transfer.lock"):
+                with rsync_ops.remote_lock(self.cfg, self._conn, timeout=0):
+                    snapshot = rsync_ops.remote_manifest_snapshot(
+                        self.cfg, self._conn, self._manifest_revision,
+                    )
+            else:
+                # Old/partially configured clients can still show a best-effort
+                # preview; real transfers are blocked by validate_transfer_safety.
+                snapshot = rsync_ops.remote_manifest_snapshot(
+                    self.cfg, self._conn, self._manifest_revision,
+                )
+        except rsync_ops.RemoteLockBusy:
+            return None
         if snapshot is None:
             return None
         revision, entries = snapshot
@@ -193,9 +208,19 @@ class ScanWorker(QThread):
         }
         unknown_remote = candidates - set(remote_states)
         if unknown_remote:
-            remote = rsync_ops.remote_file_states(
-                self.cfg, self._conn, unknown_remote, compact=False,
-            )
+            try:
+                lock_file = self.cfg.get("server_lock_file_remote")
+                if isinstance(lock_file, str) and lock_file.strip().endswith("sync-transfer.lock"):
+                    with rsync_ops.remote_lock(self.cfg, self._conn, timeout=0):
+                        remote = rsync_ops.remote_file_states(
+                            self.cfg, self._conn, unknown_remote, compact=False,
+                        )
+                else:
+                    remote = rsync_ops.remote_file_states(
+                        self.cfg, self._conn, unknown_remote, compact=False,
+                    )
+            except rsync_ops.RemoteLockBusy:
+                return None
             if remote is None or set(remote) != unknown_remote:
                 return None
             remote_states.update(remote)

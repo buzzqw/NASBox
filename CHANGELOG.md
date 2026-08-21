@@ -16,6 +16,21 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 - Corretto l'errore `name 'updater' is not defined` al click sulla versione
   nell'intestazione: mancava l'import di `updater` in `main_window.py`.
 
+## 1.13.0 - 2026-08-21
+
+- Il demone server non termina piu trasferimenti validi solo perche il lock
+  globale e' vecchio: `flock` viene rilasciato dalla chiusura della sessione SSH.
+- Il pruning dello storico rispetta il lock globale e viene rimandato durante
+  un trasferimento attivo.
+- Cancellazioni, eliminazioni da Sfoglia NAS e rinomine aggiornano il journal
+  solo dopo il successo del movimento filesystem, con rollback se il journal non
+  puo' essere scritto.
+- Sfoglia NAS e mirror esterni condividono il coordinamento con push e pull;
+  i mirror usano trasferimenti interrompibili e aggiornamenti ritardati.
+- Le importazioni push rilasciano il lock remoto tra i blocchi e i retry dopo
+  contesa usano backoff con jitter.
+- Aggiornato il protocollo server richiesto alla versione 3.10.0.
+
 ## 1.12.0 - 2026-08-19
 
 - Aggiunta la tab **Cartelle esterne**: cartelle che vivono FUORI dalla

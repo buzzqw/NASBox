@@ -16,6 +16,7 @@ import time
 import uuid
 import stat
 import os
+import random
 from pathlib import Path
 from typing import Iterator
 
@@ -91,6 +92,8 @@ class PushWorker(TransferWorker):
         self._wake = threading.Event()
         self._force_sync = threading.Event()
         self._last_hash_progress_emit = 0.0
+        self._lock_retry_until = 0.0
+        self._lock_retry_delay = 5.0
 
     def _wake_now(self) -> None:
         self._wake.set()
@@ -126,6 +129,8 @@ class PushWorker(TransferWorker):
 
     def _tick(self) -> None:
         if self._conn is None or self.cfg.is_paused() or not self.cfg.is_configured():
+            return
+        if time.time() < self._lock_retry_until:
             return
         if self._stop_flag.is_set() or self.cfg.is_paused():
             return
@@ -175,150 +180,57 @@ class PushWorker(TransferWorker):
                         return
                     if not rsync_ops.ensure_remote_dir(self.cfg, self._conn):
                         self._log("ERROR", "-", "impossibile creare la cartella remota")
-                        watcher.mark_dirty()  # consume_if_ready already cleared the retry trigger
+                        if watcher is not None:
+                            watcher.mark_dirty()  # consume_if_ready already cleared the retry trigger
                         self.transfer_finished.emit("upload", False)
                         return
-                    resolved_paths = self._resolve_paths(dirty_paths, force_sync)
-                    try:
-                        max_deletes = int(self.cfg.get("max_delete_files") or 1000)
-                    except (TypeError, ValueError):
-                        max_deletes = 1000
+                # Resolve local paths without keeping the NAS lock. Each chunk
+                # below reacquires it, so a large import yields to other clients
+                # after every PUSH_CHUNK_SIZE paths.
+                resolved_paths = self._resolve_paths(dirty_paths, force_sync)
+                try:
+                    max_deletes = int(self.cfg.get("max_delete_files") or 1000)
+                except (TypeError, ValueError):
+                    max_deletes = 1000
 
-                    # Processed in chunks (PUSH_CHUNK_SIZE) instead of one
-                    # all-or-nothing remote-state-check + rsync call over every
-                    # resolved path: on a big first-time batch (e.g. a folder just
-                    # copied in wholesale) that single check used to take minutes
-                    # against a real NAS before a single byte moved, with nothing
-                    # visible in the meantime. Each chunk gets its own remote-state
-                    # check, push, checked-delete and journal-append, so real
-                    # progress (queue, log, journal, baseline) lands every
-                    # PUSH_CHUNK_SIZE paths instead of only once at the very end --
-                    # and a failure partway through only leaves the *remaining*
-                    # chunks to redo next tick, not the whole batch.
-                    #
-                    # max_delete_files is still enforced across the whole
-                    # operation, not per chunk (a running total, checked before
-                    # each chunk's deletes are actually applied) -- a batch that
-                    # looks anomalous overall still gets stopped, it just doesn't
-                    # retroactively undo earlier chunks that were individually
-                    # unremarkable.
-                    ordered_paths = sorted(resolved_paths)
-                    chunks = list(_chunked(ordered_paths, PUSH_CHUNK_SIZE)) if ordered_paths else [[]]
-                    # One started/finished pair for the whole chunked operation, not
-                    # one per chunk (see _run_transfer_tracked's emit_lifecycle) --
-                    # and none at all for a tick that turns out to have nothing to
-                    # do, matching the pre-chunking silent-no-op behavior.
-                    has_work = bool(ordered_paths)
-                    if has_work:
-                        self.batch_size_known.emit(len(ordered_paths))
-                        self.transfer_started.emit("upload")
-                    overall_ok = True
-                    deletes_committed = 0
-                    aborted_for_delete_limit = False
-                    remote_progress_done = 0
-                    for chunk_index, chunk_paths in enumerate(chunks):
-                        chunk_set = set(chunk_paths)
-                        chunk_run_ts = rsync_ops.new_run_ts()
-                        upload_paths, delete_requests, adopted_paths = self._build_plan(
-                            chunk_set,
-                            remote_progress_offset=remote_progress_done,
-                            remote_progress_total=len(ordered_paths),
-                            # The manifest is current before the first chunk. Later
-                            # chunks use live file states, so rebuilding the whole
-                            # manifest again would be pure repeated work.
-                            compact_remote_manifest=chunk_index == 0,
-                        )
-                        remote_progress_done += len(chunk_set)
-
-                        if deletes_committed + len(delete_requests) > max_deletes:
-                            aborted_for_delete_limit = True
-                            overall_ok = False
-                            break
-
-                        planned_items = [
-                            rsync_ops.TransferItem("upload", path, self._local_file_size(path))
-                            for path in sorted(upload_paths)
-                        ]
-                        planned_items.extend(
-                            rsync_ops.TransferItem("delete_remote", path)
-                            for path, _digest, _mtime in sorted(delete_requests)
-                        )
-                        if planned_items:
-                            self.queue_items_known.emit(planned_items)
-
-                        if upload_paths:
-                            push_result = self._run_transfer_tracked(
-                                rsync_ops.push, chunk_run_ts, paths=upload_paths,
-                                emit_lifecycle=False,
-                            )
-                        else:
-                            push_result = rsync_ops.TransferResult(True, [])
-                        if push_result.ok:
-                            delete_result = rsync_ops.checked_delete_remote(
-                                self.cfg, self._conn, delete_requests, chunk_run_ts,
-                                self.sync_state.device_id(),
-                            )
-                        else:
-                            delete_result = rsync_ops.CheckedDeleteResult(False, [], set(), set())
-                        deletes_committed += len(delete_result.completed_paths)
-
-                        for item in delete_result.items:
-                            self._on_item_complete(item)
-                        for path in sorted(delete_result.stale_paths):
-                            self._log(
-                                "STALE_DELETE", path,
-                                "cancellazione ignorata: sul NAS esiste una versione successiva",
-                            )
-                        chunk_result = rsync_ops.TransferResult(
-                            push_result.ok and delete_result.ok,
-                            [*push_result.items, *delete_result.items],
-                            push_result.raw_error or delete_result.raw_error,
-                        )
-                        self._report_failure(chunk_result)
-                        if chunk_result.ok:
-                            journal_items = [item for item in chunk_result.items if item.direction == "upload"]
-                            authoritative = self._authoritative_fingerprints(
-                                journal_items, adopted_paths, delete_result.completed_paths, watcher,
-                            )
-                            journal_ok, journal_detail = rsync_ops.append_remote_journal(
-                                self.cfg, self._conn, self.sync_state.device_id(), journal_items,
-                                authoritative,
-                            )
-                            if journal_ok:
-                                self.cfg.set("journal_error", "")
-                                self.sync_state.record_fingerprints(authoritative)
-                            else:
-                                payload, payload_error = rsync_ops.build_remote_journal_payload(
-                                    self.cfg, self.sync_state.device_id(), journal_items, authoritative,
-                                )
-                                if payload:
-                                    rsync_ops.save_pending_journal(payload)
-                                detail = journal_detail or payload_error or "journal NAS non aggiornato"
-                                self.cfg.set("journal_error", detail)
-                                overall_ok = False
-                                self._log("JOURNAL_ERROR", "-", detail)
-                        else:
-                            overall_ok = False
-                        if self._scan_worker:
-                            self._scan_worker.wake()  # refresh the queue preview after every chunk, not just at the end
-                        if not chunk_result.ok:
-                            break  # stop at the first failing chunk, same as the previous all-or-nothing failure behavior
-
-                    if aborted_for_delete_limit:
+                ordered_paths = sorted(resolved_paths)
+                chunks = list(_chunked(ordered_paths, PUSH_CHUNK_SIZE)) if ordered_paths else [[]]
+                has_work = bool(ordered_paths)
+                if has_work:
+                    self.batch_size_known.emit(len(ordered_paths))
+                    self.transfer_started.emit("upload")
+                overall_ok = True
+                deletes_committed = 0
+                remote_progress_done = 0
+                for chunk_index, chunk_paths in enumerate(chunks):
+                    chunk_ok, deleted_count, delete_limit_hit = self._run_chunk(
+                        chunk_index, chunk_paths, remote_progress_done, len(ordered_paths),
+                        max_deletes, deletes_committed, watcher,
+                    )
+                    deletes_committed += deleted_count
+                    remote_progress_done += len(chunk_paths)
+                    if self._scan_worker:
+                        self._scan_worker.wake()
+                    if delete_limit_hit:
                         raise rsync_ops.RemoteLockError(
                             f"operazione bloccata: limite di sicurezza {max_deletes} cancellazioni raggiunto "
                             f"(già applicate {deletes_committed})"
                         )
-                    if overall_ok:
-                        self._force_sync.clear()
-                    else:
-                        if watcher is not None:
-                            watcher.mark_dirty()
-                        self._force_sync.set()
-                    # The preparation phase is a logical transfer even when every
-                    # path is adopted or the plan turns out empty. Always close
-                    # the lifecycle so the GUI cannot remain stuck on "preparing".
-                    self.transfer_finished.emit("upload", overall_ok)
+                    if not chunk_ok:
+                        overall_ok = False
+                        break
+
+                if overall_ok:
+                    self._force_sync.clear()
+                else:
+                    if watcher is not None:
+                        watcher.mark_dirty()
+                    self._force_sync.set()
+                # The preparation phase is a logical transfer even when every
+                # path is adopted or the plan turns out empty.
+                self.transfer_finished.emit("upload", overall_ok)
+                self._lock_retry_delay = 5.0
+                self._lock_retry_until = 0.0
             except rsync_ops.RemoteLockBusy:
                 if watcher is not None:
                     watcher.mark_dirty()
@@ -327,6 +239,8 @@ class PushWorker(TransferWorker):
                 self.transfer_lock_unavailable.emit("upload", detail)
                 self.transfer_finished.emit("upload", False)
                 self._log("LOCK_DEFERRED", "-", detail)
+                self._lock_retry_until = time.time() + self._lock_retry_delay * random.uniform(0.8, 1.2)
+                self._lock_retry_delay = min(self._lock_retry_delay * 2.0, 300.0)
             except rsync_ops.RemoteLockError as exc:
                 if watcher is not None:
                     watcher.mark_dirty()
@@ -341,6 +255,99 @@ class PushWorker(TransferWorker):
                 self._force_sync.set()
                 self.transfer_finished.emit("upload", False)
                 raise
+
+    def _run_chunk(
+        self, chunk_index: int, chunk_paths: list[str], remote_progress_done: int,
+        remote_progress_total: int, max_deletes: int, deletes_committed: int, watcher,
+    ) -> tuple[bool, int, bool]:
+        """Process one chunk under a short-lived NAS lock.
+
+        The lock is deliberately not held across the complete import. Every
+        decision is rebuilt from live remote state and the delete operation has
+        a baseline precondition, so yielding between chunks is safe and prevents
+        one PC from monopolizing the repository for an unbounded time.
+        """
+        chunk_set = set(chunk_paths)
+        self.transfer_waiting_for_lock.emit("upload")
+        with rsync_ops.remote_lock(self.cfg, self._conn, on_start=self._set_current_process):
+            if self._stop_flag.is_set():
+                return False, 0, False
+            chunk_run_ts = rsync_ops.new_run_ts()
+            upload_paths, delete_requests, adopted_paths = self._build_plan(
+                chunk_set,
+                remote_progress_offset=remote_progress_done,
+                remote_progress_total=remote_progress_total,
+                compact_remote_manifest=chunk_index == 0,
+            )
+            if deletes_committed + len(delete_requests) > max_deletes:
+                return False, 0, True
+
+            planned_items = [
+                rsync_ops.TransferItem("upload", path, self._local_file_size(path))
+                for path in sorted(upload_paths)
+            ]
+            planned_items.extend(
+                rsync_ops.TransferItem("delete_remote", path)
+                for path, _digest, _mtime in sorted(delete_requests)
+            )
+            if planned_items:
+                self.queue_items_known.emit(planned_items)
+
+            if upload_paths:
+                push_result = self._run_transfer_tracked(
+                    rsync_ops.push, chunk_run_ts, paths=upload_paths,
+                    emit_lifecycle=False,
+                )
+            else:
+                push_result = rsync_ops.TransferResult(True, [])
+            if push_result.ok:
+                delete_result = rsync_ops.checked_delete_remote(
+                    self.cfg, self._conn, delete_requests, chunk_run_ts,
+                    self.sync_state.device_id(),
+                )
+            else:
+                delete_result = rsync_ops.CheckedDeleteResult(False, [], set(), set())
+
+            for item in delete_result.items:
+                self._on_item_complete(item)
+            for path in sorted(delete_result.stale_paths):
+                self._log(
+                    "STALE_DELETE", path,
+                    "cancellazione ignorata: sul NAS esiste una versione successiva",
+                )
+            chunk_result = rsync_ops.TransferResult(
+                push_result.ok and delete_result.ok,
+                [*push_result.items, *delete_result.items],
+                push_result.raw_error or delete_result.raw_error,
+            )
+            self._report_failure(chunk_result)
+            if not chunk_result.ok:
+                return False, len(delete_result.completed_paths), False
+
+            journal_items = [item for item in chunk_result.items if item.direction == "upload"]
+            authoritative = self._authoritative_fingerprints(
+                journal_items, adopted_paths, delete_result.completed_paths, watcher,
+            )
+            journal_ok, journal_detail = rsync_ops.append_remote_journal(
+                self.cfg, self._conn, self.sync_state.device_id(), journal_items,
+                authoritative,
+            )
+            if journal_ok:
+                self.cfg.set("journal_error", "")
+                self.sync_state.record_fingerprints(authoritative)
+                return True, len(delete_result.completed_paths), False
+
+            payload, payload_error = rsync_ops.build_remote_journal_payload(
+                self.cfg, self.sync_state.device_id(), journal_items, authoritative,
+            )
+            if payload:
+                rsync_ops.save_pending_journal(payload)
+            detail = journal_detail or payload_error or "journal NAS non aggiornato"
+            self.cfg.set("journal_error", detail)
+            self._log("JOURNAL_ERROR", "-", detail)
+            # Stop immediately. A single pending payload cannot safely hold two
+            # independent failed chunks, so continuing would lose retry data.
+            return False, len(delete_result.completed_paths), False
 
     def _authoritative_fingerprints(
         self, uploaded_items: list[rsync_ops.TransferItem], adopted_paths: set[str],

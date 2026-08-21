@@ -78,7 +78,7 @@ class MainWindow(QMainWindow):
             push_worker=self.push_worker, pull_worker=self.pull_worker,
             sync_state=sync_state,
         )
-        self.mirror_manager = MirrorManager(self.cfg, self.logger)
+        self.mirror_manager = MirrorManager(self.cfg, self.logger, transfer_lock)
 
         shell = QWidget()
         shell_layout = QVBoxLayout(shell)

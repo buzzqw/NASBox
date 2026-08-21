@@ -30,7 +30,7 @@
 #
 set -uo pipefail
 
-VERSION="3.9.2"
+VERSION="3.10.0"
 SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -83,8 +83,18 @@ log_event() {
     ts=$(date '+%s')
     local escaped_path="${path_//\\/\\\\}"
     escaped_path="${escaped_path//\"/\\\"}"
+    escaped_path="${escaped_path//$'\n'/\\n}"
+    escaped_path="${escaped_path//$'\r'/\\r}"
+    escaped_path="${escaped_path//$'\t'/\\t}"
+    escaped_path="${escaped_path//$'\b'/\\b}"
+    escaped_path="${escaped_path//$'\f'/\\f}"
     local escaped_detail="${detail//\\/\\\\}"
     escaped_detail="${escaped_detail//\"/\\\"}"
+    escaped_detail="${escaped_detail//$'\n'/\\n}"
+    escaped_detail="${escaped_detail//$'\r'/\\r}"
+    escaped_detail="${escaped_detail//$'\t'/\\t}"
+    escaped_detail="${escaped_detail//$'\b'/\\b}"
+    escaped_detail="${escaped_detail//$'\f'/\\f}"
     printf '{"ts": %s, "action": "%s", "path": "%s", "detail": "%s"}\n' \
         "$ts" "$action" "$escaped_path" "$escaped_detail" >> "$EVENTS_FILE"
 }
@@ -107,7 +117,10 @@ load_config() {
     SHARE_ROOT=""
     RETENTION_DAYS=30
     TOMBSTONE_TTL_DAYS=0
-    SYNC_LOCK_MAX_AGE_MINUTES=10
+    # Kept for compatibility with older server.conf files. A live flock is
+    # released automatically when its SSH session closes, so age-based killing
+    # is intentionally no longer used.
+    SYNC_LOCK_MAX_AGE_MINUTES=0
     CHECK_INTERVAL_MINUTES=60
     LOG_MAX_BYTES=5242880
     JOURNAL_MAX_BYTES=10485760
@@ -512,6 +525,77 @@ cmd_file_states() {
     rm -rf "$tmpdir"
 }
 
+append_delete_journal_unlocked() {
+    local path="$1" device="$2" server_timestamp txid tmp journal_backup old_revision revision_tmp
+    tmp="${JOURNAL_FILE}.delete.$$.$RANDOM"
+    journal_backup="${JOURNAL_FILE}.rollback.$$.$RANDOM"
+    revision_tmp="${MANIFEST_REVISION_FILE}.rollback.$$.$RANDOM"
+    old_revision=$(cat "$MANIFEST_REVISION_FILE" 2>/dev/null || echo 0)
+    cp "$JOURNAL_FILE" "$journal_backup" || return 1
+    server_timestamp=$(date '+%s')
+    txid="delete-${server_timestamp}-$$-${RANDOM}"
+    {
+        printf 'BEGIN\t%s\t%s\t%s\n' "$txid" "$server_timestamp" "$device"
+        printf 'DELETE\t%s\t\t0\t0\t%s\t%s\n' \
+            "$(encode_journal_field "$path")" "$(encode_journal_field "$device")" "$server_timestamp"
+        printf 'COMMIT\t%s\n' "$txid"
+    } > "$tmp" || { rm -f "$tmp" "$journal_backup"; return 1; }
+    if ! cat "$tmp" >> "$JOURNAL_FILE"; then
+        cp "$journal_backup" "$JOURNAL_FILE" 2>/dev/null || true
+        rm -f "$tmp" "$journal_backup"
+        return 1
+    fi
+    rm -f "$tmp"
+    if bump_manifest_revision_unlocked; then
+        rm -f "$journal_backup"
+        return 0
+    fi
+    cp "$journal_backup" "$JOURNAL_FILE" 2>/dev/null || true
+    printf '%s\n' "$old_revision" > "$revision_tmp" && mv -f "$revision_tmp" "$MANIFEST_REVISION_FILE"
+    rm -f "$journal_backup" "$revision_tmp"
+    return 1
+}
+
+append_delete_journal_batch_unlocked() {
+    local paths_file="$1" device="$2" path server_timestamp txid tmp count=0
+    local journal_backup old_revision revision_tmp
+    tmp="${JOURNAL_FILE}.delete-batch.$$.$RANDOM"
+    journal_backup="${JOURNAL_FILE}.rollback.$$.$RANDOM"
+    revision_tmp="${MANIFEST_REVISION_FILE}.rollback.$$.$RANDOM"
+    old_revision=$(cat "$MANIFEST_REVISION_FILE" 2>/dev/null || echo 0)
+    cp "$JOURNAL_FILE" "$journal_backup" || return 1
+    : > "$tmp" || { rm -f "$tmp" "$journal_backup"; return 1; }
+    while IFS= read -r -d '' path; do
+        server_timestamp=$(date '+%s')
+        txid="delete-${server_timestamp}-$$-${RANDOM}"
+        {
+            printf 'BEGIN\t%s\t%s\t%s\n' "$txid" "$server_timestamp" "$device"
+            printf 'DELETE\t%s\t\t0\t0\t%s\t%s\n' \
+                "$(encode_journal_field "$path")" "$(encode_journal_field "$device")" "$server_timestamp"
+            printf 'COMMIT\t%s\n' "$txid"
+        } >> "$tmp" || { rm -f "$tmp" "$journal_backup"; return 1; }
+        (( count++ ))
+    done < "$paths_file"
+    if (( count == 0 )); then
+        rm -f "$tmp" "$journal_backup"
+        return 0
+    fi
+    if ! cat "$tmp" >> "$JOURNAL_FILE"; then
+        cp "$journal_backup" "$JOURNAL_FILE" 2>/dev/null || true
+        rm -f "$tmp" "$journal_backup"
+        return 1
+    fi
+    rm -f "$tmp"
+    if bump_manifest_revision_unlocked; then
+        rm -f "$journal_backup"
+        return 0
+    fi
+    cp "$journal_backup" "$JOURNAL_FILE" 2>/dev/null || true
+    printf '%s\n' "$old_revision" > "$revision_tmp" && mv -f "$revision_tmp" "$MANIFEST_REVISION_FILE"
+    rm -f "$journal_backup" "$revision_tmp"
+    return 1
+}
+
 cmd_checked_delete() {
     command -v sha256sum >/dev/null 2>&1 || {
         echo "checked-delete: sha256sum non disponibile" >&2
@@ -521,7 +605,7 @@ cmd_checked_delete() {
         echo "checked-delete: flock non disponibile" >&2
         return 1
     }
-    local magic run_ts device count path expected_digest expected_mtime index target digest mtime backup server_timestamp txid
+    local magic run_ts device count path expected_digest expected_mtime index target digest mtime backup
     local -a paths digests mtimes
     IFS= read -r -d '' magic || return 1
     IFS= read -r -d '' run_ts || return 1
@@ -550,16 +634,11 @@ cmd_checked_delete() {
         path="${paths[index]}"
         target="$SHARE_ROOT/$path"
         if [[ ! -e "$target" && ! -L "$target" ]]; then
-            server_timestamp=$(date '+%s')
-            txid="checked-delete-${run_ts}-${index}"
-            {
-                printf 'BEGIN\t%s\t%s\t%s\n' "$txid" "$server_timestamp" "$device"
-                printf 'DELETE\t%s\t\t0\t0\t%s\t%s\n' \
-                    "$(encode_journal_field "$path")" "$(encode_journal_field "$device")" "$server_timestamp"
-                printf 'COMMIT\t%s\n' "$txid"
-            } >> "$JOURNAL_FILE" || { printf '%s\0ERROR\0' "$path"; continue; }
-            bump_manifest_revision_unlocked || { printf '%s\0ERROR\0' "$path"; continue; }
-            printf '%s\0ABSENT\0' "$path"
+            if append_delete_journal_unlocked "$path" "$device"; then
+                printf '%s\0ABSENT\0' "$path"
+            else
+                printf '%s\0ERROR\0' "$path"
+            fi
             continue
         fi
         if [[ ! -f "$target" || -L "$target" ]]; then
@@ -574,17 +653,13 @@ cmd_checked_delete() {
         fi
         backup="$SHARE_ROOT/$TRASH_DIRNAME/$path-$run_ts"
         mkdir -p "${backup%/*}" || { printf '%s\0ERROR\0' "$path"; continue; }
-        server_timestamp=$(date '+%s')
-        txid="checked-delete-${run_ts}-${index}"
-        {
-            printf 'BEGIN\t%s\t%s\t%s\n' "$txid" "$server_timestamp" "$device"
-            printf 'DELETE\t%s\t\t0\t0\t%s\t%s\n' \
-                "$(encode_journal_field "$path")" "$(encode_journal_field "$device")" "$server_timestamp"
-            printf 'COMMIT\t%s\n' "$txid"
-        } >> "$JOURNAL_FILE" || { printf '%s\0ERROR\0' "$path"; continue; }
-        bump_manifest_revision_unlocked || { printf '%s\0ERROR\0' "$path"; continue; }
         if mv "$target" "$backup"; then
-            printf '%s\0DELETED\0' "$path"
+            if append_delete_journal_unlocked "$path" "$device"; then
+                printf '%s\0DELETED\0' "$path"
+            else
+                mv "$backup" "$target" 2>/dev/null || true
+                printf '%s\0ERROR\0' "$path"
+            fi
         else
             printf '%s\0ERROR\0' "$path"
         fi
@@ -603,8 +678,9 @@ cmd_checked_delete() {
 # this client (or any client) at all. Safety instead comes from: (1) never a
 # raw unlink -- everything moves into the same TRASH_DIRNAME/retention the
 # sync engine already uses, recoverable for RETENTION_DAYS like any other
-# version; (2) the same JOURNAL_LOCK_FILE the sync engine holds during a
-# push/pull, so a browse action can't interleave with an in-flight transfer.
+# version; (2) the client acquires the global sync-transfer lock before calling
+# these mutations, while this command takes JOURNAL_LOCK_FILE for the journal
+# transaction, so browse actions cannot interleave with an in-flight transfer.
 
 # List the immediate children of a folder under SHARE_ROOT (not recursive --
 # the GUI tab lists one level at a time, expanding lazily, so this stays fast
@@ -644,25 +720,10 @@ cmd_browse_list() {
     done
 }
 
-# Append one DELETE journal record for $1 (best-effort -- the actual data
-# safety here is the trash move below, not this; a failed journal write just
-# means another client's manifest-based shortcut doesn't know about this path
-# until its next full comparison, which still resolves correctly).
-_browse_journal_delete() {
-    local path="$1" device="$2" server_timestamp txid
-    server_timestamp=$(date '+%s')
-    txid="browse-${server_timestamp}-${RANDOM}-${RANDOM}"
-    {
-        printf 'BEGIN\t%s\t%s\t%s\n' "$txid" "$server_timestamp" "$device"
-        printf 'DELETE\t%s\t\t0\t0\t%s\t%s\n' \
-            "$(encode_journal_field "$path")" "$(encode_journal_field "$device")" "$server_timestamp"
-        printf 'COMMIT\t%s\n' "$txid"
-    } >> "$JOURNAL_FILE" 2>/dev/null
-}
-
 cmd_browse_delete() {
     command -v flock >/dev/null 2>&1 || { echo "browse-delete: flock non disponibile" >&2; return 1; }
-    local magic run_ts device relative target backup rel_file
+    local magic run_ts device relative target backup rel_file paths_file
+    local -a journal_paths=()
     IFS= read -r -d '' magic || return 1
     IFS= read -r -d '' run_ts || return 1
     IFS= read -r -d '' device || return 1
@@ -683,29 +744,49 @@ cmd_browse_delete() {
     flock -x 9 || { exec 9>&-; printf 'BROWSE_DELETE_V1\0ERROR\0lock non acquisito\0'; return 1; }
     ensure_journal_files
 
+    # The listing can be stale. Recheck after taking the journal lock and before
+    # collecting the paths that will be represented in the manifest.
+    if [[ ! -e "$target" && ! -L "$target" ]]; then
+        flock -u 9; exec 9>&-
+        printf 'BROWSE_DELETE_V1\0ERROR\0percorso non trovato\0'
+        return 1
+    fi
     if [[ -d "$target" && ! -L "$target" ]]; then
         while IFS= read -r -d '' rel_file; do
-            _browse_journal_delete "$relative/${rel_file#./}" "$device"
+            journal_paths+=("$relative/${rel_file#./}")
         done < <(cd "$target" && find . -type f -print0 2>/dev/null)
     else
-        _browse_journal_delete "$relative" "$device"
+        journal_paths+=("$relative")
     fi
-    bump_manifest_revision_unlocked
 
-    mkdir -p "${backup%/*}"
-    if mv "$target" "$backup"; then
+    if ! mkdir -p "${backup%/*}" || ! mv "$target" "$backup"; then
+        flock -u 9; exec 9>&-
+        printf 'BROWSE_DELETE_V1\0ERROR\0spostamento nel cestino fallito\0'
+        return 1
+    fi
+
+    paths_file="${JOURNAL_FILE}.browse-paths.$$.$RANDOM"
+    : > "$paths_file"
+    for rel_file in "${journal_paths[@]}"; do
+        printf '%s\0' "$rel_file" >> "$paths_file"
+    done
+    if append_delete_journal_batch_unlocked "$paths_file" "$device"; then
+        rm -f "$paths_file"
         flock -u 9; exec 9>&-
         printf 'BROWSE_DELETE_V1\0OK\0'
     else
+        rm -f "$paths_file"
+        mv "$backup" "$target" 2>/dev/null || true
         flock -u 9; exec 9>&-
-        printf 'BROWSE_DELETE_V1\0ERROR\0spostamento nel cestino fallito\0'
+        printf 'BROWSE_DELETE_V1\0ERROR\0journal non aggiornato, operazione annullata\0'
         return 1
     fi
 }
 
 cmd_browse_rename() {
     command -v flock >/dev/null 2>&1 || { echo "browse-rename: flock non disponibile" >&2; return 1; }
-    local magic run_ts device src dst src_target dst_target rel_file
+    local magic run_ts device src dst src_target dst_target rel_file paths_file
+    local -a journal_paths=()
     IFS= read -r -d '' magic || return 1
     IFS= read -r -d '' run_ts || return 1
     IFS= read -r -d '' device || return 1
@@ -730,6 +811,17 @@ cmd_browse_rename() {
     flock -x 9 || { exec 9>&-; printf 'BROWSE_RENAME_V1\0ERROR\0lock non acquisito\0'; return 1; }
     ensure_journal_files
 
+    if [[ ! -e "$src_target" && ! -L "$src_target" ]]; then
+        flock -u 9; exec 9>&-
+        printf 'BROWSE_RENAME_V1\0ERROR\0percorso di origine non trovato\0'
+        return 1
+    fi
+    if [[ -e "$dst_target" || -L "$dst_target" ]]; then
+        flock -u 9; exec 9>&-
+        printf 'BROWSE_RENAME_V1\0ERROR\0esiste gia un percorso con questo nome\0'
+        return 1
+    fi
+
     # The old path(s) are gone from this location -- record it exactly like a
     # delete so other clients' manifests stop expecting it there. The new
     # location needs no journal entry of its own: it's simply a file/folder
@@ -737,20 +829,32 @@ cmd_browse_rename() {
     # the same as content freshly pushed by any client.
     if [[ -d "$src_target" && ! -L "$src_target" ]]; then
         while IFS= read -r -d '' rel_file; do
-            _browse_journal_delete "$src/${rel_file#./}" "$device"
+            journal_paths+=("$src/${rel_file#./}")
         done < <(cd "$src_target" && find . -type f -print0 2>/dev/null)
     else
-        _browse_journal_delete "$src" "$device"
+        journal_paths+=("$src")
     fi
-    bump_manifest_revision_unlocked
 
-    mkdir -p "${dst_target%/*}"
-    if mv "$src_target" "$dst_target"; then
+    if ! mkdir -p "${dst_target%/*}" || ! mv "$src_target" "$dst_target"; then
+        flock -u 9; exec 9>&-
+        printf 'BROWSE_RENAME_V1\0ERROR\0spostamento fallito\0'
+        return 1
+    fi
+
+    paths_file="${JOURNAL_FILE}.browse-paths.$$.$RANDOM"
+    : > "$paths_file"
+    for rel_file in "${journal_paths[@]}"; do
+        printf '%s\0' "$rel_file" >> "$paths_file"
+    done
+    if append_delete_journal_batch_unlocked "$paths_file" "$device"; then
+        rm -f "$paths_file"
         flock -u 9; exec 9>&-
         printf 'BROWSE_RENAME_V1\0OK\0'
     else
+        rm -f "$paths_file"
+        mv "$dst_target" "$src_target" 2>/dev/null || true
         flock -u 9; exec 9>&-
-        printf 'BROWSE_RENAME_V1\0ERROR\0spostamento fallito\0'
+        printf 'BROWSE_RENAME_V1\0ERROR\0journal non aggiornato, operazione annullata\0'
         return 1
     fi
 }
@@ -928,32 +1032,19 @@ prune_root() {
     return 0
 }
 
-cleanup_stale_sync_locks() {
-    # A client crash can leave an SSH/flock process holding the transaction lock.
-    # Release only locks older than the configured safety threshold.
-    local max_age_seconds=$(( SYNC_LOCK_MAX_AGE_MINUTES * 60 ))
-    local stale_pids stale_count now pid elapsed
-    stale_pids=()
-    now=$(date '+%s')
-    while IFS=' ' read -r pid elapsed; do
-        if [[ -n "$pid" && "$elapsed" =~ ^[0-9]+$ && $(( elapsed )) -gt $(( max_age_seconds )) ]]; then
-            stale_pids+=("$pid")
-        fi
-    done < <(ps -eo pid,etimes -o args 2>/dev/null | awk -v lock="$SYNC_LOCK_FILE" '
-        /flock.*sync-transfer\.lock/ && !/awk/ { print $1, $2 }
-    ')
-    stale_count=${#stale_pids[@]}
-    if (( stale_count > 0 )); then
-        log WARN "Trovati $stale_count lock di sincronizzazione stantii (età > ${SYNC_LOCK_MAX_AGE_MINUTES} min), forzo il rilascio."
-        for pid in "${stale_pids[@]}"; do
-            kill "$pid" 2>/dev/null && log INFO "Lock stantio rilasciato: PID $pid"
-        done
-    fi
-}
-
 run_once_pass() {
-    if (( SYNC_LOCK_MAX_AGE_MINUTES > 0 )); then
-        cleanup_stale_sync_locks
+    command -v flock >/dev/null 2>&1 || {
+        log ERROR "Impossibile eseguire il pruning: flock non disponibile."
+        return 1
+    }
+    # Retention touches the same .sync-trash that rsync uses for backups. Do not
+    # prune while a client owns the transaction lock; a live transfer is never
+    # stale merely because it is long-running.
+    exec 8>"$SYNC_LOCK_FILE" || return 1
+    if ! flock -n 8; then
+        log INFO "Pass di pruning rimandato: trasferimento NASBox in corso."
+        exec 8>&-
+        return 0
     fi
     log INFO "sync-daemon-server v$VERSION: avvio pass di pruning (SHARE_ROOT=$SHARE_ROOT, retention=${RETENTION_DAYS}gg, dry-run=$DRY_RUN)"
     local trash
@@ -965,6 +1056,8 @@ run_once_pass() {
     fi
     date '+%s' > "$STAMP_FILE"
     log INFO "Pass completato."
+    flock -u 8
+    exec 8>&-
 }
 
 # --- daemon loop ---
@@ -1030,7 +1123,9 @@ cmd_start() {
     fi
     mkdir -p "$STATE_DIR"
     rm -f "$PID_FILE"
-    nohup "$SCRIPT_PATH" -c "$CONFIG_FILE" --run-foreground >>"$LOG_FILE" 2>&1 < /dev/null &
+    # log() already appends to LOG_FILE through tee. Redirecting the daemon's
+    # stderr to the same file here would write every line twice.
+    nohup "$SCRIPT_PATH" -c "$CONFIG_FILE" --run-foreground >/dev/null 2>&1 < /dev/null &
     disown
     sleep 1
     if is_running; then
@@ -1132,7 +1227,7 @@ cmd_print_config() {
     fi
     echo "RETENTION_DAYS=$RETENTION_DAYS"
     echo "TOMBSTONE_TTL_DAYS=$TOMBSTONE_TTL_DAYS"
-    echo "SYNC_LOCK_MAX_AGE_MINUTES=$SYNC_LOCK_MAX_AGE_MINUTES"
+    echo "SYNC_LOCK_MAX_AGE_MINUTES=0"
     echo "CHECK_INTERVAL_MINUTES=$CHECK_INTERVAL_MINUTES"
     echo "JOURNAL_MAX_BYTES=$JOURNAL_MAX_BYTES"
     if [[ -f "$JOURNAL_FILE" ]]; then echo "JOURNAL_READY=true"; else echo "JOURNAL_READY=false"; fi

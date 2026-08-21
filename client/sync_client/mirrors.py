@@ -94,6 +94,7 @@ class MirrorWatcher(QThread):
 
     def __init__(
         self, cfg: Config, logger: EventLogger, source: str, dest: str, root: str,
+        transfer_lock: threading.Lock,
     ) -> None:
         super().__init__()
         self.cfg = cfg
@@ -101,9 +102,11 @@ class MirrorWatcher(QThread):
         self.source = source
         self.dest = dest
         self.root = root.rstrip("/")
+        self.transfer_lock = transfer_lock
         self._stop = threading.Event()
         self._force_sync = threading.Event()
         self._last_emitted: dict | None = None
+        self._current_proc = None
 
     def request_sync(self) -> None:
         self._force_sync.set()
@@ -111,7 +114,20 @@ class MirrorWatcher(QThread):
     def stop(self) -> None:
         self._stop.set()
         self._force_sync.set()
+        proc = self._current_proc
+        if proc is not None and proc.poll() is None:
+            try:
+                proc.terminate()
+            except OSError:
+                pass
         self.wait(10_000)
+        proc = self._current_proc
+        if self.isRunning() and proc is not None and proc.poll() is None:
+            try:
+                proc.kill()
+            except OSError:
+                pass
+            self.wait(5_000)
 
     def run(self) -> None:
         self._emit_status("idle", self._t("mirrors.state_idle"))
@@ -171,7 +187,10 @@ class MirrorWatcher(QThread):
 
         destination = f"{self.root}/{dest}"
         self._emit_status("syncing", self._t("mirrors.state_syncing"))
-        cmd = ["rsync", "-a", "--delete", "--info=progress2"]
+        cmd = [
+            "rsync", "-a", "--delete-after", "--partial",
+            "--partial-dir=.sync-partial", "--delay-updates", "--info=progress2",
+        ]
         for pattern in self.cfg.exclude_patterns():
             pattern = pattern.strip()
             if pattern:
@@ -180,15 +199,38 @@ class MirrorWatcher(QThread):
             cmd += ["--exclude", name]
         cmd += [f"{source}/", f"{destination}/"]
 
+        acquired = False
         try:
-            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=SYNC_TIMEOUT_SECONDS)
-        except (OSError, subprocess.TimeoutExpired) as exc:
+            while not self._stop.is_set():
+                acquired = self.transfer_lock.acquire(timeout=0.2)
+                if acquired:
+                    break
+            if not acquired:
+                return
+            proc = subprocess.Popen(
+                cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            )
+            self._current_proc = proc
+            try:
+                stdout, stderr = proc.communicate(timeout=SYNC_TIMEOUT_SECONDS)
+            except subprocess.TimeoutExpired:
+                proc.terminate()
+                stdout, stderr = proc.communicate(timeout=10)
+                if proc.returncode is None:
+                    proc.kill()
+                    stdout, stderr = proc.communicate()
+                raise RuntimeError("timeout sincronizzazione mirror")
+        except (OSError, RuntimeError) as exc:
             self._set_error(str(exc))
             self._log("ERROR", source, f"sync mirror fallito: {exc}")
             return
+        finally:
+            self._current_proc = None
+            if acquired:
+                self.transfer_lock.release()
 
         if proc.returncode != 0:
-            detail = (proc.stderr or "").strip() or f"rsync terminato con codice {proc.returncode}"
+            detail = (stderr or "").strip() or f"rsync terminato con codice {proc.returncode}"
             self._set_error(detail)
             self._log("ERROR", source, f"sync mirror fallito: {detail}")
             return
@@ -236,10 +278,11 @@ class MirrorManager(QThread):
     status_changed = pyqtSignal(dict)
     log_event = pyqtSignal(str, str, str)
 
-    def __init__(self, cfg: Config, logger: EventLogger) -> None:
+    def __init__(self, cfg: Config, logger: EventLogger, transfer_lock: threading.Lock) -> None:
         super().__init__()
         self.cfg = cfg
         self.logger = logger
+        self.transfer_lock = transfer_lock
         self._stop = threading.Event()
         self._wake = threading.Event()
         self._watchers: dict[str, MirrorWatcher] = {}
@@ -300,7 +343,9 @@ class MirrorManager(QThread):
             if not root:
                 self._emit_disabled(source, dest, "mirrors.state_unconfigured")
                 continue
-            watcher = MirrorWatcher(self.cfg, self.logger, source, dest, root)
+            watcher = MirrorWatcher(
+                self.cfg, self.logger, source, dest, root, self.transfer_lock,
+            )
             watcher.status_changed.connect(self.status_changed)
             watcher.log_event.connect(self.log_event)
             self._watchers[source] = watcher

@@ -59,7 +59,7 @@ DELETE_FLAG = "--delete-after"
 # Bump this whenever the client starts relying on a new --print-config field or
 # server-side capability, so an outdated NAS package gets flagged instead of
 # silently misbehaving.
-EXPECTED_SERVER_VERSION = "3.9.2"
+EXPECTED_SERVER_VERSION = "3.10.0"
 _SERVER_UPDATE_NAME_RE = re.compile(r"^sync-daemon-server-([0-9]+(?:\.[0-9]+)+)\.sh$")
 
 
@@ -242,10 +242,10 @@ class RemoteLock:
 
 
 def remote_lock(
-    cfg: Config, conn: NasConnection,
+    cfg: Config, conn: NasConnection, timeout: int = 45,
     on_start: Optional[Callable[[subprocess.Popen], None]] = None,
 ) -> RemoteLock:
-    return RemoteLock(cfg, conn, on_start=on_start)
+    return RemoteLock(cfg, conn, timeout=timeout, on_start=on_start)
 
 
 def check_port(host: str, port: int, timeout: float) -> bool:
@@ -762,13 +762,26 @@ def browse_delete(cfg: Config, conn: NasConnection, relative_path: str, device_i
     script_path = (cfg.get("remote_server_script") or "").strip()
     if not script_path:
         return False, "script server NAS non configurato"
+    try:
+        validate_transfer_safety(cfg, conn, destructive=False, direction="upload")
+    except RepositorySafetyError as exc:
+        return False, str(exc)
     payload = b"\0".join((
         b"BROWSE_DELETE_V1", new_run_ts().encode("ascii"), device_id.encode("ascii"),
         os.fsencode(relative_path),
     )) + b"\0"
-    ok, output, error = run_remote_script_input_bytes(
-        cfg, conn, script_path, ["--browse-delete"], payload, timeout=120,
-    )
+    try:
+        # Browse mutations must use the same NAS transaction lock as push/pull.
+        # The server command also takes the journal lock, so filesystem and
+        # history updates cannot interleave with an rsync transaction.
+        with remote_lock(cfg, conn):
+            ok, output, error = run_remote_script_input_bytes(
+                cfg, conn, script_path, ["--browse-delete"], payload, timeout=120,
+            )
+    except RemoteLockBusy:
+        return False, "NAS occupato da un'altra sincronizzazione; riprova tra poco"
+    except RemoteLockError as exc:
+        return False, str(exc)
     if not ok:
         return False, error or "cancellazione remota fallita"
     values = output.split(b"\0")
@@ -789,13 +802,23 @@ def browse_rename(
     script_path = (cfg.get("remote_server_script") or "").strip()
     if not script_path:
         return False, "script server NAS non configurato"
+    try:
+        validate_transfer_safety(cfg, conn, destructive=False, direction="upload")
+    except RepositorySafetyError as exc:
+        return False, str(exc)
     payload = b"\0".join((
         b"BROWSE_RENAME_V1", new_run_ts().encode("ascii"), device_id.encode("ascii"),
         os.fsencode(src_relative), os.fsencode(dst_relative),
     )) + b"\0"
-    ok, output, error = run_remote_script_input_bytes(
-        cfg, conn, script_path, ["--browse-rename"], payload, timeout=120,
-    )
+    try:
+        with remote_lock(cfg, conn):
+            ok, output, error = run_remote_script_input_bytes(
+                cfg, conn, script_path, ["--browse-rename"], payload, timeout=120,
+            )
+    except RemoteLockBusy:
+        return False, "NAS occupato da un'altra sincronizzazione; riprova tra poco"
+    except RemoteLockError as exc:
+        return False, str(exc)
     if not ok:
         return False, error or "spostamento remoto fallito"
     values = output.split(b"\0")
@@ -1256,6 +1279,12 @@ def validate_transfer_safety(
         key, separator, value = line.partition("=")
         if separator:
             remote_values[key.strip()] = value.strip()
+    remote_version = remote_values.get("VERSION", "")
+    if not remote_version or server_is_outdated(remote_version):
+        raise RepositorySafetyError(
+            f"server NAS non aggiornato: trovato {remote_version or 'versione sconosciuta'}, "
+            f"richiesta almeno la {EXPECTED_SERVER_VERSION}"
+        )
     remote_id = remote_values.get("REPOSITORY_ID", "")
     if remote_values.get("REPOSITORY_READY", "").lower() != "true" or not remote_id:
         raise RepositorySafetyError("marker repository NAS assente o non valido")
