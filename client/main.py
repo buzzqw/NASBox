@@ -36,7 +36,7 @@ def _load_qt_base_translations(app: QApplication, lang_code: str) -> None:
         app.installTranslator(translator)
 
 
-def _report_fatal_startup_error(exc: Exception) -> None:
+def _report_fatal_startup_error(exc: Exception, show_dialog: bool = True) -> None:
     """A crash while building the main window (bad config, a missing system
     dependency, ...) would otherwise just dump a traceback to a terminal
     nobody's watching -- this runs as a background app, often started by
@@ -50,13 +50,14 @@ def _report_fatal_startup_error(exc: Exception) -> None:
             f.write(f"[FATAL STARTUP ERROR] {exc}\n{detail}\n")
     except OSError:
         pass
-    try:
-        QMessageBox.critical(
-            None, f"{APP_NAME} — {t('main_window.startup_error_title')}",
-            f"{APP_NAME}:\n\n{exc}\n\n{paths.log_file()}",
-        )
-    except Exception:
-        pass  # no display available at all -- the log write above is the fallback
+    if show_dialog:
+        try:
+            QMessageBox.critical(
+                None, f"{APP_NAME} — {t('main_window.startup_error_title')}",
+                f"{APP_NAME}:\n\n{exc}\n\n{paths.log_file()}",
+            )
+        except Exception:
+            pass  # no display available at all -- the log write above is the fallback
     print(detail, file=sys.stderr)
 
 
@@ -134,10 +135,13 @@ def main() -> int:
     try:
         window = MainWindow()
     except Exception as exc:  # keep a startup failure visible instead of a silent exit
-        _report_fatal_startup_error(exc)
+        _report_fatal_startup_error(exc, show_dialog=not service_mode)
         return 1
 
-    window.show()
+    if service_mode:
+        window.hide()
+    else:
+        window.show()
 
     return app.exec()
 
