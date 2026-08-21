@@ -11,6 +11,14 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 - Sostituita la licenza proprietaria con la European Union Public Licence
   versione 1.2 (EUPL-1.2).
 
+## 1.15.1 - 2026-08-21
+
+- Il pull verifica i percorsi manifestati prima di usare `--files-from` e
+  ripara in modo condizionato le voci stale dopo una cancellazione esterna,
+  evitando retry infiniti con rsync codice 23.
+- Il tab Log mostra un riepilogo leggibile degli errori rsync e conserva il
+  dettaglio completo nel tooltip della riga.
+
 ## 1.15.0 - 2026-08-21
 
 - La scheda Stato mostra se il rilevamento modifiche usa `inotify` o la

@@ -135,7 +135,9 @@ class LogTab(QWidget):
             self.table.setItem(row, 0, QTableWidgetItem(t_str))
             self.table.setItem(row, 1, self._action_item(ev.action))
             self.table.setItem(row, 2, QTableWidgetItem(ev.path))
-            self.table.setItem(row, 3, QTableWidgetItem(ev.detail))
+            detail_item = QTableWidgetItem(self._detail_preview(ev.detail))
+            detail_item.setToolTip(ev.detail)
+            self.table.setItem(row, 3, detail_item)
 
     @staticmethod
     def _action_label(action: str) -> str:
@@ -148,6 +150,22 @@ class LogTab(QWidget):
         item.setData(Qt.ItemDataRole.UserRole, action)
         item.setToolTip(t("log.raw_action_tooltip", action=action))
         return item
+
+    @staticmethod
+    def _detail_preview(detail: str) -> str:
+        """Keep important rsync diagnostics visible without making rows enormous."""
+        compact = " ".join(str(detail).split())
+        if len(compact) <= 320:
+            return compact
+        lines = [line.strip() for line in str(detail).splitlines() if line.strip()]
+        important = [
+            line for line in lines
+            if "link_stat" in line or "rsync error:" in line or "write error:" in line
+        ]
+        preview = " | ".join(dict.fromkeys(important))
+        if not preview:
+            preview = compact
+        return preview if len(preview) <= 320 else preview[:317] + "..."
 
     def on_log_event(self, action: str, path_: str, detail: str) -> None:
         current = self.filter_combo.currentData()
@@ -170,7 +188,9 @@ class LogTab(QWidget):
                 self.table.setItem(0, 0, QTableWidgetItem(t_str))
                 self.table.setItem(0, 1, self._action_item(action))
                 self.table.setItem(0, 2, QTableWidgetItem(path_))
-                self.table.setItem(0, 3, QTableWidgetItem(detail))
+                detail_item = QTableWidgetItem(self._detail_preview(detail))
+                detail_item.setToolTip(detail)
+                self.table.setItem(0, 3, detail_item)
             if self.table.rowCount() > MAX_ROWS:
                 for row in range(self.table.rowCount() - 1, MAX_ROWS - 1, -1):
                     self.table.removeRow(row)

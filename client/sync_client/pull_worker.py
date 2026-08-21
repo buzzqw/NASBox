@@ -230,6 +230,61 @@ class PullWorker(TransferWorker):
                         and not full_pull_required
                         and tombstone_count == 0
                     )
+                    if checksum_paths:
+                        # A manifest can retain a FILE entry after an out-of-band
+                        # NAS deletion. Verify the paths live before passing them
+                        # to rsync --files-from, otherwise the same code-23 retry
+                        # repeats forever. The conditional delete also repairs
+                        # the journal/manifest without removing a file recreated
+                        # after the stale manifest entry.
+                        live_states = rsync_ops.remote_file_states(
+                            self.cfg, self._conn, checksum_paths, compact=False,
+                        )
+                        if live_states is None:
+                            raise rsync_ops.RemoteLockError(
+                                "impossibile verificare lo stato live dei percorsi NAS"
+                            )
+                        repaired_baselines: dict[str, Fingerprint | None] = {}
+                        for path in set(checksum_paths):
+                            live = live_states.get(path)
+                            if live is None or live.kind == RemoteKind.FILE:
+                                continue
+                            if live.kind == RemoteKind.OTHER:
+                                raise rsync_ops.RemoteLockError(
+                                    f"il percorso NAS non è un file regolare: {path}"
+                                )
+                            expected = manifest_entries.get(path)
+                            if expected is not None and expected.kind == RemoteKind.FILE:
+                                repair = rsync_ops.checked_delete_remote(
+                                    self.cfg, self._conn,
+                                    [(path, expected.digest, expected.mtime_ns // 1_000_000_000)],
+                                    run_ts, self.sync_state.device_id(),
+                                )
+                                if not repair.ok:
+                                    raise rsync_ops.RemoteLockError(
+                                        repair.detail or f"impossibile aggiornare il journal per {path}"
+                                    )
+                                if path in repair.stale_paths:
+                                    # The file was recreated between the live
+                                    # check and the conditional repair. Keep it
+                                    # in the rsync set so the current version wins.
+                                    continue
+                            local_fp = self.sync_state.fingerprint(Path(self.cfg.local_root(), path))
+                            baseline = baselines.get(path)
+                            if local_fp is None or (
+                                baseline is not None
+                                and not baseline.is_tombstone
+                                and local_fp.digest == baseline.digest
+                            ):
+                                repaired_baselines[path] = None
+                            elif watcher is not None:
+                                # A local version changed while the stale NAS
+                                # entry was being reconciled; let PushWorker's
+                                # normal conflict plan handle it.
+                                watcher.mark_dirty(path)
+                            checksum_paths.discard(path)
+                        if repaired_baselines:
+                            self.sync_state.record_fingerprints(repaired_baselines)
                     if targeted_pull:
                         safe_checksum_paths: set[str] = set()
                         assert manifest_entries is not None
