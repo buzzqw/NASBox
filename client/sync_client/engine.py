@@ -215,7 +215,12 @@ class SyncEngine(QThread):
             except OSError as exc:
                 self._log("ERROR", "-", f"impossibile leggere la cartella locale: {exc}")
                 has_local_content = False
-            if has_local_content or (self.sync_state is not None and self.sync_state.has_entries()):
+            has_pending = self.sync_state is not None and self.sync_state.has_pending()
+            if (
+                has_local_content
+                or (self.sync_state is not None and self.sync_state.has_entries())
+                or has_pending
+            ):
                 watcher.mark_dirty()
             self.watchers.set(watcher)
             self._watched_path = local_root

@@ -962,6 +962,7 @@ STRINGS: dict[str, dict[str, str]] = {
     "main_window.tab_status": {"it": "Stato", "en": "Status"},
     "main_window.tab_transfers": {"it": "Trasferimenti", "en": "Transfers"},
     "main_window.tab_history": {"it": "Storico / Cestino", "en": "History / Trash"},
+    "main_window.tab_conflicts": {"it": "Conflitti", "en": "Conflicts"},
     "main_window.tab_browse": {"it": "Sfoglia NAS", "en": "Browse NAS"},
     "main_window.tab_log": {"it": "Log", "en": "Log"},
     "main_window.tab_mirrors": {"it": "Cartelle esterne", "en": "External folders"},
@@ -969,6 +970,7 @@ STRINGS: dict[str, dict[str, str]] = {
     "main_window.tab_status_tooltip": {"it": "Stato attuale, pausa, cartella NASBox.", "en": "Current status, pause, NASBox folder."},
     "main_window.tab_transfers_tooltip": {"it": "File in coda di caricamento/scaricamento in questo momento.", "en": "Files currently queued to upload/download."},
     "main_window.tab_history_tooltip": {"it": "Cestino e versioni storiche dei file, con ripristino.", "en": "Trash and historical file versions, with restore."},
+    "main_window.tab_conflicts_tooltip": {"it": "Conflitti rilevati: scegli quale versione mantenere.", "en": "Detected conflicts: choose which version to keep."},
     "main_window.tab_browse_tooltip": {
         "it": "Naviga la cartella sul NAS cosi' com'e' adesso, scarica, rinomina o elimina file e cartelle.",
         "en": "Browse the NAS folder as it is right now, download, rename, or delete files and folders.",
@@ -991,6 +993,43 @@ STRINGS: dict[str, dict[str, str]] = {
         "it": "Arresto della sincronizzazione in corso. Attendi un momento…",
         "en": "Stopping synchronization. Please wait…",
     },
+
+    # --- conflicts_tab.py ---
+    "conflicts.notice": {
+        "it": "Quando due versioni cambiano contemporaneamente NASBox conserva entrambe. "
+              "Scegli qui quale versione deve restare al nome originale; quella scartata "
+              "finira' nello storico locale e potra' essere ripristinata.",
+        "en": "When two versions change at the same time NASBox keeps both. "
+              "Choose which version should keep the original name; the discarded "
+              "one goes to local history and can be restored.",
+    },
+    "conflicts.count_unknown": {"it": "Cerca i conflitti presenti nella cartella NASBox.", "en": "Scan the NASBox folder for conflicts."},
+    "conflicts.refresh_btn": {"it": "Aggiorna", "en": "Refresh"},
+    "conflicts.no_folder": {"it": "Cartella NASBox non configurata.", "en": "NASBox folder not set up."},
+    "conflicts.scanning": {"it": "Scansione conflitti in corso…", "en": "Scanning for conflicts…"},
+    "conflicts.scan_error": {"it": "Scansione non riuscita: {detail}", "en": "Scan failed: {detail}"},
+    "conflicts.count": {"it": "{groups} gruppi, {files} versioni alternative.", "en": "{groups} groups, {files} alternative versions."},
+    "conflicts.none": {"it": "Nessun conflitto da risolvere.", "en": "No conflicts to resolve."},
+    "conflicts.list_title": {"it": "Conflitti da esaminare", "en": "Conflicts to review"},
+    "conflicts.col_original": {"it": "Percorso originale", "en": "Original path"},
+    "conflicts.col_alternatives": {"it": "Alternative", "en": "Alternatives"},
+    "conflicts.col_status": {"it": "Stato originale", "en": "Original status"},
+    "conflicts.keep_label": {"it": "Versione da mantenere:", "en": "Version to keep:"},
+    "conflicts.open_btn": {"it": "Apri", "en": "Open"},
+    "conflicts.keep_btn": {"it": "Mantieni selezionata", "en": "Keep selected"},
+    "conflicts.original_present": {"it": "originale presente", "en": "original present"},
+    "conflicts.original_missing": {"it": "originale mancante", "en": "original missing"},
+    "conflicts.original_option": {"it": "Versione originale", "en": "Original version"},
+    "conflicts.confirm_title": {"it": "Risolvi conflitto", "en": "Resolve conflict"},
+    "conflicts.confirm_body": {
+        "it": "Mantenere questa versione come file principale?\n\n{path}\n\n"
+              "Le altre versioni verranno conservate nello storico locale.",
+        "en": "Keep this version as the main file?\n\n{path}\n\n"
+              "The other versions will be kept in local history.",
+    },
+    "conflicts.resolve_failed_title": {"it": "Conflitto non risolto", "en": "Conflict not resolved"},
+    "conflicts.resolve_done_title": {"it": "Conflitto risolto", "en": "Conflict resolved"},
+    "conflicts.resolve_done_body": {"it": "La versione scelta e' stata mantenuta; le altre sono nello storico locale.", "en": "The selected version was kept; the others are in local history."},
     "main_window.shutdown_waiting": {
         "it": "Arresto della sincronizzazione in corso da {seconds} secondi. Attendi…",
         "en": "Stopping synchronization for {seconds} seconds. Please wait…",

@@ -27,6 +27,7 @@ from . import icons
 from .dialogs import FirstRunSetupWizard, FolderSetupDialog
 from ..repository_safety import RepositorySafetyError, initialize_local_root
 from .browse_tab import BrowseTab
+from .conflicts_tab import ConflictsTab
 from .history_tab import HistoryTab
 from .log_tab import LogTab
 from .mirrors_tab import MirrorsTab
@@ -120,12 +121,14 @@ class MainWindow(QMainWindow):
         self.transfers_tab = TransfersTab()
         self.log_tab = LogTab(self.logger)
         self.history_tab = HistoryTab(self.cfg, self.engine, self.logger)
+        self.conflicts_tab = ConflictsTab(self.cfg, self.engine)
         self.browse_tab = BrowseTab(self.cfg, self.engine, self.logger, self.sync_state)
         self.mirrors_tab = MirrorsTab(self.cfg, self.mirror_manager)
 
         tabs.addTab(self.status_tab, t("main_window.tab_status"))
         tabs.addTab(self.transfers_tab, t("main_window.tab_transfers"))
         tabs.addTab(self.history_tab, t("main_window.tab_history"))
+        tabs.addTab(self.conflicts_tab, t("main_window.tab_conflicts"))
         tabs.addTab(self.browse_tab, t("main_window.tab_browse"))
         tabs.addTab(self.log_tab, t("main_window.tab_log"))
         tabs.addTab(self.mirrors_tab, t("main_window.tab_mirrors"))
@@ -133,10 +136,11 @@ class MainWindow(QMainWindow):
         tabs.setTabToolTip(0, t("main_window.tab_status_tooltip"))
         tabs.setTabToolTip(1, t("main_window.tab_transfers_tooltip"))
         tabs.setTabToolTip(2, t("main_window.tab_history_tooltip"))
-        tabs.setTabToolTip(3, t("main_window.tab_browse_tooltip"))
-        tabs.setTabToolTip(4, t("main_window.tab_log_tooltip"))
-        tabs.setTabToolTip(5, t("main_window.tab_mirrors_tooltip"))
-        tabs.setTabToolTip(6, t("main_window.tab_settings_tooltip"))
+        tabs.setTabToolTip(3, t("main_window.tab_conflicts_tooltip"))
+        tabs.setTabToolTip(4, t("main_window.tab_browse_tooltip"))
+        tabs.setTabToolTip(5, t("main_window.tab_log_tooltip"))
+        tabs.setTabToolTip(6, t("main_window.tab_mirrors_tooltip"))
+        tabs.setTabToolTip(7, t("main_window.tab_settings_tooltip"))
         shell_layout.addWidget(tabs, 1)
         self.setCentralWidget(shell)
 
@@ -207,6 +211,7 @@ class MainWindow(QMainWindow):
             "settings": self.settings_tab,
             "log": self.log_tab,
             "history": self.history_tab,
+            "conflicts": self.conflicts_tab,
             "transfers": self.transfers_tab,
         }.get(action)
         if destination is not None:

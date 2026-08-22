@@ -137,13 +137,29 @@ class PushWorker(TransferWorker):
         debounce = float(self.cfg.get("debounce_seconds") or 2)
         watcher = self.watchers.get()
         force_sync = self._force_sync.is_set()
-        dirty_paths = watcher.consume_paths_if_ready(debounce) if watcher and watcher.is_dirty() else None
-        if dirty_paths is None:
-            if watcher and watcher.is_dirty():
+        watcher_dirty = bool(watcher and watcher.is_dirty())
+        if watcher_dirty:
+            dirty_paths = watcher.consume_paths_if_ready(debounce)
+            if dirty_paths is None:
                 return  # preserve known local changes once their debounce has elapsed
-            if not force_sync:
-                return
+        else:
             dirty_paths = set()
+        try:
+            pending_paths = set(self.sync_state.pending_paths())
+        except (AttributeError, TypeError):
+            # Keep lightweight test doubles and older embedded callers compatible.
+            pending_paths = set()
+        dirty_paths.update(pending_paths)
+        if not dirty_paths and not force_sync:
+            return
+        if dirty_paths:
+            if "" in dirty_paths:
+                dirty_paths = self.sync_state.changed_paths(self.cfg.local_root())
+            dirty_paths = {
+                path for path in dirty_paths
+                if path and not rsync_ops.path_is_excluded(self.cfg, path)
+            }
+            self.sync_state.mark_pending(dirty_paths)
 
         # Blocks only if a pull is currently running -- there's only ever one
         # NASBox folder, so this is the only pair that can conflict.
@@ -335,6 +351,14 @@ class PushWorker(TransferWorker):
             if journal_ok:
                 self.cfg.set("journal_error", "")
                 self.sync_state.record_fingerprints(authoritative)
+                clearable = set(chunk_paths)
+                for path, expected in authoritative.items():
+                    current = self.sync_state.fingerprint(Path(self.cfg.local_root(), path))
+                    if current != expected:
+                        # A new local edit landed during this chunk. Keep its
+                        # durable queue entry even if the watcher misses it.
+                        clearable.discard(path)
+                self.sync_state.clear_pending(clearable)
                 return True, len(delete_result.completed_paths), False
 
             payload, payload_error = rsync_ops.build_remote_journal_payload(

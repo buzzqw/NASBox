@@ -100,7 +100,12 @@ class PullWorker(TransferWorker):
         if not self.cfg.get("delete_enabled") or not (full_pull_required or tombstone_count):
             return
 
-        pending = self.sync_state.changed_paths(self.cfg.local_root())
+        try:
+            pending = set(self.sync_state.pending_paths())
+        except (AttributeError, TypeError):
+            pending = set()
+        if not pending:
+            pending = self.sync_state.changed_paths(self.cfg.local_root())
         pending = {
             path for path in pending
             if path and not rsync_ops.path_is_excluded(self.cfg, path)

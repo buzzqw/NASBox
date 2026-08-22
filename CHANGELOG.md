@@ -19,6 +19,16 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 - Ripristinata e redistribuita la cartella `basicF-ITA` dopo la cancellazione
   erronea causata dalla gara tra push bloccato sul lock NAS e pull remoto.
 
+## 1.16.0 - 2026-08-22
+
+- Le modifiche locali vengono registrate in una coda persistente SQLite e
+  restano da inviare anche dopo contesa del lock, errore di rete o riavvio.
+- Aggiunto il tab **Conflitti**, che raggruppa le versioni alternative,
+  evidenzia i casi da esaminare e permette di scegliere quale mantenere.
+  Le versioni scartate finiscono nello storico locale recuperabile.
+- Aggiunto `TODO.md` con le funzionalita' di sicurezza ed efficienza da
+  rivalutare in seguito, senza introdurle implicitamente nella release.
+
 ## 1.15.1 - 2026-08-21
 
 - Il pull verifica i percorsi manifestati prima di usare `--files-from` e

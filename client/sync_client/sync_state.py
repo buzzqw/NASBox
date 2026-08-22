@@ -82,6 +82,12 @@ class SyncStateStore:
                     synced_at REAL NOT NULL,
                     PRIMARY KEY (repository, path)
                 );
+                CREATE TABLE IF NOT EXISTS pending (
+                    repository TEXT NOT NULL,
+                    path TEXT NOT NULL,
+                    queued_at REAL NOT NULL,
+                    PRIMARY KEY (repository, path)
+                );
                 """
             )
             repository_id = str(self.cfg.get("repository_id") or "")
@@ -98,6 +104,15 @@ class SyncStateStore:
                         INSERT INTO entry(repository, path, digest, size, mtime_ns, synced_at)
                         SELECT ?, path, digest, size, mtime_ns, synced_at
                         FROM entry WHERE repository = ?
+                        ON CONFLICT(repository, path) DO NOTHING
+                        """,
+                        (current, legacy),
+                    )
+                    conn.execute(
+                        """
+                        INSERT INTO pending(repository, path, queued_at)
+                        SELECT ?, path, queued_at
+                        FROM pending WHERE repository = ?
                         ON CONFLICT(repository, path) DO NOTHING
                         """,
                         (current, legacy),
@@ -221,6 +236,50 @@ class SyncStateStore:
                     synced_at=excluded.synced_at
                 """,
                 rows,
+            )
+
+    def pending_paths(self) -> set[str]:
+        """Return local changes that still need a successful push."""
+        with self._lock, self._connection() as conn:
+            return {
+                row[0] for row in conn.execute(
+                    "SELECT path FROM pending WHERE repository = ?", (self._repository(),)
+                )
+            }
+
+    def has_pending(self) -> bool:
+        with self._lock, self._connection() as conn:
+            row = conn.execute(
+                "SELECT 1 FROM pending WHERE repository = ? LIMIT 1", (self._repository(),)
+            ).fetchone()
+        return row is not None
+
+    def mark_pending(self, relative_paths: set[str] | list[str]) -> None:
+        """Remember local paths before attempting a network operation."""
+        paths = {path for path in relative_paths if path}
+        if not paths:
+            return
+        repository = self._repository()
+        queued_at = time.time()
+        with self._lock, self._connection() as conn:
+            conn.executemany(
+                """
+                INSERT INTO pending(repository, path, queued_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(repository, path) DO UPDATE SET queued_at=excluded.queued_at
+                """,
+                [(repository, path, queued_at) for path in paths],
+            )
+
+    def clear_pending(self, relative_paths: set[str] | list[str]) -> None:
+        """Forget paths only after their complete push and journal commit."""
+        paths = {path for path in relative_paths if path}
+        if not paths:
+            return
+        with self._lock, self._connection() as conn:
+            conn.executemany(
+                "DELETE FROM pending WHERE repository = ? AND path = ?",
+                [(self._repository(), path) for path in paths],
             )
 
     def has_entries(self) -> bool:
