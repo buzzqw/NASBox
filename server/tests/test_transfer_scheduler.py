@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import subprocess
 import tempfile
 import time
@@ -12,6 +13,32 @@ SCRIPT = ROOT / "sync-daemon-server.sh"
 
 
 class TransferSchedulerTests(unittest.TestCase):
+    def test_pruning_limit_does_not_leave_find_blocked(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            sandbox = Path(directory)
+            share = sandbox / "share"
+            trash = share / ".sync-trash"
+            trash.mkdir(parents=True)
+            old_time = 946684800
+            for index in range(600):
+                file = trash / f"version-{index}.txt"
+                file.write_text("old")
+                os.utime(file, (old_time, old_time))
+            script = sandbox / "server.sh"
+            script.write_bytes(SCRIPT.read_bytes())
+            script.chmod(0o755)
+            config = sandbox / "server.conf"
+            config.write_text(
+                f"SHARE_ROOT={share}\nRETENTION_DAYS=1\nPRUNE_MAX_FILES_PER_PASS=1\n"
+            )
+
+            result = subprocess.run(
+                [str(script), "-c", str(config), "--run-once"],
+                capture_output=True, text=True, timeout=10,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(len(list(trash.glob("version-*.txt"))), 599)
+
     def test_priority_ticket_waits_for_current_lease(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             sandbox = Path(directory)

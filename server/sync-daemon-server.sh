@@ -1126,7 +1126,7 @@ prune_root() {
     now=$(date '+%s')
     retention_seconds=$(( RETENTION_DAYS * 86400 ))
 
-    while IFS= read -r -d '' file; do
+    find "$trash" -type f -print0 2>/dev/null | while IFS= read -r -d '' file; do
         local epoch
         epoch="$(file_epoch "$file")"
         [[ -z "$epoch" ]] && continue
@@ -1151,7 +1151,7 @@ prune_root() {
                 break
             fi
         fi
-    done < <(find "$trash" -type f -print0 2>/dev/null)
+    done
 
     # tidy up now-empty subdirectories left behind (but keep trash_dir itself)
     find "$trash" -mindepth 1 -type d -empty -delete 2>/dev/null || true
