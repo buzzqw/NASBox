@@ -86,10 +86,23 @@ class SyncStateStore:
                     repository TEXT NOT NULL,
                     path TEXT NOT NULL,
                     queued_at REAL NOT NULL,
+                    last_reason TEXT NOT NULL DEFAULT '',
+                    last_attempt_at REAL,
+                    attempt_count INTEGER NOT NULL DEFAULT 0,
                     PRIMARY KEY (repository, path)
                 );
                 """
             )
+            columns = {
+                row[1] for row in conn.execute("PRAGMA table_info(pending)")
+            }
+            for name, definition in (
+                ("last_reason", "TEXT NOT NULL DEFAULT ''"),
+                ("last_attempt_at", "REAL"),
+                ("attempt_count", "INTEGER NOT NULL DEFAULT 0"),
+            ):
+                if name not in columns:
+                    conn.execute(f"ALTER TABLE pending ADD COLUMN {name} {definition}")
             repository_id = str(self.cfg.get("repository_id") or "")
             if repository_id:
                 legacy = self._legacy_repository()
@@ -281,6 +294,50 @@ class SyncStateStore:
                 "DELETE FROM pending WHERE repository = ? AND path = ?",
                 [(self._repository(), path) for path in paths],
             )
+
+    def record_pending_attempt(self, relative_paths: set[str] | list[str], reason: str) -> None:
+        """Record why a queued path was deferred without changing its age."""
+        paths = {path for path in relative_paths if path}
+        if not paths:
+            return
+        with self._lock, self._connection() as conn:
+            conn.executemany(
+                """
+                UPDATE pending
+                SET last_reason = ?, last_attempt_at = ?, attempt_count = attempt_count + 1
+                WHERE repository = ? AND path = ?
+                """,
+                [(reason, time.time(), self._repository(), path) for path in paths],
+            )
+
+    def pending_summary(self) -> dict[str, object]:
+        """Return queue age and last defer reason for status/diagnostics UI."""
+        now = time.time()
+        with self._lock, self._connection() as conn:
+            row = conn.execute(
+                """
+                SELECT COUNT(*), MIN(queued_at)
+                FROM pending WHERE repository = ?
+                """,
+                (self._repository(),),
+            ).fetchone()
+            latest = conn.execute(
+                """
+                SELECT last_reason, last_attempt_at, attempt_count
+                FROM pending WHERE repository = ?
+                ORDER BY last_attempt_at DESC LIMIT 1
+                """,
+                (self._repository(),),
+            ).fetchone()
+        count, oldest = row
+        reason, last_attempt, attempts = latest or ("", None, 0)
+        return {
+            "count": int(count or 0),
+            "oldest_age_seconds": max(0, int(now - oldest)) if oldest else 0,
+            "last_reason": reason or "",
+            "last_attempt_at": last_attempt,
+            "attempt_count": int(attempts or 0),
+        }
 
     def has_entries(self) -> bool:
         """Whether this client has ever established a baseline for this NAS."""

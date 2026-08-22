@@ -41,6 +41,7 @@ HOST_RECHECK_SECONDS = 30
 PRUNE_INTERVAL_SECONDS = 24 * 3600
 HEALTH_CHECK_INTERVAL_SECONDS = 15 * 60  # is the NAS-side server daemon actually running?
 VERSION_WARNING_REPEAT_SECONDS = 6 * 3600  # don't re-nag about an outdated server package more than this often
+PENDING_STATUS_INTERVAL_SECONDS = 5
 
 
 class SyncEngine(QThread):
@@ -72,6 +73,8 @@ class SyncEngine(QThread):
         self._last_prune = 0.0
         self._last_health_check = 0.0
         self._last_version_warning = 0.0
+        self._last_pending_status = 0.0
+        self._pending_summary: dict[str, object] = {}
         self._offered_server_update = ""
 
     # --- external controls ---
@@ -149,6 +152,10 @@ class SyncEngine(QThread):
         now = time.time()
         self._reconcile_watcher()
 
+        if now - self._last_pending_status >= PENDING_STATUS_INTERVAL_SECONDS:
+            self._pending_summary = self.sync_state.pending_summary() if self.sync_state is not None else {}
+            self._last_pending_status = now
+
         if self._conn is None or now - self._last_host_check >= HOST_RECHECK_SECONDS:
             self._conn = rsync_ops.resolve_connection(self.cfg)
             self._last_host_check = time.time()
@@ -177,6 +184,7 @@ class SyncEngine(QThread):
             "server_lock_owner_pid": self.cfg.get("server_lock_owner_pid", ""),
             "watcher_mode": watcher_mode,
             "watcher_detail": watcher_detail,
+            "pending_summary": self._pending_summary,
             "cycle_ts": now,
         })
 

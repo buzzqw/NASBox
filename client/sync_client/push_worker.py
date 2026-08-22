@@ -16,7 +16,6 @@ import time
 import uuid
 import stat
 import os
-import random
 from pathlib import Path
 from typing import Iterator
 
@@ -25,6 +24,7 @@ from PyQt6.QtCore import pyqtSignal
 from . import rsync_ops
 from .config import Config
 from .i18n import t
+from .lock_coordinator import LockCoordinator
 from .logger import EventLogger
 from .repository_safety import RepositorySafetyError
 from .reconcile import Action, RemoteKind, plan_path
@@ -83,17 +83,17 @@ class PushWorker(TransferWorker):
         transfer_lock: threading.Lock, sync_state: SyncStateStore,
         scan_worker: ScanWorker | None = None,
         transfer_active: threading.Event | None = None,
+        lock_coordinator: LockCoordinator | None = None,
     ) -> None:
         super().__init__(cfg, logger, transfer_active=transfer_active)
         self.watchers = watchers
         self.transfer_lock = transfer_lock
         self.sync_state = sync_state
         self._scan_worker = scan_worker
+        self.lock_coordinator = lock_coordinator or LockCoordinator()
         self._wake = threading.Event()
         self._force_sync = threading.Event()
         self._last_hash_progress_emit = 0.0
-        self._lock_retry_until = 0.0
-        self._lock_retry_delay = 5.0
 
     def _wake_now(self) -> None:
         self._wake.set()
@@ -130,7 +130,7 @@ class PushWorker(TransferWorker):
     def _tick(self) -> None:
         if self._conn is None or self.cfg.is_paused() or not self.cfg.is_configured():
             return
-        if time.time() < self._lock_retry_until:
+        if not self.lock_coordinator.can_attempt():
             return
         if self._stop_flag.is_set() or self.cfg.is_paused():
             return
@@ -190,6 +190,7 @@ class PushWorker(TransferWorker):
             try:
                 self.transfer_waiting_for_lock.emit("upload")
                 with rsync_ops.remote_lock(self.cfg, self._conn, on_start=self._set_current_process):
+                    self.lock_coordinator.acquired()
                     if self._stop_flag.is_set():
                         self.transfer_finished.emit("upload", False)
                         return
@@ -199,6 +200,7 @@ class PushWorker(TransferWorker):
                         if watcher is not None:
                             watcher.mark_dirty()
                         self._force_sync.set()
+                        self.sync_state.record_pending_attempt(dirty_paths, pending_detail or "journal non raggiungibile")
                         self._log("JOURNAL_BLOCK", "-", pending_detail or "journal non raggiungibile")
                         self.transfer_finished.emit("upload", False)
                         return
@@ -263,18 +265,16 @@ class PushWorker(TransferWorker):
                 # The preparation phase is a logical transfer even when every
                 # path is adopted or the plan turns out empty.
                 self.transfer_finished.emit("upload", overall_ok)
-                self._lock_retry_delay = 5.0
-                self._lock_retry_until = 0.0
             except rsync_ops.RemoteLockBusy:
                 if watcher is not None:
                     watcher.mark_dirty()
                 self._force_sync.set()
-                detail = t("lock.busy_retry")
+                retry_after = self.lock_coordinator.defer()
+                detail = f"{t('lock.busy_retry')} Nuovo tentativo tra {retry_after}s."
+                self.sync_state.record_pending_attempt(dirty_paths, detail)
                 self.transfer_lock_unavailable.emit("upload", detail)
                 self.transfer_finished.emit("upload", False)
                 self._log("LOCK_DEFERRED", "-", detail)
-                self._lock_retry_until = time.time() + self._lock_retry_delay * random.uniform(0.8, 1.2)
-                self._lock_retry_delay = min(self._lock_retry_delay * 2.0, 300.0)
             except rsync_ops.RemoteLockError as exc:
                 if watcher is not None:
                     watcher.mark_dirty()

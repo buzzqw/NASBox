@@ -29,7 +29,7 @@ from PyQt6.QtCore import QThread, pyqtSignal
 
 from .config import Config
 from .logger import EventLogger
-from . import paths
+from . import paths, rsync_ops
 from .watcher import FolderWatcher
 
 DEBOUNCE_SECONDS = 2        # quiet time after a detected change before mirroring
@@ -134,6 +134,7 @@ class MirrorWatcher(QThread):
         watcher = FolderWatcher(
             self.source,
             on_error=lambda msg: self._log("ERROR", self.source, msg),
+            is_excluded=lambda relative: rsync_ops.path_is_excluded(self.cfg, relative),
             stamp_path=_stamp_path_for(self.source),
         )
         watcher.start()

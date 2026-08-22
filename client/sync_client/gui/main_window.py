@@ -21,6 +21,7 @@ from ..push_worker import PushWorker
 from ..scan_worker import ScanWorker
 from ..sync_state import SyncStateStore
 from ..i18n import t
+from ..lock_coordinator import LockCoordinator
 from ..watcher import WatcherHandle
 from .async_utils import run_in_background
 from . import icons
@@ -59,20 +60,24 @@ class MainWindow(QMainWindow):
         watchers = WatcherHandle()
         transfer_lock = threading.Lock()
         transfer_active = threading.Event()
+        lock_coordinator = LockCoordinator()
         sync_state = SyncStateStore(self.cfg)
         self.sync_state = sync_state
         self.scan_worker = ScanWorker(
             self.cfg, transfer_active=transfer_active, sync_state=sync_state,
             transfer_lock=transfer_lock,
             watchers=watchers,
+            lock_coordinator=lock_coordinator,
         )
         self.push_worker = PushWorker(
             self.cfg, self.logger, watchers, transfer_lock, sync_state,
             scan_worker=self.scan_worker, transfer_active=transfer_active,
+            lock_coordinator=lock_coordinator,
         )
         self.pull_worker = PullWorker(
             self.cfg, self.logger, watchers, transfer_lock, sync_state,
             scan_worker=self.scan_worker, transfer_active=transfer_active,
+            lock_coordinator=lock_coordinator,
         )
         self.engine = SyncEngine(
             self.cfg, self.logger, watchers,

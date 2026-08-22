@@ -129,6 +129,11 @@ STRINGS: dict[str, dict[str, str]] = {
         "it": "Lock NAS: occupato da circa {age}; proprietario {owner}.",
         "en": "NAS lock: held for about {age}; owner {owner}.",
     },
+    "status.pending_empty": {"it": "Coda persistente: vuota.", "en": "Persistent queue: empty."},
+    "status.pending_summary": {
+        "it": "Coda persistente: {count} percorsi, più vecchio da {age}; ultimo rinvio: {reason}.",
+        "en": "Persistent queue: {count} paths, oldest for {age}; last defer: {reason}.",
+    },
     "status.watcher_starting": {"it": "Controllo modifiche: avvio in corso…", "en": "Change detection: starting…"},
     "status.watcher_inotify": {"it": "Controllo modifiche: inotify attivo.", "en": "Change detection: inotify active."},
     "status.watcher_polling": {

@@ -11,6 +11,15 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 - Sostituita la licenza proprietaria con la European Union Public Licence
   versione 1.2 (EUPL-1.2).
 
+## 1.17.0 - 2026-08-22
+
+- Push, pull e anteprima coda condividono un cooldown con backoff dopo la
+  contesa del lock NAS, evitando retry indipendenti e ravvicinati.
+- Lo Stato mostra il numero, l'eta' e l'ultimo motivo di rinvio della coda
+  persistente.
+- I watcher dei mirror rispettano gli stessi esclusi del trasferimento, incluso
+  `.git/` quando configurato.
+
 ## 1.16.1 - 2026-08-22
 
 - Gli eventi del watcher relativi solo a directory o percorsi non trasferibili

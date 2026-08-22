@@ -25,6 +25,7 @@ from PyQt6.QtCore import QThread, pyqtSignal
 
 from . import paths, rsync_ops
 from .config import Config
+from .lock_coordinator import LockCoordinator
 from .reconcile import Action, RemoteKind, plan_path
 from .sync_state import SyncStateStore
 from .watcher import WatcherHandle
@@ -42,6 +43,7 @@ class ScanWorker(QThread):
         sync_state: SyncStateStore | None = None,
         transfer_lock: threading.Lock | None = None,
         watchers: WatcherHandle | None = None,
+        lock_coordinator: LockCoordinator | None = None,
     ) -> None:
         super().__init__()
         self.cfg = cfg
@@ -53,6 +55,7 @@ class ScanWorker(QThread):
         self.sync_state = sync_state
         self.transfer_lock = transfer_lock
         self.watchers = watchers
+        self.lock_coordinator = lock_coordinator or LockCoordinator()
         self._manifest_revision = -1
         self._manifest_entries: dict[str, rsync_ops.RemoteState] | None = None
 
@@ -109,6 +112,8 @@ class ScanWorker(QThread):
     def _scan_once(self) -> None:
         if self._conn is None or not self.cfg.is_configured():
             return  # nothing to preview until a connection is resolved and the folder is set up
+        if not self.lock_coordinator.can_attempt():
+            return
         if self._transfer_active is not None and self._transfer_active.is_set():
             return  # never compete with a real transfer for NAS/CPU/IO
         lock_acquired = self.transfer_lock is None or self.transfer_lock.acquire(blocking=False)
@@ -159,6 +164,7 @@ class ScanWorker(QThread):
                     snapshot = rsync_ops.remote_manifest_snapshot(
                         self.cfg, self._conn, self._manifest_revision,
                     )
+                    self.lock_coordinator.acquired()
             else:
                 # Old/partially configured clients can still show a best-effort
                 # preview; real transfers are blocked by validate_transfer_safety.
@@ -166,6 +172,7 @@ class ScanWorker(QThread):
                     self.cfg, self._conn, self._manifest_revision,
                 )
         except rsync_ops.RemoteLockBusy:
+            self.lock_coordinator.defer()
             return None
         if snapshot is None:
             return None

@@ -8,6 +8,7 @@ from unittest.mock import Mock
 from unittest.mock import patch
 
 from sync_client import conflicts, paths, pull_worker, push_worker, rsync_ops
+from sync_client.lock_coordinator import LockCoordinator
 from sync_client.sync_state import SyncStateStore
 
 
@@ -36,6 +37,38 @@ class PullSafetyTests(unittest.TestCase):
                 )
                 second.clear_pending({"manuale.txt"})
                 self.assertEqual(second.pending_paths(), {"basicF-ITA/regole.pdf"})
+
+    def test_pending_summary_records_age_and_defer_reason(self) -> None:
+        cfg = type(
+            "Config",
+            (),
+            {
+                "get": lambda _self, key, default=None: {
+                    "repository_id": "repo-summary",
+                }.get(key, default),
+            },
+        )()
+        with tempfile.TemporaryDirectory() as state_dir:
+            with patch.object(paths, "state_dir", return_value=Path(state_dir)):
+                store = SyncStateStore(cfg)
+                store.mark_pending({"manuale.txt"})
+                store.record_pending_attempt({"manuale.txt"}, "lock occupato")
+                summary = store.pending_summary()
+
+        self.assertEqual(summary["count"], 1)
+        self.assertEqual(summary["last_reason"], "lock occupato")
+        self.assertEqual(summary["attempt_count"], 1)
+
+    def test_lock_coordinator_shares_backoff_until_acquired(self) -> None:
+        coordinator = LockCoordinator(initial_delay=10, max_delay=20)
+        self.assertTrue(coordinator.can_attempt())
+        delay = coordinator.defer()
+        self.assertGreaterEqual(delay, 8)
+        self.assertLessEqual(delay, 12)
+        self.assertFalse(coordinator.can_attempt())
+        self.assertGreater(coordinator.retry_after(), 0)
+        coordinator.acquired()
+        self.assertTrue(coordinator.can_attempt())
 
     def test_conflict_resolution_keeps_selected_version_and_trashes_the_other(self) -> None:
         with tempfile.TemporaryDirectory() as root, tempfile.TemporaryDirectory() as state_dir:

@@ -103,6 +103,9 @@ class StatusTab(QWidget):
         self.queue_label = QLabel(t("status.queue_unknown"))
         self.queue_label.setObjectName("statusQueue")
         status_layout.addWidget(self.queue_label)
+        self.pending_label = QLabel(t("status.pending_empty"))
+        self.pending_label.setWordWrap(True)
+        status_layout.addWidget(self.pending_label)
         self.last_sync_label = QLabel(self._last_sync_text())
         self.last_sync_label.setWordWrap(True)
         status_layout.addWidget(self.last_sync_label)
@@ -330,6 +333,7 @@ class StatusTab(QWidget):
         self._refresh_remote_lock(status)
         self._refresh_watcher(status)
         self._refresh_queue_label()
+        self._refresh_pending_summary(status)
         self._refresh_attention()
         if self._connected and not self._diagnostics_auto_loaded:
             self._diagnostics_auto_loaded = True
@@ -357,6 +361,22 @@ class StatusTab(QWidget):
         age = f"{minutes}m {seconds:02d}s" if minutes else f"{seconds}s"
         owner = str(status.get("server_lock_owner_pid") or "sconosciuto")
         self.remote_lock_label.setText(t("status.remote_lock_held", age=age, owner=owner))
+
+    def _refresh_pending_summary(self, status: dict) -> None:
+        summary = status.get("pending_summary") or {}
+        try:
+            count = int(summary.get("count") or 0)
+            age_seconds = max(0, int(summary.get("oldest_age_seconds") or 0))
+        except (AttributeError, TypeError, ValueError):
+            self.pending_label.setText(t("status.pending_empty"))
+            return
+        if count <= 0:
+            self.pending_label.setText(t("status.pending_empty"))
+            return
+        minutes, seconds = divmod(age_seconds, 60)
+        age = f"{minutes}m {seconds:02d}s" if minutes else f"{seconds}s"
+        reason = str(summary.get("last_reason") or "nessun motivo registrato")
+        self.pending_label.setText(t("status.pending_summary", count=count, age=age, reason=reason))
 
     def _refresh_watcher(self, status: dict) -> None:
         mode = status.get("watcher_mode", "disabled")

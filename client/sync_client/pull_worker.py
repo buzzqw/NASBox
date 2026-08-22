@@ -30,7 +30,6 @@ from __future__ import annotations
 
 import threading
 import time
-import random
 from pathlib import Path
 
 from PyQt6.QtCore import pyqtSignal
@@ -38,6 +37,7 @@ from PyQt6.QtCore import pyqtSignal
 from . import rsync_ops
 from .config import Config
 from .i18n import t
+from .lock_coordinator import LockCoordinator
 from .logger import EventLogger
 from .repository_safety import RepositorySafetyError
 from .reconcile import RemoteKind
@@ -68,20 +68,20 @@ class PullWorker(TransferWorker):
         transfer_lock: threading.Lock, sync_state: SyncStateStore,
         scan_worker: ScanWorker | None = None,
         transfer_active: threading.Event | None = None,
+        lock_coordinator: LockCoordinator | None = None,
     ) -> None:
         super().__init__(cfg, logger, transfer_active=transfer_active)
         self.watchers = watchers
         self.transfer_lock = transfer_lock
         self.sync_state = sync_state
         self._scan_worker = scan_worker
+        self.lock_coordinator = lock_coordinator or LockCoordinator()
         self._wake = threading.Event()
         self._last_pull = 0.0
         self._last_full_pull = 0.0
         self._last_manifest_revision = -1
         self._self_cancelled = False  # set by the cancel_check right before it terminates the process
         self._cancel_dirty_paths: set[str] = set()
-        self._lock_retry_until = 0.0
-        self._lock_retry_delay = 5.0
 
     def _wake_now(self) -> None:
         self._wake.set()
@@ -146,7 +146,7 @@ class PullWorker(TransferWorker):
 
         poll_interval = float(self.cfg.get("poll_interval") or 60)
         now = time.time()
-        if now < self._lock_retry_until:
+        if not self.lock_coordinator.can_attempt(now):
             return
         if now - self._last_pull < poll_interval:
             return
@@ -166,6 +166,7 @@ class PullWorker(TransferWorker):
                 self._cancel_dirty_paths = set()
                 self.transfer_waiting_for_lock.emit("download")
                 with rsync_ops.remote_lock(self.cfg, self._conn, on_start=self._set_current_process):
+                    self.lock_coordinator.acquired()
                     if self._stop_flag.is_set():
                         self.transfer_finished.emit("download", False)
                         self._last_pull = now
@@ -422,13 +423,12 @@ class PullWorker(TransferWorker):
             except _PullDeferred:
                 pass
             except rsync_ops.RemoteLockBusy:
-                detail = t("lock.busy_retry")
+                retry_after = self.lock_coordinator.defer()
+                detail = f"{t('lock.busy_retry')} Nuovo tentativo tra {retry_after}s."
                 self.transfer_lock_unavailable.emit("download", detail)
                 self.transfer_finished.emit("download", False)
                 self._log("LOCK_DEFERRED", "-", detail)
                 self._last_pull = now - poll_interval
-                self._lock_retry_until = time.time() + self._lock_retry_delay * random.uniform(0.8, 1.2)
-                self._lock_retry_delay = min(self._lock_retry_delay * 2.0, 300.0)
                 return
             except rsync_ops.RemoteLockError as exc:
                 detail = t("lock.acquire_failed", detail=str(exc))
@@ -461,8 +461,6 @@ class PullWorker(TransferWorker):
         else:
             self._report_failure(result)
             self._last_pull = time.time()
-            self._lock_retry_until = 0.0
-            self._lock_retry_delay = 5.0
             self.transfer_finished.emit("download", result.ok)
 
     def _report_failure(self, result: "rsync_ops.TransferResult") -> None:
