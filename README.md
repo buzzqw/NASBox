@@ -6,6 +6,8 @@ NASBox synchronizes one folder between multiple PCs through a NAS using SSH
 and rsync. The PyQt6 client manages uploads, downloads, queues, history and
 trash; the small NAS daemon applies remote history retention.
 
+Current protocol versions: client `1.19.0`, NAS server `3.13.0`.
+
 ### What NASBox Is
 
 NASBox is a self-hosted Dropbox-like synchronization tool for people who own
@@ -44,7 +46,11 @@ NASBox is a synchronization tool, not a backup by itself.
 - One NASBox folder per PC, synchronized root-to-root with the NAS.
 - SSH/rsync transfers with LAN, direct WAN and SSH bastion support.
 - Transfer queue with preview, live speed, pause and manual synchronization.
+- Global NAS transfer scheduler shared by all clients, with priority tickets
+  and a session-bound lease instead of independent lock retries.
 - Local and remote history, restore and local trash cleanup.
+- Crash-safe server transactions for checked deletions, with recovery after an
+  interruption between moving a file to trash and recording the journal.
 - NAS-side retention independent of connected clients.
 - Persistent repository marker and deletion safeguards when the NAS volume is
   not the verified one.
@@ -89,6 +95,15 @@ git -C /volume1/Varie/sync-daemon pull --ff-only
 /volume1/Varie/sync-daemon/server/sync-daemon-server.sh --restart
 ```
 
+The scheduler requires the clients' `remote_server_script` setting to point to
+`/volume1/Varie/sync-daemon/server/sync-daemon-server.sh`. Use the client's
+NAS detection action to fill this setting automatically. After upgrading the
+server, verify the protocol and repository paths with:
+
+```bash
+/volume1/Varie/sync-daemon/server/sync-daemon-server.sh --print-config
+```
+
 Install the client on each Linux PC from the release page (recommended):
 
 ```bash
@@ -124,6 +139,7 @@ Useful checks:
 ```bash
 systemctl --user status sync-daemon-client.service
 /volume1/Varie/sync-daemon/server/sync-daemon-server.sh --status
+/volume1/Varie/sync-daemon/server/sync-daemon-server.sh --print-config
 ```
 
 ### Development and Tests
@@ -132,6 +148,7 @@ systemctl --user status sync-daemon-client.service
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 PYTHONPATH=client .venv/bin/python -m unittest discover -s client/tests -v
+python3 -m unittest discover -s server/tests -v
 bash -n server/install.sh server/sync-daemon-server.sh server/uninstall.sh client/install.sh
 ```
 
@@ -165,6 +182,8 @@ that permits use, study, modification and distribution under its terms.
 NASBox sincronizza una cartella tra piu PC tramite un NAS, usando SSH e rsync.
 Il client grafico PyQt6 gestisce caricamenti, scaricamenti, coda, storico e
 cestino; il piccolo demone sul NAS applica la retention dello storico remoto.
+
+Versioni correnti del protocollo: client `1.19.0`, server NAS `3.13.0`.
 
 ### Che cos'e NASBox
 
@@ -206,7 +225,11 @@ backup autonomo.
 - Trasferimenti SSH/rsync con supporto LAN, WAN diretta e bastione SSH.
 - Coda trasferimenti con anteprima, velocita live, pausa e sincronizzazione
   manuale.
+- Scheduler globale sul NAS condiviso da tutti i client, con ticket a priorita'
+  e lease legato alla sessione invece di retry indipendenti del lock.
 - Storico locale e remoto, ripristino e pulizia del cestino locale.
+- Transazioni server sicure dai crash per le cancellazioni controllate, con
+  recovery dopo un'interruzione tra spostamento nel cestino e journal.
 - Retention sul NAS indipendente dai client accesi.
 - Marker persistente del repository e protezione dalle cancellazioni quando il
   volume NAS non e quello verificato.
@@ -251,6 +274,15 @@ git -C /volume1/Varie/sync-daemon pull --ff-only
 /volume1/Varie/sync-daemon/server/sync-daemon-server.sh --restart
 ```
 
+Lo scheduler richiede che l'impostazione client `remote_server_script` punti a
+`/volume1/Varie/sync-daemon/server/sync-daemon-server.sh`. Usare l'azione di
+rilevamento del NAS nel client per compilare automaticamente il percorso. Dopo
+l'aggiornamento del server, verificare protocollo e percorsi del repository con:
+
+```bash
+/volume1/Varie/sync-daemon/server/sync-daemon-server.sh --print-config
+```
+
 Installare il client su ogni PC Linux dalla pagina release (consigliato):
 
 ```bash
@@ -286,6 +318,7 @@ Controlli utili:
 ```bash
 systemctl --user status sync-daemon-client.service
 /volume1/Varie/sync-daemon/server/sync-daemon-server.sh --status
+/volume1/Varie/sync-daemon/server/sync-daemon-server.sh --print-config
 ```
 
 ### Sviluppo e test
@@ -294,6 +327,7 @@ systemctl --user status sync-daemon-client.service
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 PYTHONPATH=client .venv/bin/python -m unittest discover -s client/tests -v
+python3 -m unittest discover -s server/tests -v
 bash -n server/install.sh server/sync-daemon-server.sh server/uninstall.sh client/install.sh
 ```
 
