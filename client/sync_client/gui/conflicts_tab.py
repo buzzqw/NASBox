@@ -89,7 +89,7 @@ class ConflictsTab(QWidget):
         self.count_label.setText(t("conflicts.scanning"))
         run_in_background(
             self, "_conflicts_scan_call",
-            lambda: conflicts.scan_conflict_groups(local_root),
+            lambda: conflicts.scan_conflict_groups(local_root, self.engine.sync_state),
             self._on_scan_done,
         )
 
@@ -169,11 +169,12 @@ class ConflictsTab(QWidget):
             t("conflicts.confirm_body", path=self._relative(chosen)),
         ) != QMessageBox.StandardButton.Yes:
             return
-        ok, detail = conflicts.resolve_conflict(group, chosen, local_root)
+        ok, detail = conflicts.resolve_conflict(group, chosen, local_root, self.engine.sync_state)
         if not ok:
             QMessageBox.warning(self, t("conflicts.resolve_failed_title"), detail)
             return
         QMessageBox.information(self, t("conflicts.resolve_done_title"), t("conflicts.resolve_done_body"))
+        self.engine.wake()
         self.refresh()
 
     def _relative(self, path: Path) -> str:

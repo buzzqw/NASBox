@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import fcntl
+import os
 import threading
 import tempfile
 import unittest
@@ -9,6 +11,7 @@ from unittest.mock import patch
 
 from sync_client import conflicts, paths, pull_worker, push_worker, rsync_ops
 from sync_client.lock_coordinator import LockCoordinator
+from sync_client.transfer_scheduler import TransferScheduler
 from sync_client.sync_state import SyncStateStore
 
 
@@ -70,6 +73,76 @@ class PullSafetyTests(unittest.TestCase):
         coordinator.acquired()
         self.assertTrue(coordinator.can_attempt())
 
+    def test_stability_check_keeps_file_pending_while_metadata_changes(self) -> None:
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / "manuale.txt"
+            path.write_text("prima")
+
+            def change_during_wait(_interval: float) -> None:
+                path.write_text("seconda")
+
+            with patch("sync_client.sync_state.time.sleep", side_effect=change_during_wait):
+                stable, unstable = SyncStateStore.stable_paths(root, {"manuale.txt"}, 0.5)
+
+        self.assertEqual(stable, set())
+        self.assertEqual(unstable, {"manuale.txt"})
+
+    def test_transfer_scheduler_prefers_push_over_preview(self) -> None:
+        scheduler = TransferScheduler()
+        pull = scheduler.permit("pull")
+        push = scheduler.permit("push")
+        preview = scheduler.permit("preview")
+        self.assertTrue(pull.acquire())
+        self.assertFalse(preview.acquire(blocking=False))
+        pull.release()
+        self.assertTrue(push.acquire(blocking=False))
+        push.release()
+
+    def test_remote_lock_reports_owner_without_a_second_probe(self) -> None:
+        with tempfile.TemporaryDirectory() as root:
+            root_path = Path(root)
+            fake_ssh = root_path / "ssh"
+            fake_ssh.write_text("#!/usr/bin/env bash\nlast=\"${!#}\"\nexec bash -c \"$last\"\n")
+            fake_ssh.chmod(0o755)
+            lock_file = root_path / "sync-transfer.lock"
+            owner_file = root_path / "sync-transfer.lock.owner"
+
+            class LockConfig:
+                values = {
+                    "server_lock_file_remote": str(lock_file),
+                    "server_lock_owner_file_remote": str(owner_file),
+                    "nas_user": "user",
+                    "ssh_port": 22,
+                    "ssh_host_key_pinned": False,
+                    "ssh_known_hosts": "",
+                    "jump_host": "",
+                }
+
+                def get(self, key, default=None):
+                    return self.values.get(key, default)
+
+            cfg = LockConfig()
+            env_path = f"{root}:{os.environ.get('PATH', '')}"
+            with patch.dict(os.environ, {"PATH": env_path}):
+                with rsync_ops.remote_lock(cfg, rsync_ops.NasConnection("local"), timeout=1, owner_id="device-a"):
+                    self.assertIn("device-a|", owner_file.read_text())
+                self.assertFalse(owner_file.exists())
+
+                owner_file.write_text("device-b|other-host|123\n")
+                held = owner_file.with_name("sync-transfer.lock-holder")
+                fd = os.open(held, os.O_CREAT | os.O_RDWR, 0o600)
+                try:
+                    os.replace(held, lock_file)
+                    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    with self.assertRaises(rsync_ops.RemoteLockBusy) as caught:
+                        with rsync_ops.remote_lock(cfg, rsync_ops.NasConnection("local"), timeout=0, owner_id="device-a"):
+                            pass
+                    self.assertEqual(caught.exception.owner_id, "device-b")
+                    self.assertEqual(caught.exception.owner_host, "other-host")
+                finally:
+                    fcntl.flock(fd, fcntl.LOCK_UN)
+                    os.close(fd)
+
     def test_conflict_resolution_keeps_selected_version_and_trashes_the_other(self) -> None:
         with tempfile.TemporaryDirectory() as root, tempfile.TemporaryDirectory() as state_dir:
             root_path = Path(root)
@@ -86,6 +159,29 @@ class PullSafetyTests(unittest.TestCase):
             self.assertEqual(original.read_text(), "alternativa")
             self.assertFalse(conflict.exists())
             self.assertTrue(any(Path(state_dir).rglob("manuale.txt-*")))
+
+    def test_conflict_group_survives_scan_and_resolution(self) -> None:
+        cfg = type(
+            "Config",
+            (),
+            {"get": lambda _self, key, default=None: {"repository_id": "repo-conflict"}.get(key, default)},
+        )()
+        with tempfile.TemporaryDirectory() as root, tempfile.TemporaryDirectory() as state_dir:
+            root_path = Path(root)
+            original = root_path / "manuale.txt"
+            conflict = root_path / "manuale (conflitto da pc-a abc123).txt"
+            original.write_text("originale")
+            conflict.write_text("alternativa")
+            with patch.object(paths, "sync_state_db_file", return_value=Path(state_dir) / "state.sqlite3"):
+                store = SyncStateStore(cfg)
+                groups = conflicts.scan_conflict_groups(root, store)
+                self.assertEqual(len(groups), 1)
+                self.assertTrue(groups[0].group_id)
+                self.assertEqual(len(store.open_conflict_groups()), 1)
+                ok, detail = conflicts.resolve_conflict(groups[0], conflict, root, store)
+                self.assertTrue(ok, detail)
+                self.assertEqual(store.pending_paths(), {"manuale.txt"})
+                self.assertEqual(store.open_conflict_groups(), [])
 
     def test_destructive_pull_defers_when_local_copy_is_not_in_baseline(self) -> None:
         cfg = Mock()

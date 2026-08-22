@@ -59,7 +59,7 @@ DELETE_FLAG = "--delete-after"
 # Bump this whenever the client starts relying on a new --print-config field or
 # server-side capability, so an outdated NAS package gets flagged instead of
 # silently misbehaving.
-EXPECTED_SERVER_VERSION = "3.11.0"
+EXPECTED_SERVER_VERSION = "3.12.0"
 _SERVER_UPDATE_NAME_RE = re.compile(r"^sync-daemon-server-([0-9]+(?:\.[0-9]+)+)\.sh$")
 
 
@@ -168,6 +168,13 @@ class RemoteLockError(RuntimeError):
 class RemoteLockBusy(RemoteLockError):
     """Another client held the NAS transaction lock for the whole wait."""
 
+    def __init__(self, detail: str = "lock occupato da un altro client", owner_id: str = "",
+                 owner_host: str = "", started_at: int = 0) -> None:
+        super().__init__(detail)
+        self.owner_id = owner_id
+        self.owner_host = owner_host
+        self.started_at = started_at
+
 
 REMOTE_LOCK_BUSY_EXIT_CODE = 75
 
@@ -183,11 +190,13 @@ class RemoteLock:
     def __init__(
         self, cfg: Config, conn: NasConnection, timeout: int = 45,
         on_start: Optional[Callable[[subprocess.Popen], None]] = None,
+        owner_id: str = "",
     ) -> None:
         self.cfg = cfg
         self.conn = conn
         self.timeout = timeout
         self.on_start = on_start
+        self.owner_id = owner_id
         self.proc: subprocess.Popen | None = None
 
     def __enter__(self) -> "RemoteLock":
@@ -196,10 +205,23 @@ class RemoteLock:
             raise RemoteLockError("server NAS senza lock multi-client; aggiornamento obbligatorio")
 
         parent = lock_file.rsplit("/", 1)[0] or "."
+        owner_file = (self.cfg.get("server_lock_owner_file_remote") or f"{lock_file}.owner").strip()
+        owner = self.owner_id or "unknown"
+        hostname = socket.gethostname() or "unknown"
+        owner_payload = f"{owner}|{hostname}|{int(time.time())}"
+        owner_tmp = f"{owner_file}.$$"
+        owner_script = (
+            f"trap 'rm -f {shlex.quote(owner_tmp)} {shlex.quote(owner_file)}' EXIT; "
+            f"printf '%s\\n' {shlex.quote(owner_payload)} > {shlex.quote(owner_tmp)} && "
+            f"mv -f {shlex.quote(owner_tmp)} {shlex.quote(owner_file)} && "
+            "printf 'NASBOX_LOCKED\\n' && cat >/dev/null"
+        )
         remote_cmd = (
             f"mkdir -p {shlex.quote(parent)} && "
-            f"exec flock -E {REMOTE_LOCK_BUSY_EXIT_CODE} -x -w {self.timeout} {shlex.quote(lock_file)} "
-            "sh -c 'printf \"NASBOX_LOCKED\\n\"; cat >/dev/null'"
+            f"flock -E {REMOTE_LOCK_BUSY_EXIT_CODE} -x -w {self.timeout} {shlex.quote(lock_file)} "
+            f"sh -c {shlex.quote(owner_script)}; rc=$?; "
+            f"if [ \"$rc\" -eq {REMOTE_LOCK_BUSY_EXIT_CODE} ]; then "
+            f"printf 'NASBOX_LOCK_BUSY\\n'; cat {shlex.quote(owner_file)} 2>/dev/null || true; fi; exit \"$rc\""
         )
         user = self.cfg.get("nas_user")
         try:
@@ -210,12 +232,28 @@ class RemoteLock:
             if self.on_start:
                 self.on_start(self.proc)
             assert self.proc.stdout is not None
-            if self.proc.stdout.readline().strip() == "NASBOX_LOCKED":
+            response = self.proc.stdout.readline().strip()
+            if response == "NASBOX_LOCKED":
                 return self
+            owner_id = owner_host = ""
+            started_at = 0
+            if response == "NASBOX_LOCK_BUSY":
+                owner_line = self.proc.stdout.readline().strip()
+                owner_id, separator, remainder = owner_line.partition("|")
+                if separator:
+                    owner_host, separator, started = remainder.partition("|")
+                    try:
+                        started_at = int(started) if separator else 0
+                    except ValueError:
+                        started_at = 0
             _stdout, stderr = self.proc.communicate(timeout=5)
             detail = _clean_ssh_stderr(stderr)
             if self.proc.returncode == REMOTE_LOCK_BUSY_EXIT_CODE:
-                raise RemoteLockBusy("lock occupato da un altro client")
+                error = RemoteLockBusy(
+                    "lock occupato da un altro client", owner_id, owner_host, started_at,
+                )
+                self.release()
+                raise error
             if not detail:
                 raise RemoteLockError("risposta inattesa durante l'acquisizione del lock remoto")
             raise RemoteLockError(detail)
@@ -236,6 +274,13 @@ class RemoteLock:
                 proc.terminate()
             except OSError:
                 pass
+        finally:
+            for stream in (proc.stdin, proc.stdout, proc.stderr):
+                if stream is not None:
+                    try:
+                        stream.close()
+                    except OSError:
+                        pass
 
     def __exit__(self, _exc_type, _exc, _tb) -> None:
         self.release()
@@ -244,8 +289,9 @@ class RemoteLock:
 def remote_lock(
     cfg: Config, conn: NasConnection, timeout: int = 45,
     on_start: Optional[Callable[[subprocess.Popen], None]] = None,
+    owner_id: str = "",
 ) -> RemoteLock:
-    return RemoteLock(cfg, conn, timeout=timeout, on_start=on_start)
+    return RemoteLock(cfg, conn, timeout=timeout, on_start=on_start, owner_id=owner_id)
 
 
 def check_port(host: str, port: int, timeout: float) -> bool:

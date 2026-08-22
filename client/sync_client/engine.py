@@ -182,6 +182,8 @@ class SyncEngine(QThread):
             "server_lock_held": self.cfg.get("server_lock_held", False),
             "server_lock_age_seconds": self.cfg.get("server_lock_age_seconds", 0),
             "server_lock_owner_pid": self.cfg.get("server_lock_owner_pid", ""),
+            "server_lock_owner_id": self.cfg.get("server_lock_owner_id", ""),
+            "server_lock_owner_host": self.cfg.get("server_lock_owner_host", ""),
             "watcher_mode": watcher_mode,
             "watcher_detail": watcher_detail,
             "pending_summary": self._pending_summary,
@@ -260,6 +262,9 @@ class SyncEngine(QThread):
         lock_file = values.get("SYNC_LOCK_FILE", "")
         if lock_file != self.cfg.get("server_lock_file_remote"):
             self.cfg.set("server_lock_file_remote", lock_file)
+        owner_file = values.get("SYNC_LOCK_OWNER_FILE", "")
+        if owner_file != self.cfg.get("server_lock_owner_file_remote"):
+            self.cfg.set("server_lock_owner_file_remote", owner_file)
         lock_held = values.get("SYNC_LOCK_HELD", "").lower() == "true"
         if lock_held != self.cfg.get("server_lock_held"):
             self.cfg.set("server_lock_held", lock_held)
@@ -272,6 +277,19 @@ class SyncEngine(QThread):
         owner_pid = values.get("SYNC_LOCK_OWNER_PID", "")
         if owner_pid != self.cfg.get("server_lock_owner_pid"):
             self.cfg.set("server_lock_owner_pid", owner_pid)
+        owner_id = values.get("SYNC_LOCK_OWNER_ID", "")
+        if owner_id != self.cfg.get("server_lock_owner_id"):
+            self.cfg.set("server_lock_owner_id", owner_id)
+        owner_host = values.get("SYNC_LOCK_OWNER_HOST", "")
+        if owner_host != self.cfg.get("server_lock_owner_host"):
+            self.cfg.set("server_lock_owner_host", owner_host)
+        owner_started = values.get("SYNC_LOCK_STARTED_AT", "0")
+        try:
+            owner_started_value = int(owner_started or 0)
+        except ValueError:
+            owner_started_value = 0
+        if owner_started_value != self.cfg.get("server_lock_started_at"):
+            self.cfg.set("server_lock_started_at", owner_started_value)
 
         repository_id = values.get("REPOSITORY_ID", "")
         if repository_id != self.cfg.get("repository_id"):

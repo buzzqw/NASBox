@@ -182,6 +182,25 @@ class PushWorker(TransferWorker):
         if not resolved_paths:
             self._force_sync.clear()
             return
+        try:
+            stability_interval = max(0.0, min(float(self.cfg.get("file_stability_seconds") or 0), 10.0))
+        except (TypeError, ValueError):
+            stability_interval = 0.75
+        try:
+            stable_paths, unstable_paths = self.sync_state.stable_paths(
+                self.cfg.local_root(), resolved_paths, stability_interval,
+            )
+        except (AttributeError, TypeError):
+            stable_paths, unstable_paths = resolved_paths, set()
+        if unstable_paths:
+            self.sync_state.record_pending_attempt(unstable_paths, "file ancora in scrittura o instabile")
+            if watcher is not None:
+                for path in unstable_paths:
+                    watcher.mark_dirty(path)
+        resolved_paths = stable_paths
+        if not resolved_paths:
+            self._force_sync.clear()
+            return
 
         # Blocks only if a pull is currently running -- there's only ever one
         # NASBox folder, so this is the only pair that can conflict.
@@ -189,7 +208,10 @@ class PushWorker(TransferWorker):
         with self.transfer_lock:
             try:
                 self.transfer_waiting_for_lock.emit("upload")
-                with rsync_ops.remote_lock(self.cfg, self._conn, on_start=self._set_current_process):
+                with rsync_ops.remote_lock(
+                    self.cfg, self._conn, on_start=self._set_current_process,
+                    owner_id=self.sync_state.device_id(),
+                ):
                     self.lock_coordinator.acquired()
                     if self._stop_flag.is_set():
                         self.transfer_finished.emit("upload", False)
@@ -265,7 +287,8 @@ class PushWorker(TransferWorker):
                 # The preparation phase is a logical transfer even when every
                 # path is adopted or the plan turns out empty.
                 self.transfer_finished.emit("upload", overall_ok)
-            except rsync_ops.RemoteLockBusy:
+            except rsync_ops.RemoteLockBusy as exc:
+                self._record_lock_owner(exc)
                 if watcher is not None:
                     watcher.mark_dirty()
                 self._force_sync.set()
@@ -303,7 +326,10 @@ class PushWorker(TransferWorker):
         """
         chunk_set = set(chunk_paths)
         self.transfer_waiting_for_lock.emit("upload")
-        with rsync_ops.remote_lock(self.cfg, self._conn, on_start=self._set_current_process):
+        with rsync_ops.remote_lock(
+            self.cfg, self._conn, on_start=self._set_current_process,
+            owner_id=self.sync_state.device_id(),
+        ):
             if self._stop_flag.is_set():
                 return False, 0, False
             chunk_run_ts = rsync_ops.new_run_ts()

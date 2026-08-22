@@ -91,6 +91,31 @@ class SyncStateStore:
                     attempt_count INTEGER NOT NULL DEFAULT 0,
                     PRIMARY KEY (repository, path)
                 );
+                CREATE TABLE IF NOT EXISTS conflict_group (
+                    repository TEXT NOT NULL,
+                    group_id TEXT NOT NULL,
+                    original_path TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    created_at REAL NOT NULL,
+                    updated_at REAL NOT NULL,
+                    resolved_at REAL,
+                    chosen_path TEXT,
+                    PRIMARY KEY (repository, group_id)
+                );
+                CREATE TABLE IF NOT EXISTS conflict_member (
+                    repository TEXT NOT NULL,
+                    group_id TEXT NOT NULL,
+                    relative_path TEXT NOT NULL,
+                    origin_device TEXT NOT NULL DEFAULT '',
+                    digest TEXT NOT NULL DEFAULT '',
+                    size INTEGER NOT NULL DEFAULT 0,
+                    mtime_ns INTEGER NOT NULL DEFAULT 0,
+                    present INTEGER NOT NULL DEFAULT 1,
+                    PRIMARY KEY (repository, group_id, relative_path),
+                    FOREIGN KEY (repository, group_id)
+                        REFERENCES conflict_group(repository, group_id)
+                        ON DELETE CASCADE
+                );
                 """
             )
             columns = {
@@ -177,6 +202,43 @@ class SyncStateStore:
             except OSError:
                 return None
         return None
+
+    @staticmethod
+    def stable_paths(local_root: str, relative_paths: set[str], interval: float) -> tuple[set[str], set[str]]:
+        """Return paths whose regular-file metadata stayed unchanged over one interval.
+
+        Missing paths are stable deletion candidates. The interval is shared by the
+        whole batch so a large import does not sleep once per file.
+        """
+        root = Path(local_root)
+        before: dict[str, tuple[int, int, int, int] | None] = {}
+        for relative_path in relative_paths:
+            try:
+                info = (root / relative_path).lstat()
+            except OSError:
+                before[relative_path] = None
+                continue
+            before[relative_path] = (
+                info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns,
+            ) if stat.S_ISREG(info.st_mode) else None
+        if interval > 0:
+            time.sleep(interval)
+        stable: set[str] = set()
+        unstable: set[str] = set()
+        for relative_path, old in before.items():
+            try:
+                info = (root / relative_path).lstat()
+            except OSError:
+                new = None
+            else:
+                new = (
+                    info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns,
+                ) if stat.S_ISREG(info.st_mode) else None
+            if old == new:
+                stable.add(relative_path)
+            else:
+                unstable.add(relative_path)
+        return stable, unstable
 
     def get(self, relative_path: str) -> Fingerprint | None:
         with self._lock, self._connection() as conn:
@@ -338,6 +400,87 @@ class SyncStateStore:
             "last_attempt_at": last_attempt,
             "attempt_count": int(attempts or 0),
         }
+
+    def upsert_conflict_group(self, original_path: str, members: list[dict[str, object]]) -> str:
+        """Persist the current local conflict set for one original path."""
+        repository = self._repository()
+        group_id = hashlib.sha256(f"{repository}\0{original_path}".encode()).hexdigest()[:24]
+        now = time.time()
+        with self._lock, self._connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO conflict_group(
+                    repository, group_id, original_path, status, created_at, updated_at,
+                    resolved_at, chosen_path
+                ) VALUES (?, ?, ?, 'open', ?, ?, NULL, NULL)
+                ON CONFLICT(repository, group_id) DO UPDATE SET
+                    original_path=excluded.original_path, status='open', updated_at=excluded.updated_at,
+                    resolved_at=NULL, chosen_path=NULL
+                """,
+                (repository, group_id, original_path, now, now),
+            )
+            conn.execute(
+                "DELETE FROM conflict_member WHERE repository = ? AND group_id = ?",
+                (repository, group_id),
+            )
+            conn.executemany(
+                """
+                INSERT INTO conflict_member(
+                    repository, group_id, relative_path, origin_device, digest, size, mtime_ns, present
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, 1)
+                """,
+                [
+                    (
+                        repository, group_id, str(member.get("path") or ""),
+                        str(member.get("origin_device") or ""), str(member.get("digest") or ""),
+                        int(member.get("size") or 0), int(member.get("mtime_ns") or 0),
+                    )
+                    for member in members
+                ],
+            )
+        return group_id
+
+    def mark_conflict_resolved(self, group_id: str, chosen_path: str) -> None:
+        with self._lock, self._connection() as conn:
+            conn.execute(
+                """
+                UPDATE conflict_group
+                SET status = 'resolved', resolved_at = ?, updated_at = ?, chosen_path = ?
+                WHERE repository = ? AND group_id = ?
+                """,
+                (time.time(), time.time(), chosen_path, self._repository(), group_id),
+            )
+
+    def open_conflict_groups(self) -> list[dict[str, object]]:
+        with self._lock, self._connection() as conn:
+            groups = conn.execute(
+                """
+                SELECT group_id, original_path, status, created_at, updated_at
+                FROM conflict_group WHERE repository = ? AND status = 'open'
+                ORDER BY original_path
+                """,
+                (self._repository(),),
+            ).fetchall()
+            result = []
+            for group_id, original, status, created_at, updated_at in groups:
+                members = conn.execute(
+                    """
+                    SELECT relative_path, origin_device, digest, size, mtime_ns
+                    FROM conflict_member WHERE repository = ? AND group_id = ?
+                    ORDER BY relative_path
+                    """,
+                    (self._repository(), group_id),
+                ).fetchall()
+                result.append({
+                    "group_id": group_id, "original_path": original, "status": status,
+                    "created_at": created_at, "updated_at": updated_at,
+                    "members": [
+                        {"path": path, "origin_device": origin, "digest": digest,
+                         "size": size, "mtime_ns": mtime}
+                        for path, origin, digest, size, mtime in members
+                    ],
+                })
+        return result
 
     def has_entries(self) -> bool:
         """Whether this client has ever established a baseline for this NAS."""

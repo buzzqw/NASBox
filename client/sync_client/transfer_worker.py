@@ -222,3 +222,9 @@ class TransferWorker(QThread):
     def _log(self, action: str, path_: str, detail: str = "") -> None:
         self.logger.log(action, path_, detail)
         self.log_event.emit(action, path_, detail)
+
+    def _record_lock_owner(self, error: rsync_ops.RemoteLockBusy) -> None:
+        """Persist owner metadata returned by the lock attempt itself."""
+        self.cfg.set("server_lock_owner_id", error.owner_id)
+        self.cfg.set("server_lock_owner_host", error.owner_host)
+        self.cfg.set("server_lock_started_at", error.started_at)

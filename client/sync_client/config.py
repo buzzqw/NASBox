@@ -30,6 +30,7 @@ DEFAULTS: dict[str, Any] = {
     "client_update_remote_path": ".nasbox-client-update",  # relative to remote_prefix by default
     "poll_interval": 60,       # seconds between pull-from-NAS cycles (discover other clients' changes)
     "debounce_seconds": 2,     # seconds of local quiet before pushing a change
+    "file_stability_seconds": 0.75,  # one local stat interval before a queued file is eligible
     "notify_sync_completion": False,  # show a tray notification after completed file transfers
     "animate_sync_icon": False,  # animate the tray icon while files are transferred
     "tray_single_click": "menu",  # "menu" (compatibility default) or "window"
@@ -45,9 +46,13 @@ DEFAULTS: dict[str, Any] = {
                                    # read-only here, self-reported by the daemon via --print-config so
                                     # rsync_ops can exclude it if it falls inside the synced tree
     "server_lock_file_remote": "", # authoritative NAS-side transaction lock, reported by server >= 3.2.0
+    "server_lock_owner_file_remote": "",
     "server_lock_held": False,      # best-effort diagnostics from --print-config
     "server_lock_age_seconds": 0,
     "server_lock_owner_pid": "",
+    "server_lock_owner_id": "",
+    "server_lock_owner_host": "",
+    "server_lock_started_at": 0,
     "repository_id": "",           # UUID-like ID read from the NAS-side .nasbox-root marker
     "remote_repository_ready": False,
     "remote_journal_ready": False,

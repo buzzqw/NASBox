@@ -11,6 +11,20 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 - Sostituita la licenza proprietaria con la European Union Public Licence
   versione 1.2 (EUPL-1.2).
 
+## 1.18.0 - 2026-08-22
+
+- I file candidati al push devono restare stabili per un intervallo locale
+  condiviso dal batch; quelli ancora in scrittura restano pending senza usare
+  il lock NAS.
+- Push, pull, mirror e preview passano da uno scheduler locale a priorita', con
+  il lavoro reale favorito rispetto alle anteprime.
+- I conflitti hanno gruppi persistenti SQLite e una risoluzione che rimette il
+  percorso originale nella coda pending prima della propagazione.
+- Il lock remoto pubblica device, host e istante di acquisizione nella stessa
+  sessione SSH, senza una seconda interrogazione dopo la contesa.
+- Aggiunti failpoint opt-in e test subprocess per verificare crash dopo lo
+  spostamento nel cestino.
+
 ## 1.17.0 - 2026-08-22
 
 - Push, pull e anteprima coda condividono un cooldown con backoff dopo la

@@ -20,6 +20,7 @@ from ..pull_worker import PullWorker
 from ..push_worker import PushWorker
 from ..scan_worker import ScanWorker
 from ..sync_state import SyncStateStore
+from ..transfer_scheduler import TransferScheduler
 from ..i18n import t
 from ..lock_coordinator import LockCoordinator
 from ..watcher import WatcherHandle
@@ -58,24 +59,24 @@ class MainWindow(QMainWindow):
             self._run_first_time_setup()
 
         watchers = WatcherHandle()
-        transfer_lock = threading.Lock()
+        transfer_scheduler = TransferScheduler()
         transfer_active = threading.Event()
         lock_coordinator = LockCoordinator()
         sync_state = SyncStateStore(self.cfg)
         self.sync_state = sync_state
         self.scan_worker = ScanWorker(
             self.cfg, transfer_active=transfer_active, sync_state=sync_state,
-            transfer_lock=transfer_lock,
+            transfer_lock=transfer_scheduler.permit("preview"),
             watchers=watchers,
             lock_coordinator=lock_coordinator,
         )
         self.push_worker = PushWorker(
-            self.cfg, self.logger, watchers, transfer_lock, sync_state,
+            self.cfg, self.logger, watchers, transfer_scheduler.permit("push"), sync_state,
             scan_worker=self.scan_worker, transfer_active=transfer_active,
             lock_coordinator=lock_coordinator,
         )
         self.pull_worker = PullWorker(
-            self.cfg, self.logger, watchers, transfer_lock, sync_state,
+            self.cfg, self.logger, watchers, transfer_scheduler.permit("pull"), sync_state,
             scan_worker=self.scan_worker, transfer_active=transfer_active,
             lock_coordinator=lock_coordinator,
         )
@@ -84,7 +85,7 @@ class MainWindow(QMainWindow):
             push_worker=self.push_worker, pull_worker=self.pull_worker,
             sync_state=sync_state,
         )
-        self.mirror_manager = MirrorManager(self.cfg, self.logger, transfer_lock)
+        self.mirror_manager = MirrorManager(self.cfg, self.logger, transfer_scheduler.permit("mirror"))
 
         shell = QWidget()
         shell_layout = QVBoxLayout(shell)

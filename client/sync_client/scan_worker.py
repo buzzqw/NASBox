@@ -160,7 +160,10 @@ class ScanWorker(QThread):
             # the dry-run fallback below remains safe if the lock is busy.
             lock_file = self.cfg.get("server_lock_file_remote")
             if isinstance(lock_file, str) and lock_file.strip().endswith("sync-transfer.lock"):
-                with rsync_ops.remote_lock(self.cfg, self._conn, timeout=0):
+                with rsync_ops.remote_lock(
+                    self.cfg, self._conn, timeout=0,
+                    owner_id=self.sync_state.device_id() if self.sync_state is not None else "preview",
+                ):
                     snapshot = rsync_ops.remote_manifest_snapshot(
                         self.cfg, self._conn, self._manifest_revision,
                     )
@@ -171,7 +174,10 @@ class ScanWorker(QThread):
                 snapshot = rsync_ops.remote_manifest_snapshot(
                     self.cfg, self._conn, self._manifest_revision,
                 )
-        except rsync_ops.RemoteLockBusy:
+        except rsync_ops.RemoteLockBusy as exc:
+            self.cfg.set("server_lock_owner_id", exc.owner_id)
+            self.cfg.set("server_lock_owner_host", exc.owner_host)
+            self.cfg.set("server_lock_started_at", exc.started_at)
             self.lock_coordinator.defer()
             return None
         if snapshot is None:
@@ -218,7 +224,10 @@ class ScanWorker(QThread):
             try:
                 lock_file = self.cfg.get("server_lock_file_remote")
                 if isinstance(lock_file, str) and lock_file.strip().endswith("sync-transfer.lock"):
-                    with rsync_ops.remote_lock(self.cfg, self._conn, timeout=0):
+                    with rsync_ops.remote_lock(
+                        self.cfg, self._conn, timeout=0,
+                        owner_id=self.sync_state.device_id() if self.sync_state is not None else "preview",
+                    ):
                         remote = rsync_ops.remote_file_states(
                             self.cfg, self._conn, unknown_remote, compact=False,
                         )
@@ -226,7 +235,11 @@ class ScanWorker(QThread):
                     remote = rsync_ops.remote_file_states(
                         self.cfg, self._conn, unknown_remote, compact=False,
                     )
-            except rsync_ops.RemoteLockBusy:
+            except rsync_ops.RemoteLockBusy as exc:
+                self.cfg.set("server_lock_owner_id", exc.owner_id)
+                self.cfg.set("server_lock_owner_host", exc.owner_host)
+                self.cfg.set("server_lock_started_at", exc.started_at)
+                self.lock_coordinator.defer()
                 return None
             if remote is None or set(remote) != unknown_remote:
                 return None

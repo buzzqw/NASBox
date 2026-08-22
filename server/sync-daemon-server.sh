@@ -30,7 +30,7 @@
 #
 set -uo pipefail
 
-VERSION="3.11.0"
+VERSION="3.12.0"
 SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -42,6 +42,7 @@ PID_FILE="$STATE_DIR/daemon.pid"
 DAEMON_LOCK_FILE="$STATE_DIR/daemon.lock"
 STAMP_FILE="$STATE_DIR/last-run"
 SYNC_LOCK_FILE="$STATE_DIR/sync-transfer.lock"
+SYNC_LOCK_OWNER_FILE="$STATE_DIR/sync-transfer.lock.owner"
 JOURNAL_FILE="$STATE_DIR/transfer-journal.tsv"
 MANIFEST_FILE="$STATE_DIR/manifest.tsv"
 JOURNAL_LOCK_FILE="$STATE_DIR/transfer-journal.lock"
@@ -59,6 +60,13 @@ REPOSITORY_MARKER_NAME=".nasbox-root"
 DRY_RUN="false"
 
 # --- logging ---
+
+test_failpoint() {
+    # Crash injection is opt-in and only used by isolated subprocess tests.
+    if [[ -n "${NASBOX_TEST_FAILPOINT:-}" && "${NASBOX_TEST_FAILPOINT}" == "$1" ]]; then
+        kill -KILL "$$"
+    fi
+}
 
 log() {
     local level="$1"; shift
@@ -548,6 +556,7 @@ append_delete_journal_unlocked() {
         rm -f "$tmp" "$journal_backup"
         return 1
     fi
+    test_failpoint "journal_after_append"
     rm -f "$tmp"
     if bump_manifest_revision_unlocked; then
         rm -f "$journal_backup"
@@ -657,7 +666,9 @@ cmd_checked_delete() {
         backup="$SHARE_ROOT/$TRASH_DIRNAME/$path-$run_ts"
         mkdir -p "${backup%/*}" || { printf '%s\0ERROR\0' "$path"; continue; }
         if mv "$target" "$backup"; then
+            test_failpoint "checked_delete_after_move"
             if append_delete_journal_unlocked "$path" "$device"; then
+                test_failpoint "checked_delete_after_journal"
                 printf '%s\0DELETED\0' "$path"
             else
                 mv "$backup" "$target" 2>/dev/null || true
@@ -767,6 +778,7 @@ cmd_browse_delete() {
         printf 'BROWSE_DELETE_V1\0ERROR\0spostamento nel cestino fallito\0'
         return 1
     fi
+    test_failpoint "browse_delete_after_move"
 
     paths_file="${JOURNAL_FILE}.browse-paths.$$.$RANDOM"
     : > "$paths_file"
@@ -774,6 +786,7 @@ cmd_browse_delete() {
         printf '%s\0' "$rel_file" >> "$paths_file"
     done
     if append_delete_journal_batch_unlocked "$paths_file" "$device"; then
+        test_failpoint "browse_delete_after_journal"
         rm -f "$paths_file"
         flock -u 9; exec 9>&-
         printf 'BROWSE_DELETE_V1\0OK\0'
@@ -843,6 +856,7 @@ cmd_browse_rename() {
         printf 'BROWSE_RENAME_V1\0ERROR\0spostamento fallito\0'
         return 1
     fi
+    test_failpoint "browse_rename_after_move"
 
     paths_file="${JOURNAL_FILE}.browse-paths.$$.$RANDOM"
     : > "$paths_file"
@@ -850,6 +864,7 @@ cmd_browse_rename() {
         printf '%s\0' "$rel_file" >> "$paths_file"
     done
     if append_delete_journal_batch_unlocked "$paths_file" "$device"; then
+        test_failpoint "browse_rename_after_journal"
         rm -f "$paths_file"
         flock -u 9; exec 9>&-
         printf 'BROWSE_RENAME_V1\0OK\0'
@@ -1181,6 +1196,9 @@ read_sync_lock_diagnostics() {
     SYNC_LOCK_HELD="false"
     SYNC_LOCK_AGE_SECONDS="0"
     SYNC_LOCK_OWNER_PID=""
+    SYNC_LOCK_OWNER_ID=""
+    SYNC_LOCK_OWNER_HOST=""
+    SYNC_LOCK_STARTED_AT="0"
     exec 8>"$SYNC_LOCK_FILE" || return 0
     if flock -n 8; then
         flock -u 8
@@ -1188,6 +1206,10 @@ read_sync_lock_diagnostics() {
         return 0
     fi
     SYNC_LOCK_HELD="true"
+    if [[ -f "$SYNC_LOCK_OWNER_FILE" ]]; then
+        IFS='|' read -r SYNC_LOCK_OWNER_ID SYNC_LOCK_OWNER_HOST SYNC_LOCK_STARTED_AT < "$SYNC_LOCK_OWNER_FILE"
+        [[ "$SYNC_LOCK_STARTED_AT" =~ ^[0-9]+$ ]] || SYNC_LOCK_STARTED_AT="0"
+    fi
     while read -r pid elapsed args; do
         case "$args" in
             *"$SYNC_LOCK_FILE"*)
@@ -1238,8 +1260,9 @@ cmd_status() {
     printf '%-18s %s\n' "Manifest (spazio):" "$(wc -c < "$MANIFEST_FILE" 2>/dev/null || echo 0) byte"
     read_sync_lock_diagnostics
     if [[ "$SYNC_LOCK_HELD" == "true" ]]; then
-        printf '%-18s occupato (PID %s, età %s secondi)\n' \
-            "Lock trasferimenti:" "${SYNC_LOCK_OWNER_PID:-sconosciuto}" "$SYNC_LOCK_AGE_SECONDS"
+        printf '%-18s occupato (host %s, device %s, PID %s, età %s secondi)\n' \
+            "Lock trasferimenti:" "${SYNC_LOCK_OWNER_HOST:-sconosciuto}" \
+            "${SYNC_LOCK_OWNER_ID:-sconosciuto}" "${SYNC_LOCK_OWNER_PID:-sconosciuto}" "$SYNC_LOCK_AGE_SECONDS"
     else
         printf '%-18s libero\n' "Lock trasferimenti:"
     fi
@@ -1271,6 +1294,9 @@ cmd_print_config() {
     echo "SYNC_LOCK_HELD=$SYNC_LOCK_HELD"
     echo "SYNC_LOCK_AGE_SECONDS=$SYNC_LOCK_AGE_SECONDS"
     echo "SYNC_LOCK_OWNER_PID=$SYNC_LOCK_OWNER_PID"
+    echo "SYNC_LOCK_OWNER_ID=$SYNC_LOCK_OWNER_ID"
+    echo "SYNC_LOCK_OWNER_HOST=$SYNC_LOCK_OWNER_HOST"
+    echo "SYNC_LOCK_STARTED_AT=$SYNC_LOCK_STARTED_AT"
     echo "CHECK_INTERVAL_MINUTES=$CHECK_INTERVAL_MINUTES"
     echo "PRUNE_MAX_FILES_PER_PASS=$PRUNE_MAX_FILES_PER_PASS"
     echo "JOURNAL_MAX_BYTES=$JOURNAL_MAX_BYTES"
@@ -1288,6 +1314,7 @@ cmd_print_config() {
     # rsync transaction is active. Closing that session releases flock safely.
     if command -v flock >/dev/null 2>&1; then
         echo "SYNC_LOCK_FILE=$SYNC_LOCK_FILE"
+        echo "SYNC_LOCK_OWNER_FILE=$SYNC_LOCK_OWNER_FILE"
         echo "SYNC_LOCK_AVAILABLE=true"
     else
         echo "SYNC_LOCK_FILE="

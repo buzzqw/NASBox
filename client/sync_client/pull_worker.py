@@ -165,7 +165,10 @@ class PullWorker(TransferWorker):
             try:
                 self._cancel_dirty_paths = set()
                 self.transfer_waiting_for_lock.emit("download")
-                with rsync_ops.remote_lock(self.cfg, self._conn, on_start=self._set_current_process):
+                with rsync_ops.remote_lock(
+                    self.cfg, self._conn, on_start=self._set_current_process,
+                    owner_id=self.sync_state.device_id(),
+                ):
                     self.lock_coordinator.acquired()
                     if self._stop_flag.is_set():
                         self.transfer_finished.emit("download", False)
@@ -422,7 +425,8 @@ class PullWorker(TransferWorker):
                             self._last_full_pull = time.time()
             except _PullDeferred:
                 pass
-            except rsync_ops.RemoteLockBusy:
+            except rsync_ops.RemoteLockBusy as exc:
+                self._record_lock_owner(exc)
                 retry_after = self.lock_coordinator.defer()
                 detail = f"{t('lock.busy_retry')} Nuovo tentativo tra {retry_after}s."
                 self.transfer_lock_unavailable.emit("download", detail)

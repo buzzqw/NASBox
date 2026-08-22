@@ -359,7 +359,12 @@ class StatusTab(QWidget):
             age_seconds = 0
         minutes, seconds = divmod(age_seconds, 60)
         age = f"{minutes}m {seconds:02d}s" if minutes else f"{seconds}s"
-        owner = str(status.get("server_lock_owner_pid") or "sconosciuto")
+        owner_id = str(status.get("server_lock_owner_id") or "")
+        owner_host = str(status.get("server_lock_owner_host") or "")
+        owner_pid = str(status.get("server_lock_owner_pid") or "")
+        owner = owner_host or owner_id or owner_pid or "sconosciuto"
+        if owner_host and owner_id:
+            owner = f"{owner_host} / {owner_id}"
         self.remote_lock_label.setText(t("status.remote_lock_held", age=age, owner=owner))
 
     def _refresh_pending_summary(self, status: dict) -> None:
