@@ -4,6 +4,11 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+- Le cancellazioni controllate sul server usano transazioni atomiche con
+  recovery dopo un crash tra lo spostamento nel cestino e il journal.
+- Push, pull e anteprima condividono ora una coda globale sul NAS con ticket a
+  priorita', evitando retry indipendenti e ravvicinati tra client diversi.
+
 - La sincronizzazione non si blocca piu quando una cartella cancellata lascia
   una directory vuota sul NAS: quei percorsi vengono ignorati invece di
   interrompere l'intero ciclo con un errore "non e un file regolare".

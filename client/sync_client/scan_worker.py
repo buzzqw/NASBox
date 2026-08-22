@@ -163,6 +163,7 @@ class ScanWorker(QThread):
                 with rsync_ops.remote_lock(
                     self.cfg, self._conn, timeout=0,
                     owner_id=self.sync_state.device_id() if self.sync_state is not None else "preview",
+                    priority=3,
                 ):
                     snapshot = rsync_ops.remote_manifest_snapshot(
                         self.cfg, self._conn, self._manifest_revision,
@@ -227,6 +228,7 @@ class ScanWorker(QThread):
                     with rsync_ops.remote_lock(
                         self.cfg, self._conn, timeout=0,
                         owner_id=self.sync_state.device_id() if self.sync_state is not None else "preview",
+                        priority=3,
                     ):
                         remote = rsync_ops.remote_file_states(
                             self.cfg, self._conn, unknown_remote, compact=False,

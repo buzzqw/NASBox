@@ -24,6 +24,7 @@ import socket
 import subprocess
 import tempfile
 import time
+import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -59,7 +60,7 @@ DELETE_FLAG = "--delete-after"
 # Bump this whenever the client starts relying on a new --print-config field or
 # server-side capability, so an outdated NAS package gets flagged instead of
 # silently misbehaving.
-EXPECTED_SERVER_VERSION = "3.12.0"
+EXPECTED_SERVER_VERSION = "3.13.0"
 _SERVER_UPDATE_NAME_RE = re.compile(r"^sync-daemon-server-([0-9]+(?:\.[0-9]+)+)\.sh$")
 
 
@@ -190,13 +191,14 @@ class RemoteLock:
     def __init__(
         self, cfg: Config, conn: NasConnection, timeout: int = 45,
         on_start: Optional[Callable[[subprocess.Popen], None]] = None,
-        owner_id: str = "",
+        owner_id: str = "", priority: int = 1,
     ) -> None:
         self.cfg = cfg
         self.conn = conn
         self.timeout = timeout
         self.on_start = on_start
         self.owner_id = owner_id
+        self.priority = priority
         self.proc: subprocess.Popen | None = None
 
     def __enter__(self) -> "RemoteLock":
@@ -205,6 +207,7 @@ class RemoteLock:
             raise RemoteLockError("server NAS senza lock multi-client; aggiornamento obbligatorio")
 
         parent = lock_file.rsplit("/", 1)[0] or "."
+        remote_script = (self.cfg.get("remote_server_script") or "").strip()
         owner_file = (self.cfg.get("server_lock_owner_file_remote") or f"{lock_file}.owner").strip()
         owner = self.owner_id or "unknown"
         hostname = socket.gethostname() or "unknown"
@@ -216,13 +219,17 @@ class RemoteLock:
             f"mv -f {shlex.quote(owner_tmp)} {shlex.quote(owner_file)} && "
             "printf 'NASBOX_LOCKED\\n' && cat >/dev/null"
         )
-        remote_cmd = (
-            f"mkdir -p {shlex.quote(parent)} && "
-            f"flock -E {REMOTE_LOCK_BUSY_EXIT_CODE} -x -w {self.timeout} {shlex.quote(lock_file)} "
-            f"sh -c {shlex.quote(owner_script)}; rc=$?; "
-            f"if [ \"$rc\" -eq {REMOTE_LOCK_BUSY_EXIT_CODE} ]; then "
-            f"printf 'NASBOX_LOCK_BUSY\\n'; cat {shlex.quote(owner_file)} 2>/dev/null || true; fi; exit \"$rc\""
-        )
+        scheduler_mode = bool(remote_script)
+        if scheduler_mode:
+            remote_cmd = f"exec {shlex.quote(remote_script)} --transfer-wait"
+        else:
+            remote_cmd = (
+                f"mkdir -p {shlex.quote(parent)} && "
+                f"flock -E {REMOTE_LOCK_BUSY_EXIT_CODE} -x -w {self.timeout} {shlex.quote(lock_file)} "
+                f"sh -c {shlex.quote(owner_script)}; rc=$?; "
+                f"if [ \"$rc\" -eq {REMOTE_LOCK_BUSY_EXIT_CODE} ]; then "
+                f"printf 'NASBOX_LOCK_BUSY\\n'; cat {shlex.quote(owner_file)} 2>/dev/null || true; fi; exit \"$rc\""
+            )
         user = self.cfg.get("nas_user")
         try:
             self.proc = subprocess.Popen(
@@ -231,6 +238,13 @@ class RemoteLock:
             )
             if self.on_start:
                 self.on_start(self.proc)
+            if scheduler_mode:
+                assert self.proc.stdin is not None
+                self.proc.stdin.write(
+                    "TRANSFER_WAIT_V1\0%s\0%d\0%s\0%s\0"
+                    % (owner, self.priority, uuid.uuid4().hex, hostname)
+                )
+                self.proc.stdin.flush()
             assert self.proc.stdout is not None
             response = self.proc.stdout.readline().strip()
             if response == "NASBOX_LOCKED":
@@ -289,9 +303,12 @@ class RemoteLock:
 def remote_lock(
     cfg: Config, conn: NasConnection, timeout: int = 45,
     on_start: Optional[Callable[[subprocess.Popen], None]] = None,
-    owner_id: str = "",
+    owner_id: str = "", priority: int = 1,
 ) -> RemoteLock:
-    return RemoteLock(cfg, conn, timeout=timeout, on_start=on_start, owner_id=owner_id)
+    return RemoteLock(
+        cfg, conn, timeout=timeout, on_start=on_start,
+        owner_id=owner_id, priority=priority,
+    )
 
 
 def check_port(host: str, port: int, timeout: float) -> bool:

@@ -210,7 +210,7 @@ class PushWorker(TransferWorker):
                 self.transfer_waiting_for_lock.emit("upload")
                 with rsync_ops.remote_lock(
                     self.cfg, self._conn, on_start=self._set_current_process,
-                    owner_id=self.sync_state.device_id(),
+                    owner_id=self.sync_state.device_id(), priority=0,
                 ):
                     self.lock_coordinator.acquired()
                     if self._stop_flag.is_set():
@@ -328,7 +328,7 @@ class PushWorker(TransferWorker):
         self.transfer_waiting_for_lock.emit("upload")
         with rsync_ops.remote_lock(
             self.cfg, self._conn, on_start=self._set_current_process,
-            owner_id=self.sync_state.device_id(),
+            owner_id=self.sync_state.device_id(), priority=0,
         ):
             if self._stop_flag.is_set():
                 return False, 0, False

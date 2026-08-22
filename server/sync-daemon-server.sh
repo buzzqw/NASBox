@@ -30,7 +30,7 @@
 #
 set -uo pipefail
 
-VERSION="3.12.0"
+VERSION="3.13.0"
 SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -43,10 +43,13 @@ DAEMON_LOCK_FILE="$STATE_DIR/daemon.lock"
 STAMP_FILE="$STATE_DIR/last-run"
 SYNC_LOCK_FILE="$STATE_DIR/sync-transfer.lock"
 SYNC_LOCK_OWNER_FILE="$STATE_DIR/sync-transfer.lock.owner"
+TRANSFER_QUEUE_DIR="$STATE_DIR/transfer-queue"
+TRANSFER_QUEUE_LOCK_FILE="$STATE_DIR/transfer-queue.lock"
 JOURNAL_FILE="$STATE_DIR/transfer-journal.tsv"
 MANIFEST_FILE="$STATE_DIR/manifest.tsv"
 JOURNAL_LOCK_FILE="$STATE_DIR/transfer-journal.lock"
 MANIFEST_REVISION_FILE="$STATE_DIR/manifest.revision"
+TRANSACTION_DIR="$STATE_DIR/transactions"
 
 # How many sha256sum/stat lookups cmd_file_states runs concurrently -- see
 # that function for why. 8 is a conservative default: enough to stop a single
@@ -184,6 +187,89 @@ ensure_journal_files() {
     if [[ ! -f "$MANIFEST_REVISION_FILE" ]]; then
         printf '0\n' > "$MANIFEST_REVISION_FILE"
     fi
+}
+
+write_move_transaction() {
+    local file="$1" kind="$2" txid="$3" stage="$4" device="$5" run_ts="$6"
+    local relative="$7" target="$8" backup="$9" tmp
+    tmp="${file}.tmp.$$"
+    printf '%s\0%s\0%s\0%s\0%s\0%s\0%s\0%s\0%s\0' \
+        "$kind" "$txid" "$stage" "$device" "$run_ts" "$relative" "$target" "$backup" \
+        > "$tmp" && mv -f "$tmp" "$file"
+}
+
+begin_move_transaction() {
+    local kind="$1" txid="$2" device="$3" run_ts="$4" relative="$5" target="$6" backup="$7"
+    mkdir -p "$TRANSACTION_DIR" || return 1
+    write_move_transaction "$TRANSACTION_DIR/$txid.txn" "$kind" "$txid" STARTED \
+        "$device" "$run_ts" "$relative" "$target" "$backup"
+}
+
+advance_move_transaction() {
+    local file="$1" stage="$2"
+    local kind txid old_stage device run_ts relative target backup
+    exec 3< "$file" || return 1
+    IFS= read -r -d '' kind <&3 || { exec 3<&-; return 1; }
+    IFS= read -r -d '' txid <&3 || { exec 3<&-; return 1; }
+    IFS= read -r -d '' old_stage <&3 || { exec 3<&-; return 1; }
+    IFS= read -r -d '' device <&3 || { exec 3<&-; return 1; }
+    IFS= read -r -d '' run_ts <&3 || { exec 3<&-; return 1; }
+    IFS= read -r -d '' relative <&3 || { exec 3<&-; return 1; }
+    IFS= read -r -d '' target <&3 || { exec 3<&-; return 1; }
+    IFS= read -r -d '' backup <&3 || { exec 3<&-; return 1; }
+    exec 3<&-
+    write_move_transaction "$file" "$kind" "$txid" "$stage" "$device" "$run_ts" \
+        "$relative" "$target" "$backup"
+}
+
+recover_pending_transactions_unlocked() {
+    mkdir -p "$TRANSACTION_DIR" || return 1
+    local file kind txid stage device run_ts relative target backup
+    shopt -s nullglob
+    for file in "$TRANSACTION_DIR"/*.txn; do
+        exec 3< "$file"
+        IFS= read -r -d '' kind <&3 || { exec 3<&-; continue; }
+        IFS= read -r -d '' txid <&3 || { exec 3<&-; continue; }
+        IFS= read -r -d '' stage <&3 || { exec 3<&-; continue; }
+        IFS= read -r -d '' device <&3 || { exec 3<&-; continue; }
+        IFS= read -r -d '' run_ts <&3 || { exec 3<&-; continue; }
+        IFS= read -r -d '' relative <&3 || { exec 3<&-; continue; }
+        IFS= read -r -d '' target <&3 || { exec 3<&-; continue; }
+        IFS= read -r -d '' backup <&3 || { exec 3<&-; continue; }
+        exec 3<&-
+
+        case "$kind" in
+            DELETE)
+                if grep -Fq $'COMMIT\t'"$txid" "$JOURNAL_FILE" 2>/dev/null; then
+                    # A crash after journal append but before the transaction
+                    # marker was removed. The extra revision is harmless and
+                    # makes the manifest change visible to waiting clients.
+                    bump_manifest_revision_unlocked || return 1
+                    rm -f "$file"
+                    continue
+                fi
+                if [[ "$stage" == "STARTED" && -e "$target" ]]; then
+                    rm -f "$file"
+                    continue
+                fi
+                if [[ ! -e "$target" && ! -L "$target" && -e "$backup" ]]; then
+                    if append_delete_journal_unlocked "$relative" "$device" "$txid"; then
+                        rm -f "$file"
+                    fi
+                    continue
+                fi
+                if [[ -e "$target" || -L "$target" ]] && [[ ! -e "$backup" ]]; then
+                    rm -f "$file"
+                    continue
+                fi
+                log ERROR "recovery transazione ambigua: $txid ($relative)"
+                ;;
+            *)
+                log ERROR "recovery transazione non supportata: $txid ($kind)"
+                ;;
+        esac
+    done
+    shopt -u nullglob
 }
 
 bump_manifest_revision_unlocked() {
@@ -345,6 +431,7 @@ cmd_journal_append() {
         exec 9>&-
         return 1
     fi
+    recover_pending_transactions_unlocked || { flock -u 9; exec 9>&-; return 1; }
     cat "$tmp" >> "$JOURNAL_FILE"
     local append_status=$?
     rm -f "$tmp"
@@ -376,6 +463,7 @@ cmd_journal_compact() {
     fi
     exec 9>"$JOURNAL_LOCK_FILE"
     flock -x 9 || { exec 9>&-; return 1; }
+    recover_pending_transactions_unlocked || { flock -u 9; exec 9>&-; return 1; }
     compact_manifest_unlocked
     local status=$?
     flock -u 9
@@ -537,14 +625,14 @@ cmd_file_states() {
 }
 
 append_delete_journal_unlocked() {
-    local path="$1" device="$2" server_timestamp txid tmp journal_backup old_revision revision_tmp
+    local path="$1" device="$2" supplied_txid="${3:-}" server_timestamp txid tmp journal_backup old_revision revision_tmp
     tmp="${JOURNAL_FILE}.delete.$$.$RANDOM"
     journal_backup="${JOURNAL_FILE}.rollback.$$.$RANDOM"
     revision_tmp="${MANIFEST_REVISION_FILE}.rollback.$$.$RANDOM"
     old_revision=$(cat "$MANIFEST_REVISION_FILE" 2>/dev/null || echo 0)
     cp "$JOURNAL_FILE" "$journal_backup" || return 1
     server_timestamp=$(date '+%s')
-    txid="delete-${server_timestamp}-$$-${RANDOM}"
+    txid="${supplied_txid:-delete-${server_timestamp}-$$-${RANDOM}}"
     {
         printf 'BEGIN\t%s\t%s\t%s\n' "$txid" "$server_timestamp" "$device"
         printf 'DELETE\t%s\t\t0\t0\t%s\t%s\n' \
@@ -617,7 +705,7 @@ cmd_checked_delete() {
         echo "checked-delete: flock non disponibile" >&2
         return 1
     }
-    local magic run_ts device count path expected_digest expected_mtime index target digest mtime backup
+    local magic run_ts device count path expected_digest expected_mtime index target digest mtime backup txid txfile
     local -a paths digests mtimes
     IFS= read -r -d '' magic || return 1
     IFS= read -r -d '' run_ts || return 1
@@ -641,6 +729,7 @@ cmd_checked_delete() {
     exec 9>"$JOURNAL_LOCK_FILE"
     flock -x 9 || { exec 9>&-; return 1; }
     ensure_journal_files
+    recover_pending_transactions_unlocked || { flock -u 9; exec 9>&-; return 1; }
     printf 'CHECKED_DELETE_V1\0%s\0' "$count"
     for ((index = 0; index < count; index++)); do
         path="${paths[index]}"
@@ -665,16 +754,31 @@ cmd_checked_delete() {
         fi
         backup="$SHARE_ROOT/$TRASH_DIRNAME/$path-$run_ts"
         mkdir -p "${backup%/*}" || { printf '%s\0ERROR\0' "$path"; continue; }
+        txid="delete-move-${run_ts}-${index}-${RANDOM}"
+        txfile="$TRANSACTION_DIR/$txid.txn"
+        if ! begin_move_transaction DELETE "$txid" "$device" "$run_ts" "$path" "$target" "$backup"; then
+            printf '%s\0ERROR\0' "$path"
+            continue
+        fi
         if mv "$target" "$backup"; then
             test_failpoint "checked_delete_after_move"
-            if append_delete_journal_unlocked "$path" "$device"; then
+            if ! advance_move_transaction "$txfile" MOVED; then
+                mv "$backup" "$target" 2>/dev/null || true
+                rm -f "$txfile"
+                printf '%s\0ERROR\0' "$path"
+                continue
+            fi
+            if append_delete_journal_unlocked "$path" "$device" "$txid"; then
                 test_failpoint "checked_delete_after_journal"
+                rm -f "$txfile"
                 printf '%s\0DELETED\0' "$path"
             else
                 mv "$backup" "$target" 2>/dev/null || true
+                rm -f "$txfile"
                 printf '%s\0ERROR\0' "$path"
             fi
         else
+            rm -f "$txfile"
             printf '%s\0ERROR\0' "$path"
         fi
     done
@@ -1223,6 +1327,99 @@ read_sync_lock_diagnostics() {
     exec 8>&-
 }
 
+transfer_queue_prune_stale() {
+    local ticket priority created device pid
+    mkdir -p "$TRANSFER_QUEUE_DIR" || return 1
+    while IFS= read -r -d '' ticket; do
+        IFS='|' read -r priority created device pid < "$ticket" || { rm -f "$ticket"; continue; }
+        if [[ ! "$pid" =~ ^[0-9]+$ ]] || ! kill -0 "$pid" 2>/dev/null; then
+            rm -f "$ticket"
+        fi
+    done < <(find "$TRANSFER_QUEUE_DIR" -maxdepth 1 -type f -name '*.ticket' -print0 2>/dev/null)
+}
+
+transfer_queue_head() {
+    local ticket priority created device pid
+    transfer_queue_prune_stale || return 1
+    while IFS= read -r -d '' ticket; do
+        IFS='|' read -r priority created device pid < "$ticket" || continue
+        printf '%s\t%s\t%s\n' "$priority" "$created" "$ticket"
+    done < <(find "$TRANSFER_QUEUE_DIR" -maxdepth 1 -type f -name '*.ticket' -print0 2>/dev/null) \
+        | sort -n -k1,1 -k2,2 | awk -F '\t' 'NR == 1 { print $3; exit }'
+}
+
+cmd_transfer_wait() {
+    command -v flock >/dev/null 2>&1 || return 1
+    local magic device priority request_id owner_host queue_head now owner_payload owner_tmp
+    TRANSFER_ACTIVE_TICKET=""
+    TRANSFER_LEASE_HELD=false
+    IFS= read -r -d '' magic || return 1
+    IFS= read -r -d '' device || return 1
+    IFS= read -r -d '' priority || return 1
+    IFS= read -r -d '' request_id || return 1
+    IFS= read -r -d '' owner_host || return 1
+    [[ "$magic" == "TRANSFER_WAIT_V1" ]] || return 1
+    [[ "$device" =~ ^[A-Za-z0-9._:-]{1,128}$ ]] || return 1
+    [[ "$priority" =~ ^[0-9]+$ && "$priority" -le 9 ]] || return 1
+    [[ "$request_id" =~ ^[A-Za-z0-9._:-]{8,128}$ ]] || return 1
+    [[ "$owner_host" =~ ^[A-Za-z0-9._:-]{1,128}$ ]] || owner_host="unknown"
+
+    exec 9>"$JOURNAL_LOCK_FILE"
+    flock -x 9 || { exec 9>&-; return 1; }
+    recover_pending_transactions_unlocked || { flock -u 9; exec 9>&-; return 1; }
+    flock -u 9
+    exec 9>&-
+
+    mkdir -p "$TRANSFER_QUEUE_DIR" || return 1
+    TRANSFER_ACTIVE_TICKET="$TRANSFER_QUEUE_DIR/$request_id.ticket"
+    now=$(date '+%s')
+    exec 7>"$TRANSFER_QUEUE_LOCK_FILE"
+    flock -x 7 || { exec 7>&-; return 1; }
+    printf '%s|%s|%s|%s\n' "$priority" "$now" "$device" "$$" > "$TRANSFER_ACTIVE_TICKET" || {
+        flock -u 7; exec 7>&-; return 1;
+    }
+    flock -u 7
+    exec 7>&-
+
+    cleanup_transfer_ticket() {
+        rm -f "$TRANSFER_ACTIVE_TICKET"
+        if [[ "$TRANSFER_LEASE_HELD" == true ]]; then
+            rm -f "$SYNC_LOCK_OWNER_FILE"
+        fi
+    }
+    trap cleanup_transfer_ticket EXIT
+    trap 'exit 143' HUP INT TERM
+
+    while :; do
+        exec 7>"$TRANSFER_QUEUE_LOCK_FILE" || return 1
+        flock -x 7 || { exec 7>&-; return 1; }
+        queue_head=$(transfer_queue_head || true)
+        if [[ "$queue_head" == "$TRANSFER_ACTIVE_TICKET" ]]; then
+            exec 8>"$SYNC_LOCK_FILE" || { flock -u 7; exec 7>&-; return 1; }
+            if flock -n 8; then
+                rm -f "$TRANSFER_ACTIVE_TICKET"
+                owner_payload="$device|$owner_host|$(date '+%s')"
+                owner_tmp="${SYNC_LOCK_OWNER_FILE}.$$"
+                printf '%s\n' "$owner_payload" > "$owner_tmp" && mv -f "$owner_tmp" "$SYNC_LOCK_OWNER_FILE" || {
+                    flock -u 8; exec 8>&-; flock -u 7; exec 7>&-; return 1;
+                }
+                TRANSFER_LEASE_HELD=true
+                flock -u 7
+                exec 7>&-
+                printf 'NASBOX_LOCKED\n'
+                cat >/dev/null
+                flock -u 8
+                exec 8>&-
+                return 0
+            fi
+            exec 8>&-
+        fi
+        flock -u 7
+        exec 7>&-
+        sleep 2
+    done
+}
+
 cmd_status() {
     echo "sync-daemon-server v$VERSION"
     printf '%-18s %s\n' "Script:" "$SCRIPT_PATH"
@@ -1408,6 +1605,7 @@ Uso:
   $(basename "$0") --journal-status             Stato e dimensione journal/manifest
   $(basename "$0") --history-list              Elenco NUL dello storico sul NAS (per il client)
   $(basename "$0") --diagnostics               Diagnostica KEY=VALUE del NAS (per il client)
+  $(basename "$0") --transfer-wait             Attende un ticket globale e mantiene il lock SSH
   $(basename "$0") -c FILE                     Usa un file di config alternativo
   $(basename "$0") --help
 
@@ -1444,6 +1642,7 @@ while [[ $# -gt 0 ]]; do
         --journal-status) ACTION="journal_status" ;;
         --history-list) ACTION="history_list" ;;
         --diagnostics) ACTION="diagnostics" ;;
+        --transfer-wait) ACTION="transfer_wait" ;;
         -c|--config) shift; CONFIG_FILE="${1:?}" ;;
         --help|-h) cmd_help; exit 0 ;;
         *) echo "Opzione sconosciuta: $1" >&2; cmd_help; exit 1 ;;
@@ -1477,4 +1676,5 @@ case "$ACTION" in
     journal_status) cmd_journal_status; exit $? ;;
     history_list) cmd_history_list; exit $? ;;
     diagnostics) cmd_diagnostics; exit $? ;;
+    transfer_wait) cmd_transfer_wait; exit $? ;;
 esac
