@@ -59,6 +59,11 @@ def sync_state_db_file() -> Path:
     return state_dir() / "sync-state.sqlite3"
 
 
+def instance_lock_file() -> Path:
+    """Kernel-owned process lock preventing a manual and service client pair."""
+    return state_dir() / "client.instance.lock"
+
+
 def ensure_dirs() -> None:
     # 0700: client.json holds the NAS host/username and this machine's own
     # filesystem layout, and state_dir's event log records every synced path --

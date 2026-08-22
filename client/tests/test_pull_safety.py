@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import fcntl
 import os
+import subprocess
+import sys
 import threading
 import tempfile
 import unittest
@@ -142,6 +144,40 @@ class PullSafetyTests(unittest.TestCase):
                 finally:
                     fcntl.flock(fd, fcntl.LOCK_UN)
                     os.close(fd)
+
+    def test_second_client_process_is_rejected_by_instance_lock(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            lock_path = Path(directory) / "client.instance.lock"
+            first_code = (
+                "import sys,time; from pathlib import Path; "
+                "from sync_client.instance_lock import acquire; "
+                "print(acquire(Path(sys.argv[1])), flush=True); time.sleep(5)"
+            )
+            second_code = (
+                "import sys; from pathlib import Path; "
+                "from sync_client.instance_lock import acquire; "
+                "print(acquire(Path(sys.argv[1])))"
+            )
+            env = os.environ.copy()
+            env["PYTHONPATH"] = str(Path(__file__).resolve().parents[1])
+            first = subprocess.Popen(
+                [sys.executable, "-c", first_code, str(lock_path)],
+                cwd=Path(__file__).resolve().parents[2],
+                env=env, stdout=subprocess.PIPE, text=True,
+            )
+            try:
+                self.assertEqual(first.stdout.readline().strip(), "True")
+                second = subprocess.run(
+                    [sys.executable, "-c", second_code, str(lock_path)],
+                    cwd=Path(__file__).resolve().parents[2],
+                    env=env, capture_output=True, text=True, check=True,
+                )
+                self.assertEqual(second.stdout.strip(), "False")
+            finally:
+                first.terminate()
+                first.wait(timeout=5)
+                if first.stdout is not None:
+                    first.stdout.close()
 
     def test_conflict_resolution_keeps_selected_version_and_trashes_the_other(self) -> None:
         with tempfile.TemporaryDirectory() as root, tempfile.TemporaryDirectory() as state_dir:

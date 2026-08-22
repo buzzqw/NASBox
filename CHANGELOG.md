@@ -11,6 +11,11 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 - Sostituita la licenza proprietaria con la European Union Public Licence
   versione 1.2 (EUPL-1.2).
 
+## 1.18.1 - 2026-08-22
+
+- Aggiunto un lock di istanza locale basato sul kernel: un secondo avvio del
+  client, manuale o systemd, termina prima di creare worker o connessioni NAS.
+
 ## 1.18.0 - 2026-08-22
 
 - I file candidati al push devono restare stabili per un intervallo locale

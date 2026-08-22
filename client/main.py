@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from PyQt6.QtCore import QLibraryInfo, QLocale, QTranslator
 from PyQt6.QtWidgets import QApplication, QMessageBox
 
-from sync_client import config as config_module, i18n, logger as logger_module, paths, updater
+from sync_client import config as config_module, i18n, instance_lock, logger as logger_module, paths, updater
 from sync_client.i18n import t
 from sync_client.version import APP_NAME, APP_VERSION
 
@@ -95,6 +95,9 @@ def _offer_update(cfg: config_module.Config, current_root: Path) -> bool:
 
 def main() -> int:
     paths.ensure_dirs()
+    if not instance_lock.acquire():
+        print("NASBox è già in esecuzione per questo utente.", file=sys.stderr)
+        return 0
 
     # Language must be resolved before any widget is built -- they read
     # translated strings once, at construction time (see i18n.py).
