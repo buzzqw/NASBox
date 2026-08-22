@@ -11,6 +11,12 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 - Sostituita la licenza proprietaria con la European Union Public Licence
   versione 1.2 (EUPL-1.2).
 
+## 1.16.1 - 2026-08-22
+
+- Gli eventi del watcher relativi solo a directory o percorsi non trasferibili
+  vengono rimossi dalla coda pending senza tentare di acquisire il lock NAS,
+  evitando cicli di retry ravvicinati durante operazioni Git o simili.
+
 ## 1.15.2 - 2026-08-22
 
 - Un pull distruttivo non cancella piu modifiche locali nuove o non ancora

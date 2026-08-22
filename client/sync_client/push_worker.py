@@ -161,6 +161,28 @@ class PushWorker(TransferWorker):
             }
             self.sync_state.mark_pending(dirty_paths)
 
+        # Resolve local paths before any NAS preflight. Watchers also report
+        # directory-only events (notably Git maintenance under a synced
+        # checkout). They are not transfer items, but must not remain in the
+        # durable queue and retrigger a lock attempt every tick.
+        resolved_paths = self._resolve_paths(dirty_paths, force_sync)
+        stale_pending: set[str] = set()
+        for path in pending_paths - resolved_paths:
+            if rsync_ops.path_is_excluded(self.cfg, path):
+                stale_pending.add(path)
+                continue
+            try:
+                mode = Path(self.cfg.local_root(), path).lstat().st_mode
+            except OSError:
+                continue
+            if not stat.S_ISREG(mode):
+                stale_pending.add(path)
+        if stale_pending:
+            self.sync_state.clear_pending(stale_pending)
+        if not resolved_paths:
+            self._force_sync.clear()
+            return
+
         # Blocks only if a pull is currently running -- there's only ever one
         # NASBox folder, so this is the only pair that can conflict.
         self.transfer_preparing.emit("upload")
@@ -200,10 +222,6 @@ class PushWorker(TransferWorker):
                             watcher.mark_dirty()  # consume_if_ready already cleared the retry trigger
                         self.transfer_finished.emit("upload", False)
                         return
-                # Resolve local paths without keeping the NAS lock. Each chunk
-                # below reacquires it, so a large import yields to other clients
-                # after every PUSH_CHUNK_SIZE paths.
-                resolved_paths = self._resolve_paths(dirty_paths, force_sync)
                 try:
                     max_deletes = int(self.cfg.get("max_delete_files") or 1000)
                 except (TypeError, ValueError):

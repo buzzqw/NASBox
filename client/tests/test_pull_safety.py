@@ -112,6 +112,33 @@ class PullSafetyTests(unittest.TestCase):
         state.mark_pending.assert_called_once_with({"new.txt"})
         resolve.assert_called_once_with({"new.txt"}, False)
 
+    def test_push_discards_directory_only_pending_events_without_locking_nas(self) -> None:
+        with tempfile.TemporaryDirectory() as root:
+            Path(root, ".git", "objects", "info").mkdir(parents=True)
+            cfg = Mock()
+            cfg.is_paused.return_value = False
+            cfg.is_configured.return_value = True
+            cfg.local_root.return_value = root
+            cfg.get.side_effect = lambda key, default=None: {
+                "debounce_seconds": 2,
+            }.get(key, default)
+            cfg.exclude_patterns.return_value = []
+            watcher = Mock()
+            watcher.is_dirty.return_value = True
+            watcher.consume_paths_if_ready.return_value = {".git/objects/info"}
+            watchers = Mock()
+            watchers.get.return_value = watcher
+            state = Mock()
+            state.pending_paths.return_value = {".git/objects/info"}
+            worker = push_worker.PushWorker(cfg, Mock(), watchers, threading.Lock(), state)
+            worker._conn = rsync_ops.NasConnection("fake-host")
+
+            with patch.object(rsync_ops, "remote_lock") as remote_lock:
+                worker._tick()
+
+            state.clear_pending.assert_called_once_with({".git/objects/info"})
+            remote_lock.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()
