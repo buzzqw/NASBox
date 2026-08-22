@@ -53,6 +53,10 @@ TICK_SECONDS = 1
 LEGACY_FULL_PULL_INTERVAL_SECONDS = 15 * 60
 
 
+class _PullDeferred(Exception):
+    """Abort a destructive pull until pending local changes are uploaded."""
+
+
 class PullWorker(TransferWorker):
     # The pull preflight knows the real batch size before rsync starts, just like
     # PushWorker. Keep the signal on this worker too so a pull cannot fail while
@@ -81,6 +85,36 @@ class PullWorker(TransferWorker):
 
     def _wake_now(self) -> None:
         self._wake.set()
+
+    def _defer_if_local_changes_pending(
+        self, watcher, *, full_pull_required: bool, tombstone_count: int,
+    ) -> None:
+        """Never let a delete-enabled pull erase a local change the watcher missed.
+
+        The watcher is an optimization, not the source of truth. In particular,
+        a large copy can happen while inotify is unavailable or while a previous
+        push has already consumed the dirty marker but is waiting for the NAS
+        lock. A full pull or a pull containing tombstones would otherwise apply
+        the stale NAS absence with rsync --delete.
+        """
+        if not self.cfg.get("delete_enabled") or not (full_pull_required or tombstone_count):
+            return
+
+        pending = self.sync_state.changed_paths(self.cfg.local_root())
+        pending = {
+            path for path in pending
+            if path and not rsync_ops.path_is_excluded(self.cfg, path)
+        }
+        if not pending:
+            return
+
+        self._self_cancelled = True
+        self._cancel_dirty_paths = pending
+        if watcher is not None:
+            # An unknown-path mark makes PushWorker perform its authoritative
+            # local sweep instead of relying on a potentially incomplete list.
+            watcher.mark_dirty()
+        raise _PullDeferred
 
     def wake(self) -> None:
         """Ask the worker to re-evaluate immediately instead of waiting for the next tick."""
@@ -199,6 +233,12 @@ class PullWorker(TransferWorker):
                         estimated_total = changed_count + tombstone_count
                         if estimated_total > 0:
                             self.batch_size_known.emit(estimated_total)
+
+                    self._defer_if_local_changes_pending(
+                        watcher,
+                        full_pull_required=full_pull_required,
+                        tombstone_count=tombstone_count,
+                    )
 
                     def _cancel_check(w=watcher) -> bool:
                         if w is None or not w.is_dirty():
@@ -374,6 +414,8 @@ class PullWorker(TransferWorker):
                         self._last_manifest_revision = manifest_revision
                         if full_pull_required:
                             self._last_full_pull = time.time()
+            except _PullDeferred:
+                pass
             except rsync_ops.RemoteLockBusy:
                 detail = t("lock.busy_retry")
                 self.transfer_lock_unavailable.emit("download", detail)

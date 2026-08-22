@@ -11,6 +11,14 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 - Sostituita la licenza proprietaria con la European Union Public Licence
   versione 1.2 (EUPL-1.2).
 
+## 1.15.2 - 2026-08-22
+
+- Un pull distruttivo non cancella piu modifiche locali nuove o non ancora
+  inviate quando il watcher non ha ancora registrato l'evento: il client
+  verifica il baseline locale e rimanda il pull al push.
+- Ripristinata e redistribuita la cartella `basicF-ITA` dopo la cancellazione
+  erronea causata dalla gara tra push bloccato sul lock NAS e pull remoto.
+
 ## 1.15.1 - 2026-08-21
 
 - Il pull verifica i percorsi manifestati prima di usare `--files-from` e
