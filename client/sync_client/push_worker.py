@@ -94,6 +94,7 @@ class PushWorker(TransferWorker):
         self._wake = threading.Event()
         self._force_sync = threading.Event()
         self._last_hash_progress_emit = 0.0
+        self._conflict_journal_items: list[rsync_ops.TransferItem] = []
 
     def _wake_now(self) -> None:
         self._wake.set()
@@ -333,6 +334,7 @@ class PushWorker(TransferWorker):
             if self._stop_flag.is_set():
                 return False, 0, False
             chunk_run_ts = rsync_ops.new_run_ts()
+            self._conflict_journal_items = []
             upload_paths, delete_requests, adopted_paths = self._build_plan(
                 chunk_set,
                 remote_progress_offset=remote_progress_done,
@@ -384,9 +386,17 @@ class PushWorker(TransferWorker):
             if not chunk_result.ok:
                 return False, len(delete_result.completed_paths), False
 
+            # A retry after a crash between rsync success and journal append sees
+            # its original upload as ADOPT. Journal that confirmed remote state so
+            # the manifest recovers instead of silently retaining a blind spot.
+            # Conflict copies are also real NAS writes and must be visible there.
             journal_items = [item for item in chunk_result.items if item.direction == "upload"]
+            journal_items.extend(rsync_ops.TransferItem("upload", path) for path in sorted(adopted_paths))
+            journal_items.extend(self._conflict_journal_items)
+            remote_only_paths = {item.path for item in self._conflict_journal_items}
             authoritative = self._authoritative_fingerprints(
                 journal_items, adopted_paths, delete_result.completed_paths, watcher,
+                remote_only_paths=remote_only_paths,
             )
             journal_ok, journal_detail = rsync_ops.append_remote_journal(
                 self.cfg, self._conn, self.sync_state.device_id(), journal_items,
@@ -394,7 +404,10 @@ class PushWorker(TransferWorker):
             )
             if journal_ok:
                 self.cfg.set("journal_error", "")
-                self.sync_state.record_fingerprints(authoritative)
+                self.sync_state.record_fingerprints({
+                    path: fp for path, fp in authoritative.items()
+                    if path not in remote_only_paths
+                })
                 clearable = set(chunk_paths)
                 for path, expected in authoritative.items():
                     current = self.sync_state.fingerprint(Path(self.cfg.local_root(), path))
@@ -419,8 +432,9 @@ class PushWorker(TransferWorker):
 
     def _authoritative_fingerprints(
         self, uploaded_items: list[rsync_ops.TransferItem], adopted_paths: set[str],
-        deleted_paths: set[str], watcher,
+        deleted_paths: set[str], watcher, *, remote_only_paths: set[str] | None = None,
     ) -> dict[str, Fingerprint | None]:
+        remote_only_paths = remote_only_paths or set()
         uploaded_paths = {item.path for item in uploaded_items}
         remote = rsync_ops.remote_file_states(
             self.cfg, self._conn, uploaded_paths, compact=False,
@@ -436,6 +450,9 @@ class PushWorker(TransferWorker):
             if state.kind != RemoteKind.FILE:
                 raise rsync_ops.RemoteLockError(f"il file appena caricato non risulta presente sul NAS: {path}")
             remote_fp = Fingerprint(state.digest, state.size, state.mtime_ns)
+            if path in remote_only_paths:
+                authoritative[path] = remote_fp
+                continue
             local_fp = self.sync_state.fingerprint(Path(self.cfg.local_root(), path))
             if local_fp is not None and local_fp.digest == remote_fp.digest:
                 authoritative[path] = local_fp
@@ -525,6 +542,7 @@ class PushWorker(TransferWorker):
                 conflict_path = self._conflict_path(relative_path)
                 if not rsync_ops.copy_remote_file(self.cfg, self._conn, relative_path, conflict_path):
                     raise rsync_ops.RemoteLockError("impossibile conservare la versione NAS in conflitto")
+                self._conflict_journal_items.append(rsync_ops.TransferItem("upload", conflict_path))
                 self._log("CONFLICT", relative_path, f"versione NAS salvata come {conflict_path}")
                 uploads.add(relative_path)
             elif decision.action == Action.CONFLICT_REMOTE_WINS:
@@ -535,6 +553,7 @@ class PushWorker(TransferWorker):
                     )
                     if not ok:
                         raise rsync_ops.RemoteLockError(detail or "impossibile conservare la versione locale in conflitto")
+                    self._conflict_journal_items.append(rsync_ops.TransferItem("upload", conflict_path))
                     self._log("CONFLICT", relative_path, f"versione locale salvata sul NAS come {conflict_path}")
             elif decision.action == Action.REMOTE_WINS:
                 if local_fp is None and baseline is not None and not baseline.is_tombstone:

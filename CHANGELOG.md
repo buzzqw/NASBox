@@ -4,6 +4,19 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 1.19.1 - 2026-08-23
+
+- I mirror rifiutano destinazioni pericolose e symlink che puntano fuori dalla
+  cartella NASBox, evitando cancellazioni accidentali durante `rsync --delete`.
+- Le copie create per risolvere conflitti e gli upload completati prima di un
+  crash vengono ora registrati nel journal remoto e distribuiti agli altri PC.
+- Le operazioni Browse di eliminazione e rinomina sul server sono recuperabili
+  dopo un crash e verificano la scrittura dell'elenco per il journal.
+- Il launcher del menu sostituisce correttamente il servizio NASBox nascosto
+  nel tray con l'interfaccia visibile.
+
+## 1.19.0 - 2026-08-22
+
 - Le cancellazioni controllate sul server usano transazioni atomiche con
   recovery dopo un crash tra lo spostamento nel cestino e il journal.
 - Push, pull e anteprima condividono ora una coda globale sul NAS con ticket a

@@ -47,9 +47,10 @@ def _stamp_path_for(source: str) -> str:
     return str(paths.state_dir() / f"mirror-stamp-{digest}")
 
 
-def validate_mirror(cfg: Config, source: str, dest: str) -> tuple[bool, str]:
-    """Return (ok, error). Kept as a module-level function so both the GUI tab
-    and anything else can validate without importing Qt widgets."""
+def _validate_mirror_paths(
+    cfg: Config, source: str, dest: str, *, root: str | None = None,
+) -> tuple[bool, str]:
+    """Validate paths immediately before a destructive mirror operation."""
     from .i18n import t
 
     source = (source or "").strip()
@@ -63,17 +64,41 @@ def validate_mirror(cfg: Config, source: str, dest: str) -> tuple[bool, str]:
         return False, t("mirrors.err_source_absolute")
     if not os.path.isdir(source):
         return False, t("mirrors.err_source_missing", source=source)
-    if not dest or dest.startswith("/") or ".." in dest.split("/") or "\\" in dest:
+    components = dest.split("/")
+    if (not dest or dest.startswith("/") or ".." in components
+            or "." in components or "\\" in dest):
         return False, t("mirrors.err_dest_invalid")
     if dest in RESERVED_DEST_NAMES:
         return False, t("mirrors.err_dest_reserved")
 
-    root = cfg.local_root().rstrip("/")
+    root = (root if root is not None else cfg.local_root()).rstrip("/")
     if not root:
         return False, t("mirrors.err_nasbox_not_configured")
-    normalized_source = os.path.normpath(source)
-    if normalized_source == root or normalized_source.startswith(root + os.sep):
+    canonical_root = os.path.realpath(root)
+    canonical_source = os.path.realpath(source)
+    canonical_destination = os.path.realpath(os.path.join(canonical_root, dest))
+    try:
+        source_inside_root = os.path.commonpath((canonical_source, canonical_root)) == canonical_root
+        destination_inside_root = os.path.commonpath((canonical_destination, canonical_root)) == canonical_root
+    except ValueError:
+        source_inside_root = False
+        destination_inside_root = False
+    if source_inside_root:
         return False, t("mirrors.err_source_inside_nasbox")
+    if not destination_inside_root:
+        return False, t("mirrors.err_dest_invalid")
+
+    return True, ""
+
+
+def validate_mirror(cfg: Config, source: str, dest: str) -> tuple[bool, str]:
+    """Return (ok, error). Kept as a module-level function so both the GUI tab
+    and anything else can validate without importing Qt widgets."""
+    source = (source or "").strip()
+    dest = (dest or "").strip("/").strip()
+    ok, error = _validate_mirror_paths(cfg, source, dest)
+    if not ok:
+        return ok, error
 
     for entry in cfg.mirrors():
         if entry.get("source") == source:
@@ -169,21 +194,14 @@ class MirrorWatcher(QThread):
         return self.cfg.mirror_by_source(self.source)
 
     def _sync(self) -> None:
-        from .i18n import t
-
         entry = self._current_entry()
         if entry is None or not entry.get("enabled", True):
             return
         source = (entry.get("source") or "").rstrip("/")
         dest = (entry.get("dest") or "").strip("/")
-        if not source or not dest:
-            self._set_error(t("mirrors.err_invalid_entry"))
-            return
-        if not os.path.isdir(source):
-            self._set_error(t("mirrors.err_source_missing", source=source))
-            return
-        if not self.root:
-            self._set_error(t("mirrors.err_nasbox_not_configured"))
+        ok, error = _validate_mirror_paths(self.cfg, source, dest, root=self.root)
+        if not ok:
+            self._set_error(error)
             return
 
         destination = f"{self.root}/{dest}"

@@ -30,7 +30,7 @@
 #
 set -uo pipefail
 
-VERSION="3.13.0"
+VERSION="3.13.1"
 SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -191,23 +191,23 @@ ensure_journal_files() {
 
 write_move_transaction() {
     local file="$1" kind="$2" txid="$3" stage="$4" device="$5" run_ts="$6"
-    local relative="$7" target="$8" backup="$9" tmp
+    local relative="$7" target="$8" backup="$9" paths_file="${10:-}" tmp
     tmp="${file}.tmp.$$"
-    printf '%s\0%s\0%s\0%s\0%s\0%s\0%s\0%s\0%s\0' \
+    printf '%s\0%s\0%s\0%s\0%s\0%s\0%s\0%s\0%s\0%s\0' \
         "$kind" "$txid" "$stage" "$device" "$run_ts" "$relative" "$target" "$backup" \
-        > "$tmp" && mv -f "$tmp" "$file"
+        "$paths_file" > "$tmp" && mv -f "$tmp" "$file"
 }
 
 begin_move_transaction() {
-    local kind="$1" txid="$2" device="$3" run_ts="$4" relative="$5" target="$6" backup="$7"
+    local kind="$1" txid="$2" device="$3" run_ts="$4" relative="$5" target="$6" backup="$7" paths_file="${8:-}"
     mkdir -p "$TRANSACTION_DIR" || return 1
     write_move_transaction "$TRANSACTION_DIR/$txid.txn" "$kind" "$txid" STARTED \
-        "$device" "$run_ts" "$relative" "$target" "$backup"
+        "$device" "$run_ts" "$relative" "$target" "$backup" "$paths_file"
 }
 
 advance_move_transaction() {
     local file="$1" stage="$2"
-    local kind txid old_stage device run_ts relative target backup
+    local kind txid old_stage device run_ts relative target backup paths_file
     exec 3< "$file" || return 1
     IFS= read -r -d '' kind <&3 || { exec 3<&-; return 1; }
     IFS= read -r -d '' txid <&3 || { exec 3<&-; return 1; }
@@ -217,14 +217,15 @@ advance_move_transaction() {
     IFS= read -r -d '' relative <&3 || { exec 3<&-; return 1; }
     IFS= read -r -d '' target <&3 || { exec 3<&-; return 1; }
     IFS= read -r -d '' backup <&3 || { exec 3<&-; return 1; }
+    IFS= read -r -d '' paths_file <&3 || paths_file=""
     exec 3<&-
     write_move_transaction "$file" "$kind" "$txid" "$stage" "$device" "$run_ts" \
-        "$relative" "$target" "$backup"
+        "$relative" "$target" "$backup" "$paths_file"
 }
 
 recover_pending_transactions_unlocked() {
     mkdir -p "$TRANSACTION_DIR" || return 1
-    local file kind txid stage device run_ts relative target backup
+    local file kind txid stage device run_ts relative target backup paths_file
     shopt -s nullglob
     for file in "$TRANSACTION_DIR"/*.txn; do
         exec 3< "$file"
@@ -236,6 +237,7 @@ recover_pending_transactions_unlocked() {
         IFS= read -r -d '' relative <&3 || { exec 3<&-; continue; }
         IFS= read -r -d '' target <&3 || { exec 3<&-; continue; }
         IFS= read -r -d '' backup <&3 || { exec 3<&-; continue; }
+        IFS= read -r -d '' paths_file <&3 || paths_file=""
         exec 3<&-
 
         case "$kind" in
@@ -260,6 +262,31 @@ recover_pending_transactions_unlocked() {
                 fi
                 if [[ -e "$target" || -L "$target" ]] && [[ ! -e "$backup" ]]; then
                     rm -f "$file"
+                    continue
+                fi
+                log ERROR "recovery transazione ambigua: $txid ($relative)"
+                ;;
+            BROWSE_DELETE|BROWSE_RENAME)
+                if [[ -z "$paths_file" || ! -f "$paths_file" ]]; then
+                    log ERROR "recovery transazione senza elenco percorsi: $txid ($relative)"
+                    continue
+                fi
+                if grep -Fq $'COMMIT\t'"$txid" "$JOURNAL_FILE" 2>/dev/null; then
+                    rm -f "$file" "$paths_file"
+                    continue
+                fi
+                if [[ "$stage" == "STARTED" && ( -e "$target" || -L "$target" ) ]]; then
+                    rm -f "$file" "$paths_file"
+                    continue
+                fi
+                if [[ ! -e "$target" && ! -L "$target" && ( -e "$backup" || -L "$backup" ) ]]; then
+                    if append_delete_journal_batch_unlocked "$paths_file" "$device" "$txid"; then
+                        rm -f "$file" "$paths_file"
+                    fi
+                    continue
+                fi
+                if [[ ( -e "$target" || -L "$target" ) && ! -e "$backup" && ! -L "$backup" ]]; then
+                    rm -f "$file" "$paths_file"
                     continue
                 fi
                 log ERROR "recovery transazione ambigua: $txid ($relative)"
@@ -657,29 +684,27 @@ append_delete_journal_unlocked() {
 }
 
 append_delete_journal_batch_unlocked() {
-    local paths_file="$1" device="$2" path server_timestamp txid tmp count=0
+    local paths_file="$1" device="$2" txid="$3" path server_timestamp tmp count=0
     local journal_backup old_revision revision_tmp
+    [[ -f "$paths_file" ]] || return 1
     tmp="${JOURNAL_FILE}.delete-batch.$$.$RANDOM"
     journal_backup="${JOURNAL_FILE}.rollback.$$.$RANDOM"
     revision_tmp="${MANIFEST_REVISION_FILE}.rollback.$$.$RANDOM"
     old_revision=$(cat "$MANIFEST_REVISION_FILE" 2>/dev/null || echo 0)
     cp "$JOURNAL_FILE" "$journal_backup" || return 1
     : > "$tmp" || { rm -f "$tmp" "$journal_backup"; return 1; }
+    server_timestamp=$(date '+%s')
+    printf 'BEGIN\t%s\t%s\t%s\n' "$txid" "$server_timestamp" "$device" >> "$tmp" || {
+        rm -f "$tmp" "$journal_backup"; return 1;
+    }
     while IFS= read -r -d '' path; do
-        server_timestamp=$(date '+%s')
-        txid="delete-${server_timestamp}-$$-${RANDOM}"
-        {
-            printf 'BEGIN\t%s\t%s\t%s\n' "$txid" "$server_timestamp" "$device"
-            printf 'DELETE\t%s\t\t0\t0\t%s\t%s\n' \
-                "$(encode_journal_field "$path")" "$(encode_journal_field "$device")" "$server_timestamp"
-            printf 'COMMIT\t%s\n' "$txid"
-        } >> "$tmp" || { rm -f "$tmp" "$journal_backup"; return 1; }
+        printf 'DELETE\t%s\t\t0\t0\t%s\t%s\n' \
+            "$(encode_journal_field "$path")" "$(encode_journal_field "$device")" "$server_timestamp" \
+            >> "$tmp" || { rm -f "$tmp" "$journal_backup"; return 1; }
         (( count++ ))
     done < "$paths_file"
-    if (( count == 0 )); then
-        rm -f "$tmp" "$journal_backup"
-        return 0
-    fi
+    (( count == 0 )) && { rm -f "$tmp" "$journal_backup"; return 0; }
+    printf 'COMMIT\t%s\n' "$txid" >> "$tmp" || { rm -f "$tmp" "$journal_backup"; return 1; }
     if ! cat "$tmp" >> "$JOURNAL_FILE"; then
         cp "$journal_backup" "$JOURNAL_FILE" 2>/dev/null || true
         rm -f "$tmp" "$journal_backup"
@@ -840,7 +865,7 @@ cmd_browse_list() {
 
 cmd_browse_delete() {
     command -v flock >/dev/null 2>&1 || { echo "browse-delete: flock non disponibile" >&2; return 1; }
-    local magic run_ts device relative target backup rel_file paths_file
+    local magic run_ts device relative target backup rel_file paths_file txid txfile
     local -a journal_paths=()
     IFS= read -r -d '' magic || return 1
     IFS= read -r -d '' run_ts || return 1
@@ -861,6 +886,7 @@ cmd_browse_delete() {
     exec 9>"$JOURNAL_LOCK_FILE"
     flock -x 9 || { exec 9>&-; printf 'BROWSE_DELETE_V1\0ERROR\0lock non acquisito\0'; return 1; }
     ensure_journal_files
+    recover_pending_transactions_unlocked || { flock -u 9; exec 9>&-; printf 'BROWSE_DELETE_V1\0ERROR\0recupero transazioni fallito\0'; return 1; }
 
     # The listing can be stale. Recheck after taking the journal lock and before
     # collecting the paths that will be represented in the manifest.
@@ -877,26 +903,48 @@ cmd_browse_delete() {
         journal_paths+=("$relative")
     fi
 
-    if ! mkdir -p "${backup%/*}" || ! mv "$target" "$backup"; then
+    txid="browse-delete-${run_ts}-$$-${RANDOM}"
+    txfile="$TRANSACTION_DIR/$txid.txn"
+    paths_file="$TRANSACTION_DIR/$txid.paths"
+    if ! mkdir -p "$TRANSACTION_DIR" "${backup%/*}" || ! : > "$paths_file"; then
+        flock -u 9; exec 9>&-
+        printf 'BROWSE_DELETE_V1\0ERROR\0creazione elenco percorsi fallita\0'
+        return 1
+    fi
+    for rel_file in "${journal_paths[@]}"; do
+        if ! printf '%s\0' "$rel_file" >> "$paths_file"; then
+            rm -f "$paths_file"
+            flock -u 9; exec 9>&-
+            printf 'BROWSE_DELETE_V1\0ERROR\0scrittura elenco percorsi fallita\0'
+            return 1
+        fi
+    done
+    if ! begin_move_transaction BROWSE_DELETE "$txid" "$device" "$run_ts" "$relative" "$target" "$backup" "$paths_file"; then
+        rm -f "$paths_file"
+        flock -u 9; exec 9>&-
+        printf 'BROWSE_DELETE_V1\0ERROR\0registrazione transazione fallita\0'
+        return 1
+    fi
+    if ! mv "$target" "$backup"; then
+        rm -f "$txfile" "$paths_file"
         flock -u 9; exec 9>&-
         printf 'BROWSE_DELETE_V1\0ERROR\0spostamento nel cestino fallito\0'
         return 1
     fi
     test_failpoint "browse_delete_after_move"
-
-    paths_file="${JOURNAL_FILE}.browse-paths.$$.$RANDOM"
-    : > "$paths_file"
-    for rel_file in "${journal_paths[@]}"; do
-        printf '%s\0' "$rel_file" >> "$paths_file"
-    done
-    if append_delete_journal_batch_unlocked "$paths_file" "$device"; then
+    if ! advance_move_transaction "$txfile" MOVED; then
+        mv "$backup" "$target" 2>/dev/null && rm -f "$txfile" "$paths_file"
+        flock -u 9; exec 9>&-
+        printf 'BROWSE_DELETE_V1\0ERROR\0registrazione transazione fallita\0'
+        return 1
+    fi
+    if append_delete_journal_batch_unlocked "$paths_file" "$device" "$txid"; then
         test_failpoint "browse_delete_after_journal"
-        rm -f "$paths_file"
+        rm -f "$txfile" "$paths_file"
         flock -u 9; exec 9>&-
         printf 'BROWSE_DELETE_V1\0OK\0'
     else
-        rm -f "$paths_file"
-        mv "$backup" "$target" 2>/dev/null || true
+        mv "$backup" "$target" 2>/dev/null && rm -f "$txfile" "$paths_file"
         flock -u 9; exec 9>&-
         printf 'BROWSE_DELETE_V1\0ERROR\0journal non aggiornato, operazione annullata\0'
         return 1
@@ -905,7 +953,7 @@ cmd_browse_delete() {
 
 cmd_browse_rename() {
     command -v flock >/dev/null 2>&1 || { echo "browse-rename: flock non disponibile" >&2; return 1; }
-    local magic run_ts device src dst src_target dst_target rel_file paths_file
+    local magic run_ts device src dst src_target dst_target rel_file paths_file txid txfile
     local -a journal_paths=()
     IFS= read -r -d '' magic || return 1
     IFS= read -r -d '' run_ts || return 1
@@ -930,6 +978,7 @@ cmd_browse_rename() {
     exec 9>"$JOURNAL_LOCK_FILE"
     flock -x 9 || { exec 9>&-; printf 'BROWSE_RENAME_V1\0ERROR\0lock non acquisito\0'; return 1; }
     ensure_journal_files
+    recover_pending_transactions_unlocked || { flock -u 9; exec 9>&-; printf 'BROWSE_RENAME_V1\0ERROR\0recupero transazioni fallito\0'; return 1; }
 
     if [[ ! -e "$src_target" && ! -L "$src_target" ]]; then
         flock -u 9; exec 9>&-
@@ -955,26 +1004,48 @@ cmd_browse_rename() {
         journal_paths+=("$src")
     fi
 
-    if ! mkdir -p "${dst_target%/*}" || ! mv "$src_target" "$dst_target"; then
+    txid="browse-rename-${run_ts}-$$-${RANDOM}"
+    txfile="$TRANSACTION_DIR/$txid.txn"
+    paths_file="$TRANSACTION_DIR/$txid.paths"
+    if ! mkdir -p "$TRANSACTION_DIR" "${dst_target%/*}" || ! : > "$paths_file"; then
+        flock -u 9; exec 9>&-
+        printf 'BROWSE_RENAME_V1\0ERROR\0creazione elenco percorsi fallita\0'
+        return 1
+    fi
+    for rel_file in "${journal_paths[@]}"; do
+        if ! printf '%s\0' "$rel_file" >> "$paths_file"; then
+            rm -f "$paths_file"
+            flock -u 9; exec 9>&-
+            printf 'BROWSE_RENAME_V1\0ERROR\0scrittura elenco percorsi fallita\0'
+            return 1
+        fi
+    done
+    if ! begin_move_transaction BROWSE_RENAME "$txid" "$device" "$run_ts" "$src" "$src_target" "$dst_target" "$paths_file"; then
+        rm -f "$paths_file"
+        flock -u 9; exec 9>&-
+        printf 'BROWSE_RENAME_V1\0ERROR\0registrazione transazione fallita\0'
+        return 1
+    fi
+    if ! mv "$src_target" "$dst_target"; then
+        rm -f "$txfile" "$paths_file"
         flock -u 9; exec 9>&-
         printf 'BROWSE_RENAME_V1\0ERROR\0spostamento fallito\0'
         return 1
     fi
     test_failpoint "browse_rename_after_move"
-
-    paths_file="${JOURNAL_FILE}.browse-paths.$$.$RANDOM"
-    : > "$paths_file"
-    for rel_file in "${journal_paths[@]}"; do
-        printf '%s\0' "$rel_file" >> "$paths_file"
-    done
-    if append_delete_journal_batch_unlocked "$paths_file" "$device"; then
+    if ! advance_move_transaction "$txfile" MOVED; then
+        mv "$dst_target" "$src_target" 2>/dev/null && rm -f "$txfile" "$paths_file"
+        flock -u 9; exec 9>&-
+        printf 'BROWSE_RENAME_V1\0ERROR\0registrazione transazione fallita\0'
+        return 1
+    fi
+    if append_delete_journal_batch_unlocked "$paths_file" "$device" "$txid"; then
         test_failpoint "browse_rename_after_journal"
-        rm -f "$paths_file"
+        rm -f "$txfile" "$paths_file"
         flock -u 9; exec 9>&-
         printf 'BROWSE_RENAME_V1\0OK\0'
     else
-        rm -f "$paths_file"
-        mv "$dst_target" "$src_target" 2>/dev/null || true
+        mv "$dst_target" "$src_target" 2>/dev/null && rm -f "$txfile" "$paths_file"
         flock -u 9; exec 9>&-
         printf 'BROWSE_RENAME_V1\0ERROR\0journal non aggiornato, operazione annullata\0'
         return 1

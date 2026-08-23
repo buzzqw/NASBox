@@ -482,6 +482,13 @@ mkdir -p "$INSTALL_BIN"
 LAUNCHER="$INSTALL_BIN/sync-daemon-gui"
 cat > "$LAUNCHER" <<EOF
 #!/usr/bin/env bash
+# The autostart service keeps NASBox hidden in the tray. A launch from the
+# application menu must replace it, otherwise the single-instance lock exits
+# without bringing a window to the foreground.
+if [[ "\${NASBOX_SERVICE:-}" != "1" ]] && command -v systemctl &>/dev/null \
+        && systemctl --user is-active --quiet sync-daemon-client.service; then
+    systemctl --user stop sync-daemon-client.service
+fi
 exec python3 "$CANONICAL_CLIENT_DIR/main.py" "\$@"
 EOF
 chmod +x "$LAUNCHER"

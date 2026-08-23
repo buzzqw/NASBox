@@ -442,6 +442,87 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(deletes, [])
         self.assertEqual(adopted, set())
 
+    def test_push_plan_tracks_both_remote_conflict_copies_for_journaling(self) -> None:
+        worker, _watcher = self._make_push_worker_for_tick()
+        base = Fingerprint("a" * 64, 1, 10_000_000_000)
+        local = Fingerprint("b" * 64, 1, 30_000_000_000)
+        worker.sync_state.fingerprint.return_value = local
+        worker.sync_state.get.return_value = base
+
+        # The NAS loses when the local version is newer: its copied conflict
+        # file must become a manifest entry too.
+        with patch.object(
+            rsync_ops, "remote_file_states",
+            return_value={"report.txt": rsync_ops.RemoteState(rsync_ops.RemoteKind.FILE, "c" * 64, 1, 20_000_000_000)},
+        ), patch.object(rsync_ops, "copy_remote_file", return_value=True):
+            worker._build_plan({"report.txt"})
+
+        self.assertEqual(len(worker._conflict_journal_items), 1)
+        self.assertEqual(worker._conflict_journal_items[0].direction, "upload")
+        self.assertIn("conflitto", worker._conflict_journal_items[0].path)
+
+        # The local loser is uploaded under a conflict name when the NAS is newer.
+        worker._conflict_journal_items = []
+        with patch.object(
+            rsync_ops, "remote_file_states",
+            return_value={"report.txt": rsync_ops.RemoteState(rsync_ops.RemoteKind.FILE, "c" * 64, 1, 40_000_000_000)},
+        ), patch.object(rsync_ops, "upload_conflict_copy", return_value=(True, "")):
+            worker._build_plan({"report.txt"})
+
+        self.assertEqual(len(worker._conflict_journal_items), 1)
+        self.assertEqual(worker._conflict_journal_items[0].direction, "upload")
+
+    def test_push_recovery_journals_adopted_upload_left_pending_by_crash(self) -> None:
+        worker, watcher = self._make_push_worker_for_tick()
+        recovered = Fingerprint("a" * 64, 1, 10)
+        worker.sync_state.fingerprint.return_value = recovered
+
+        with patch.object(worker, "_build_plan", return_value=(set(), [], {"uploaded.txt"})), \
+             patch.object(worker, "_authoritative_fingerprints", return_value={"uploaded.txt": recovered}), \
+             patch.object(rsync_ops, "remote_lock") as remote_lock, \
+             patch.object(rsync_ops, "checked_delete_remote", return_value=rsync_ops.CheckedDeleteResult(True, [], set(), set())), \
+             patch.object(rsync_ops, "append_remote_journal", return_value=(True, "")) as append:
+            remote_lock.return_value.__enter__ = Mock(return_value=None)
+            remote_lock.return_value.__exit__ = Mock(return_value=False)
+            ok, _deleted, _limited = worker._run_chunk(0, ["uploaded.txt"], 0, 1, 1000, 0, watcher)
+
+        self.assertTrue(ok)
+        journal_items = append.call_args.args[3]
+        self.assertEqual(journal_items, [rsync_ops.TransferItem("upload", "uploaded.txt")])
+        worker.sync_state.record_fingerprints.assert_called_once_with({"uploaded.txt": recovered})
+
+    def test_push_journals_conflict_copy_without_adopting_it_locally(self) -> None:
+        worker, watcher = self._make_push_worker_for_tick()
+        original = Fingerprint("a" * 64, 1, 10)
+        conflict = Fingerprint("b" * 64, 1, 20)
+
+        def build_plan(*_args, **_kwargs):
+            worker._conflict_journal_items.append(
+                rsync_ops.TransferItem("upload", "report (conflitto da dev01).txt"),
+            )
+            return {"report.txt"}, [], set()
+
+        with patch.object(worker, "_build_plan", side_effect=build_plan), \
+             patch.object(
+                 worker, "_run_transfer_tracked",
+                 return_value=rsync_ops.TransferResult(True, [rsync_ops.TransferItem("upload", "report.txt")]),
+             ), patch.object(
+                 worker, "_authoritative_fingerprints",
+                 return_value={"report.txt": original, "report (conflitto da dev01).txt": conflict},
+             ), patch.object(rsync_ops, "remote_lock") as remote_lock, \
+             patch.object(rsync_ops, "checked_delete_remote", return_value=rsync_ops.CheckedDeleteResult(True, [], set(), set())), \
+             patch.object(rsync_ops, "append_remote_journal", return_value=(True, "")) as append:
+            remote_lock.return_value.__enter__ = Mock(return_value=None)
+            remote_lock.return_value.__exit__ = Mock(return_value=False)
+            ok, _deleted, _limited = worker._run_chunk(0, ["report.txt"], 0, 1, 1000, 0, watcher)
+
+        self.assertTrue(ok)
+        self.assertEqual(append.call_args.args[3], [
+            rsync_ops.TransferItem("upload", "report.txt"),
+            rsync_ops.TransferItem("upload", "report (conflitto da dev01).txt"),
+        ])
+        worker.sync_state.record_fingerprints.assert_called_once_with({"report.txt": original})
+
     def test_push_tick_stops_at_cumulative_delete_limit_across_chunks(self) -> None:
         worker, watcher = self._make_push_worker_for_tick()
         worker.cfg.get.side_effect = lambda key, default=None: {

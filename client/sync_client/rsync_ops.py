@@ -60,7 +60,7 @@ DELETE_FLAG = "--delete-after"
 # Bump this whenever the client starts relying on a new --print-config field or
 # server-side capability, so an outdated NAS package gets flagged instead of
 # silently misbehaving.
-EXPECTED_SERVER_VERSION = "3.13.0"
+EXPECTED_SERVER_VERSION = "3.13.1"
 _SERVER_UPDATE_NAME_RE = re.compile(r"^sync-daemon-server-([0-9]+(?:\.[0-9]+)+)\.sh$")
 
 
