@@ -38,7 +38,7 @@ class ServerCrashRecoveryTests(unittest.TestCase):
             payload += (
                 os.fsencode(relative) + b"\0" + hashlib.sha256(content).hexdigest().encode() + b"\0"
                 + str(len(content)).encode() + b"\0"
-                + str(int(staged.stat().st_mtime) * 1_000_000_000).encode() + b"\0"
+                + str(staged.stat().st_mtime_ns).encode() + b"\0"
             )
         return payload
 

@@ -30,7 +30,7 @@
 #
 set -uo pipefail
 
-VERSION="3.15.0"
+VERSION="3.15.1"
 SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -797,12 +797,16 @@ sync_transfer_lock_is_held() {
 }
 
 publish_file_matches() {
-    local file="$1" digest="$2" size="$3" mtime_ns="$4" actual_size actual_mtime digest_actual
+    local file="$1" digest="$2" size="$3" mtime_ns="$4" actual_size actual_mtime digest_actual expected_mtime
     [[ -f "$file" && ! -L "$file" ]] || return 1
     actual_size=$(portable_file_size "$file" || true)
     actual_mtime=$(portable_file_mtime "$file" || true)
     [[ "$actual_size" == "$size" && "$actual_mtime" =~ ^[0-9]+$ ]] || return 1
-    [[ "$((actual_mtime * 1000000000))" == "$mtime_ns" ]] || return 1
+    # Rsync/NAS stat expose whole-second mtimes. Local Python fingerprints may
+    # retain sub-second precision, so compare the portable precision here and
+    # normalize it before writing the remote manifest below.
+    expected_mtime=$((mtime_ns / 1000000000))
+    [[ "$actual_mtime" == "$expected_mtime" ]] || return 1
     digest_actual=$(portable_sha256 "$file" || true)
     [[ "$digest_actual" == "$digest" ]]
 }
@@ -865,7 +869,7 @@ recover_publish_transaction_unlocked() {
 cmd_staging_publish() {
     command -v flock >/dev/null 2>&1 || { echo "staging-publish: flock non disponibile" >&2; return 1; }
     command -v sha256sum >/dev/null 2>&1 || { echo "staging-publish: sha256sum non disponibile" >&2; return 1; }
-    local magic staging_dir txid device count path digest size mtime index paths_file txfile target
+    local magic staging_dir txid device count path digest size mtime normalized_mtime index paths_file txfile target
     local -A seen_paths
     IFS= read -r -d '' magic || return 1
     IFS= read -r -d '' staging_dir || return 1
@@ -886,8 +890,10 @@ cmd_staging_publish() {
         valid_sync_relative_path "$path" && [[ -z "${seen_paths[$path]:-}" ]] || { rm -f "$paths_file"; return 1; }
         [[ "$digest" =~ ^[0-9a-f]{64}$ && "$size" =~ ^[0-9]+$ && "$mtime" =~ ^[0-9]+$ ]] || { rm -f "$paths_file"; return 1; }
         publish_file_matches "$staging_dir/$path" "$digest" "$size" "$mtime" || { rm -f "$paths_file"; return 1; }
+        normalized_mtime=$(portable_file_mtime "$staging_dir/$path" || true)
+        [[ "$normalized_mtime" =~ ^[0-9]+$ ]] || { rm -f "$paths_file"; return 1; }
         seen_paths["$path"]=1
-        printf '%s\0%s\0%s\0%s\0' "$path" "$digest" "$size" "$mtime" >> "$paths_file" || { rm -f "$paths_file"; return 1; }
+        printf '%s\0%s\0%s\0%s\0' "$path" "$digest" "$size" "$((normalized_mtime * 1000000000))" >> "$paths_file" || { rm -f "$paths_file"; return 1; }
     done
     # The caller's persistent SSH lease owns this lock. Refuse standalone use,
     # but do not acquire it here: doing so would deadlock a valid lease.

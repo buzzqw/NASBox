@@ -4,6 +4,12 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 1.21.1 - 2026-08-23
+
+- Corretto il publish staging su NAS con `stat` a precisione di secondo: i
+  timestamp locali sub-secondo vengono confrontati e memorizzati nella
+  precisione disponibile, senza lasciare batch privati non pubblicati.
+
 ## 1.21.0 - 2026-08-23
 
 - I batch composti esclusivamente da nuovi file vengono caricati nella staging
