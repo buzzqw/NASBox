@@ -118,7 +118,9 @@ def main() -> int:
                 source_root = candidate.materialize()
                 updater.install_update(source_root, Path(__file__).resolve().parent)
                 candidate.cleanup()
-                os.execv(sys.executable, [sys.executable, str(Path(__file__).resolve()), *sys.argv[1:]])
+                # Let systemd start a fresh process instead of exec'ing while
+                # the Qt application and its worker threads are still alive.
+                return 75
             except Exception as exc:
                 candidate.cleanup()
                 logger_module.shared().log(

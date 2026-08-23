@@ -4,6 +4,12 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 1.19.5 - 2026-08-23
+
+- Dopo un aggiornamento avviato dal servizio, il client termina con un codice
+  che fa ripartire systemd con un processo nuovo. Evita il riavvio incompleto
+  del client gia in esecuzione, osservato sul client 122.
+
 ## 1.19.4 - 2026-08-23
 
 - La pulizia dello storico locale ora viene eseguita in background: la finestra
