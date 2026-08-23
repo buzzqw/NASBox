@@ -234,6 +234,13 @@ class SyncEngine(QThread):
                 watcher.mark_dirty()
             self.watchers.set(watcher)
             self._watched_path = local_root
+            if self._push_worker is not None and (has_local_content or has_pending):
+                # inotify only reports changes that happen after it starts. A
+                # restart can therefore leave pre-existing local differences in
+                # the preview but outside the durable push queue. Keep an
+                # explicit full reconciliation request until PushWorker has
+                # resolved it, rather than relying on this one watcher event.
+                self._push_worker.request_full_sync()
 
     def _log(self, action: str, path_: str, detail: str = "") -> None:
         self.logger.log(action, path_, detail)

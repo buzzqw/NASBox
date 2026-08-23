@@ -4,6 +4,13 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 1.21.2 - 2026-08-23
+
+- All'avvio o dopo la ricreazione del watcher, una cartella locale non vuota
+  richiede una riconciliazione push durevole. Le differenze gia presenti prima
+  dell'avvio non possono piu comparire nella preview senza entrare nella coda
+  reale di upload.
+
 ## 1.21.1 - 2026-08-23
 
 - Corretto il publish staging su NAS con `stat` a precisione di secondo: i
