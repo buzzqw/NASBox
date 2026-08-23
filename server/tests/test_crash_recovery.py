@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+import fcntl
 from pathlib import Path
 
 
@@ -14,6 +15,46 @@ SCRIPT = ROOT / "sync-daemon-server.sh"
 
 
 class ServerCrashRecoveryTests(unittest.TestCase):
+    def staging_fixture(self, sandbox: Path) -> tuple[Path, Path, Path, Path]:
+        script = sandbox / "server.sh"
+        share = sandbox / "share"
+        share.mkdir()
+        shutil.copy2(SCRIPT, script)
+        script.chmod(0o755)
+        config = sandbox / "server.conf"
+        config.write_text(f"SHARE_ROOT={share}\nRETENTION_DAYS=30\n")
+        staging = share / ".nasbox-staging" / "batch-a"
+        staging.mkdir(parents=True)
+        return script, share, config, staging
+
+    @staticmethod
+    def staging_payload(staging: Path, txid: str, files: list[tuple[str, bytes]]) -> bytes:
+        payload = b"STAGING_PUBLISH_V1\0" + os.fsencode(staging) + b"\0"
+        payload += txid.encode() + b"\0device-a\0" + str(len(files)).encode() + b"\0"
+        for relative, content in files:
+            staged = staging / relative
+            staged.parent.mkdir(parents=True, exist_ok=True)
+            staged.write_bytes(content)
+            payload += (
+                os.fsencode(relative) + b"\0" + hashlib.sha256(content).hexdigest().encode() + b"\0"
+                + str(len(content)).encode() + b"\0"
+                + str(int(staged.stat().st_mtime) * 1_000_000_000).encode() + b"\0"
+            )
+        return payload
+
+    @staticmethod
+    def hold_global_lock(sandbox: Path):
+        lock_path = sandbox / "state" / "sync-transfer.lock"
+        lock_path.parent.mkdir(exist_ok=True)
+        lock = lock_path.open("w")
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        return lock
+
+    @staticmethod
+    def release_lock(lock) -> None:
+        fcntl.flock(lock, fcntl.LOCK_UN)
+        lock.close()
+
     @staticmethod
     def empty_checked_delete_payload() -> bytes:
         return (
@@ -67,6 +108,122 @@ class ServerCrashRecoveryTests(unittest.TestCase):
             self.assertIn(b"manuale.txt\0ABSENT\0", recovered.stdout)
             journal = (sandbox / "state" / "transfer-journal.tsv").read_text()
             self.assertIn("manuale.txt", journal)
+
+    def test_staging_publish_moves_only_new_files_journals_them_and_hides_staging(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            sandbox = Path(directory)
+            script, share, config, staging = self.staging_fixture(sandbox)
+            payload = self.staging_payload(staging, "publish-normal", [("folder/new.txt", b"new bytes")])
+            lock = self.hold_global_lock(sandbox)
+            try:
+                result = subprocess.run(
+                    [str(script), "-c", str(config), "--staging-publish"], input=payload, capture_output=True,
+                )
+            finally:
+                self.release_lock(lock)
+            self.assertEqual(result.returncode, 0, result.stderr.decode())
+            self.assertEqual(result.stdout, b"STAGING_PUBLISH_V1\0OK\0" b"1\0")
+            self.assertEqual((share / "folder" / "new.txt").read_bytes(), b"new bytes")
+            self.assertFalse((staging / "folder" / "new.txt").exists())
+            journal = (sandbox / "state" / "transfer-journal.tsv").read_text()
+            self.assertIn("PUT\tfolder/new.txt", journal)
+            listing = subprocess.run(
+                [str(script), "-c", str(config), "--browse-list"], capture_output=True,
+            )
+            self.assertNotIn(b".nasbox-staging\0", listing.stdout)
+
+    def test_staging_publish_refuses_unlocked_or_existing_targets_without_losing_staging(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            sandbox = Path(directory)
+            script, share, config, staging = self.staging_fixture(sandbox)
+            payload = self.staging_payload(staging, "publish-conflict", [("exists.txt", b"staged")])
+            unlocked = subprocess.run(
+                [str(script), "-c", str(config), "--staging-publish"], input=payload, capture_output=True,
+            )
+            self.assertNotEqual(unlocked.returncode, 0)
+            self.assertTrue((staging / "exists.txt").exists())
+            (share / "exists.txt").write_bytes(b"live")
+            lock = self.hold_global_lock(sandbox)
+            try:
+                conflict = subprocess.run(
+                    [str(script), "-c", str(config), "--staging-publish"], input=payload, capture_output=True,
+                )
+            finally:
+                self.release_lock(lock)
+            self.assertNotEqual(conflict.returncode, 0)
+            self.assertEqual((share / "exists.txt").read_bytes(), b"live")
+            self.assertEqual((staging / "exists.txt").read_bytes(), b"staged")
+
+    def test_staging_publish_crash_recovery_completes_marker_move_and_journal(self) -> None:
+        for failpoint in ("publish_after_marker", "publish_after_move"):
+            with self.subTest(failpoint=failpoint), tempfile.TemporaryDirectory() as directory:
+                sandbox = Path(directory)
+                script, share, config, staging = self.staging_fixture(sandbox)
+                payload = self.staging_payload(staging, f"publish-{failpoint}", [("one.txt", b"one"), ("two.txt", b"two")])
+                lock = self.hold_global_lock(sandbox)
+                environment = os.environ.copy()
+                environment["NASBOX_TEST_FAILPOINT"] = failpoint
+                try:
+                    crashed = subprocess.run(
+                        [str(script), "-c", str(config), "--staging-publish"], input=payload,
+                        capture_output=True, env=environment,
+                    )
+                finally:
+                    self.release_lock(lock)
+                self.assertEqual(crashed.returncode, -9)
+                journal_before_recovery = (sandbox / "state" / "transfer-journal.tsv").read_text()
+                self.assertNotIn("PUT\tone.txt", journal_before_recovery)
+                self.assertNotIn("PUT\ttwo.txt", journal_before_recovery)
+                if failpoint == "publish_after_marker":
+                    self.assertFalse((share / "one.txt").exists())
+                    self.assertTrue((staging / "one.txt").exists())
+                else:
+                    self.assertTrue((share / "one.txt").exists())
+                recovery_lock = self.hold_global_lock(sandbox)
+                try:
+                    recovered = subprocess.run(
+                        [str(script), "-c", str(config), "--checked-delete"],
+                        input=self.empty_checked_delete_payload(), capture_output=True,
+                    )
+                finally:
+                    self.release_lock(recovery_lock)
+                self.assertEqual(recovered.returncode, 0, recovered.stderr.decode())
+                self.assertEqual((share / "one.txt").read_bytes(), b"one")
+                self.assertEqual((share / "two.txt").read_bytes(), b"two")
+                journal = (sandbox / "state" / "transfer-journal.tsv").read_text()
+                self.assertEqual(journal.count("PUT\tone.txt"), 1)
+                self.assertEqual(journal.count("PUT\ttwo.txt"), 1)
+                self.assertFalse(list((sandbox / "state" / "transactions").glob("*.txn")))
+
+    def test_staging_publish_crash_after_journal_keeps_files_and_recovers_marker(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            sandbox = Path(directory)
+            script, share, config, staging = self.staging_fixture(sandbox)
+            payload = self.staging_payload(staging, "publish-after-journal", [("done.txt", b"durable")])
+            lock = self.hold_global_lock(sandbox)
+            environment = os.environ.copy()
+            environment["NASBOX_TEST_FAILPOINT"] = "publish_after_journal_append"
+            try:
+                crashed = subprocess.run(
+                    [str(script), "-c", str(config), "--staging-publish"], input=payload,
+                    capture_output=True, env=environment,
+                )
+            finally:
+                self.release_lock(lock)
+            self.assertEqual(crashed.returncode, -9)
+            self.assertEqual((share / "done.txt").read_bytes(), b"durable")
+            recovery_lock = self.hold_global_lock(sandbox)
+            try:
+                recovered = subprocess.run(
+                    [str(script), "-c", str(config), "--checked-delete"],
+                    input=self.empty_checked_delete_payload(), capture_output=True,
+                )
+            finally:
+                self.release_lock(recovery_lock)
+            self.assertEqual(recovered.returncode, 0, recovered.stderr.decode())
+            self.assertFalse(list((sandbox / "state" / "transactions").glob("*.txn")))
+            journal = (sandbox / "state" / "transfer-journal.tsv").read_text()
+            self.assertEqual(journal.count("PUT\tdone.txt"), 1)
 
     def test_browse_delete_crash_after_move_recovers_all_directory_paths(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

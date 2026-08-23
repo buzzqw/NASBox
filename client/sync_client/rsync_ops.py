@@ -41,7 +41,8 @@ REPOSITORY_MARKER_NAME = ".nasbox-root"
 # never sync it, in either direction, or every listing recurses into NAS-internal
 # cache churn instead of the user's actual files.
 SYNOLOGY_EADIR = "@eaDir"
-EXCLUDE_DIRNAMES = [TRASH_DIRNAME, SYNOLOGY_EADIR, ".sync-partial"]
+STAGING_DIRNAME = ".nasbox-staging"
+EXCLUDE_DIRNAMES = [TRASH_DIRNAME, SYNOLOGY_EADIR, ".sync-partial", STAGING_DIRNAME]
 
 # rsync's default --delete mode (--delete-during) applies deletions incrementally,
 # directory by directory, as the transfer proceeds -- using a source-side file list
@@ -61,7 +62,7 @@ DELETE_FLAG = "--delete-after"
 # Bump this whenever the client starts relying on a new --print-config field or
 # server-side capability, so an outdated NAS package gets flagged instead of
 # silently misbehaving.
-EXPECTED_SERVER_VERSION = "3.14.0"
+EXPECTED_SERVER_VERSION = "3.15.0"
 _SERVER_UPDATE_NAME_RE = re.compile(r"^sync-daemon-server-([0-9]+(?:\.[0-9]+)+)\.sh$")
 
 
@@ -812,6 +813,70 @@ def checked_delete_remote(
     return CheckedDeleteResult(True, items, completed, stale)
 
 
+def create_remote_staging(cfg: Config, conn: NasConnection, transaction_id: str) -> str | None:
+    """Create one private, same-filesystem staging tree for a publish batch."""
+    if not re.fullmatch(r"[A-Za-z0-9._:-]{1,128}", transaction_id):
+        return None
+    staging_dir = f"{_remote_dir(cfg)}/{STAGING_DIRNAME}/{transaction_id}"
+    user = cfg.get("nas_user")
+    try:
+        result = subprocess.run(
+            ["ssh", *ssh_opts(cfg, conn), f"{user}@{conn.host}", "mkdir -p -- " + shlex.quote(staging_dir)],
+            capture_output=True, text=True, timeout=30,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return staging_dir if result.returncode == 0 else None
+
+
+def cleanup_remote_staging(cfg: Config, conn: NasConnection, staging_dir: str) -> None:
+    """Best-effort cleanup after a completed publish; failed staging is retained."""
+    expected_prefix = f"{_remote_dir(cfg)}/{STAGING_DIRNAME}/"
+    if not staging_dir.startswith(expected_prefix):
+        return
+    user = cfg.get("nas_user")
+    try:
+        subprocess.run(
+            ["ssh", *ssh_opts(cfg, conn), f"{user}@{conn.host}", "rm -rf -- " + shlex.quote(staging_dir)],
+            capture_output=True, text=True, timeout=30,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+
+
+def publish_staging(
+    cfg: Config, conn: NasConnection, staging_dir: str, transaction_id: str,
+    device_id: str, fingerprints: dict[str, "Fingerprint"],
+) -> tuple[bool, str]:
+    """Atomically publish new staged files while the caller owns the NAS lease."""
+    script_path = (cfg.get("remote_server_script") or "").strip()
+    if not script_path or not fingerprints:
+        return False, "publish staging senza script o file"
+    fields = [
+        b"STAGING_PUBLISH_V1", os.fsencode(staging_dir), transaction_id.encode("ascii"),
+        device_id.encode("ascii"), str(len(fingerprints)).encode("ascii"),
+    ]
+    for path, fingerprint in sorted(fingerprints.items()):
+        fields.extend((
+            os.fsencode(path), fingerprint.digest.encode("ascii"), str(fingerprint.size).encode("ascii"),
+            str(fingerprint.mtime_ns).encode("ascii"),
+        ))
+    ok, output, error = run_remote_script_input_bytes(
+        cfg, conn, script_path, ["--staging-publish"], b"\0".join(fields) + b"\0", timeout=300,
+    )
+    if not ok:
+        return False, error or "pubblicazione staging fallita"
+    values = output.split(b"\0")
+    if values and values[-1] == b"":
+        values.pop()
+    if len(values) != 3 or values[:2] != [b"STAGING_PUBLISH_V1", b"OK"]:
+        return False, "risposta publish staging non valida"
+    try:
+        return int(values[2]) == len(fingerprints), ""
+    except ValueError:
+        return False, "conteggio publish staging non valido"
+
+
 # --- interactive remote browsing ("Sfoglia NAS" tab) ---
 #
 # Unlike the sync engine's own push/pull, these are direct results of the user
@@ -1524,6 +1589,8 @@ def _run_transfer(
     on_progress: Optional[Callable[[int, float], None]] = None,
     on_start: Optional[Callable[[subprocess.Popen], None]] = None,
     paths: set[str] | None = None,
+    remote_destination: str | None = None,
+    keep_backups: bool = True,
 ) -> TransferResult:
     """Runs the real (non-dry-run) push/pull, streaming rsync's output line by
     line as it happens instead of waiting for the whole thing to finish. This
@@ -1533,7 +1600,7 @@ def _run_transfer(
     instead of being stuck waiting for it for up to the full timeout."""
     delete_flag = [DELETE_FLAG] if cfg.get("delete_enabled") and direction == "download" else []
     local = cfg.local_root().rstrip("/") + "/"
-    remote = _remote_uri(cfg, conn)
+    remote = remote_destination or _remote_uri(cfg, conn)
 
     if direction == "upload":
         src, dst = local, remote
@@ -1586,7 +1653,7 @@ def _run_transfer(
         *_bwlimit_args(cfg, direction),
         "--progress",
         "--info=progress2",
-        "--backup", f"--backup-dir={backup_dir}", f"--suffix=-{run_ts}",
+        *(["--backup", f"--backup-dir={backup_dir}", f"--suffix=-{run_ts}"] if keep_backups else []),
         *_exclude_args(cfg),
         "--out-format=%i|%l|%n",
         "-e", _ssh_e_arg(cfg, conn),
@@ -1699,6 +1766,26 @@ def push(
         on_item=on_item, on_item_started=on_item_started,
         on_item_progress=on_item_progress, on_progress=on_progress,
         on_start=on_start, paths=paths,
+    )
+
+
+def push_to_staging(
+    cfg: Config, conn: NasConnection, run_ts: str, staging_dir: str,
+    on_item: Optional[Callable[[TransferItem], None]] = None,
+    on_item_started: Optional[Callable[[TransferItem], None]] = None,
+    on_item_progress: Optional[Callable[[TransferItem, int], None]] = None,
+    on_progress: Optional[Callable[[int, float], None]] = None,
+    on_start: Optional[Callable[[subprocess.Popen], None]] = None,
+    paths: set[str] | None = None,
+) -> TransferResult:
+    user = cfg.get("nas_user")
+    return _run_transfer(
+        cfg, conn, "upload", run_ts,
+        on_item=on_item, on_item_started=on_item_started,
+        on_item_progress=on_item_progress, on_progress=on_progress,
+        on_start=on_start, paths=paths,
+        remote_destination=f"{user}@{conn.host}:{staging_dir.rstrip('/')}/",
+        keep_backups=False,
     )
 
 

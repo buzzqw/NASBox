@@ -89,6 +89,7 @@ class PushWorker(TransferWorker):
         self._force_sync = threading.Event()
         self._last_hash_progress_emit = 0.0
         self._conflict_journal_items: list[rsync_ops.TransferItem] = []
+        self._staging_upload_paths: set[str] = set()
 
     def _wake_now(self) -> None:
         self._wake.set()
@@ -338,6 +339,11 @@ class PushWorker(TransferWorker):
         one PC from monopolizing the repository for an unbounded time.
         """
         chunk_set = set(chunk_paths)
+        staged_result = self._try_run_staged_chunk(
+            chunk_set, remote_progress_done, remote_progress_total, chunk_index, watcher,
+        )
+        if staged_result is not None:
+            return staged_result
         self.transfer_waiting_for_lock.emit("upload")
         with rsync_ops.remote_lock(
             self.cfg, self._conn, on_start=self._set_current_process,
@@ -465,6 +471,79 @@ class PushWorker(TransferWorker):
             # independent failed chunks, so continuing would lose retry data.
             return False, len(delete_result.completed_paths), False
 
+    def _try_run_staged_chunk(
+        self, chunk_set: set[str], remote_progress_done: int, remote_progress_total: int,
+        chunk_index: int, watcher,
+    ) -> tuple[bool, int, bool] | None:
+        """Stage a pure batch of brand-new files outside the NAS lease.
+
+        Existing paths, deletes and conflicts retain the conservative direct
+        path below. A staging publish never overwrites: if another client wins
+        the race, the private staged files remain untouched and this batch is
+        retried from a fresh plan.
+        """
+        self.transfer_waiting_for_lock.emit("upload")
+        with rsync_ops.remote_lock(
+            self.cfg, self._conn, on_start=self._set_current_process,
+            owner_id=self.sync_state.device_id(), priority=0,
+        ) as lock:
+            self.lock_coordinator.acquired()
+            self._conflict_journal_items = []
+            self._staging_upload_paths = set()
+            self.transfer_phase.emit("upload", "checking", remote_progress_done, remote_progress_total)
+            lock.set_activity("checking", remote_progress_done, remote_progress_total)
+            upload_paths, delete_requests, adopted_paths, remote_wins_paths = self._build_plan(
+                chunk_set,
+                remote_progress_offset=remote_progress_done,
+                remote_progress_total=remote_progress_total,
+                compact_remote_manifest=chunk_index == 0,
+            )
+            if (
+                not upload_paths or upload_paths != self._staging_upload_paths
+                or delete_requests or adopted_paths or remote_wins_paths or self._conflict_journal_items
+            ):
+                return None
+            fingerprints = {
+                path: self.sync_state.fingerprint(Path(self.cfg.local_root(), path))
+                for path in upload_paths
+            }
+            if any(fingerprint is None for fingerprint in fingerprints.values()):
+                return None
+
+        transaction_id = f"publish-{rsync_ops.new_run_ts()}-{uuid.uuid4().hex[:12]}"
+        staging_dir = rsync_ops.create_remote_staging(self.cfg, self._conn, transaction_id)
+        if staging_dir is None:
+            return False, 0, False
+        self.transfer_phase.emit("upload", "transferring", remote_progress_done, remote_progress_total)
+        stage_result = self._run_transfer_tracked(
+            rsync_ops.push_to_staging, rsync_ops.new_run_ts(),
+            emit_lifecycle=False, paths=upload_paths, staging_dir=staging_dir,
+        )
+        self._report_failure(stage_result)
+        if not stage_result.ok:
+            return False, 0, False
+
+        self.transfer_waiting_for_lock.emit("upload")
+        with rsync_ops.remote_lock(
+            self.cfg, self._conn, on_start=self._set_current_process,
+            owner_id=self.sync_state.device_id(), priority=0,
+        ) as lock:
+            self.lock_coordinator.acquired()
+            self.transfer_phase.emit("upload", "committing", remote_progress_done, remote_progress_total)
+            lock.set_activity("committing", remote_progress_done, remote_progress_total)
+            staged_fingerprints = {path: fp for path, fp in fingerprints.items() if fp is not None}
+            published, detail = rsync_ops.publish_staging(
+                self.cfg, self._conn, staging_dir, transaction_id,
+                self.sync_state.device_id(), staged_fingerprints,
+            )
+            if not published:
+                self._log("STAGING_DEFERRED", "-", detail)
+                return False, 0, False
+            self.sync_state.record_fingerprints(staged_fingerprints)
+            self.sync_state.clear_pending(set(staged_fingerprints))
+        rsync_ops.cleanup_remote_staging(self.cfg, self._conn, staging_dir)
+        return True, 0, False
+
     def _authoritative_fingerprints(
         self, uploaded_items: list[rsync_ops.TransferItem], adopted_paths: set[str],
         deleted_paths: set[str], watcher, *, remote_only_paths: set[str] | None = None,
@@ -569,6 +648,8 @@ class PushWorker(TransferWorker):
             )
             if decision.action == Action.UPLOAD:
                 uploads.add(relative_path)
+                if remote.kind == RemoteKind.ABSENT and (baseline is None or baseline.is_tombstone):
+                    self._staging_upload_paths.add(relative_path)
             elif decision.action == Action.DELETE_REMOTE:
                 # Precondition deletion on the exact live state just observed,
                 # not its older common baseline. This permits mtime-only NAS

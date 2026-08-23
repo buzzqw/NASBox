@@ -4,6 +4,18 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 1.21.0 - 2026-08-23
+
+- I batch composti esclusivamente da nuovi file vengono caricati nella staging
+  privata del NAS senza detenere il lock globale. Il publish finale verifica
+  che le destinazioni siano ancora assenti, sposta i file e registra un unico
+  journal atomico sotto un lease breve.
+- Il publish ha marker durevoli e recovery dopo crash durante marker, move o
+  journal; non sovrascrive mai un percorso apparso nel frattempo e conserva la
+  staging per retry quando non puo completare in sicurezza.
+- La staging e esclusa da sincronizzazione, Browse e retention; quella vuota
+  dopo un publish riuscito viene rimossa senza bloccare il trasferimento.
+
 ## 1.20.0 - 2026-08-23
 
 - I controlli remoti riusano il digest gia presente nel manifest quando

@@ -30,7 +30,7 @@
 #
 set -uo pipefail
 
-VERSION="3.14.0"
+VERSION="3.15.0"
 SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -50,6 +50,7 @@ MANIFEST_FILE="$STATE_DIR/manifest.tsv"
 JOURNAL_LOCK_FILE="$STATE_DIR/transfer-journal.lock"
 MANIFEST_REVISION_FILE="$STATE_DIR/manifest.revision"
 TRANSACTION_DIR="$STATE_DIR/transactions"
+STAGING_DIRNAME=".nasbox-staging"
 
 # How many sha256sum/stat lookups cmd_file_states runs concurrently -- see
 # that function for why. 8 is a conservative default: enough to stop a single
@@ -291,6 +292,24 @@ recover_pending_transactions_unlocked() {
                 fi
                 log ERROR "recovery transazione ambigua: $txid ($relative)"
                 ;;
+            PUBLISH)
+                if [[ -z "$paths_file" || ! -f "$paths_file" ]]; then
+                    log ERROR "recovery publish senza metadati: $txid"
+                    continue
+                fi
+                if ! sync_transfer_lock_is_held; then
+                    log ERROR "recovery publish senza lock globale client: $txid"
+                    return 1
+                fi
+                if grep -Fq $'COMMIT\t'"$txid" "$JOURNAL_FILE" 2>/dev/null; then
+                    bump_manifest_revision_unlocked || return 1
+                    rm -f "$file" "$paths_file"
+                    continue
+                fi
+                if recover_publish_transaction_unlocked "$file" "$device" "$target" "$paths_file" "$txid"; then
+                    rm -f "$file" "$paths_file"
+                fi
+                ;;
             *)
                 log ERROR "recovery transazione non supportata: $txid ($kind)"
                 ;;
@@ -523,7 +542,7 @@ valid_sync_relative_path() {
     local path="$1" part current remaining
     [[ -n "$path" && "$path" != /* && "/$path/" != */../* ]] || return 1
     case "/$path/" in
-        */.sync-trash/*|*/.sync-partial/*|*/.nasbox-root/*|*/@eaDir/*) return 1 ;;
+        */.sync-trash/*|*/.sync-partial/*|*/.nasbox-staging/*|*/.nasbox-root/*|*/@eaDir/*) return 1 ;;
     esac
     current="$SHARE_ROOT"
     remaining="$path"
@@ -747,6 +766,162 @@ append_delete_journal_batch_unlocked() {
     return 1
 }
 
+# A staged publish is deliberately not an rsync operation: every file is first
+# made durable below SHARE_ROOT/.nasbox-staging, then moved into place only when
+# its destination does not exist. The transaction marker makes a killed SSH
+# command resumable without ever recording a PUT before its move succeeded.
+valid_staging_directory() {
+    local directory="$1" current part remaining
+    [[ "$directory" == "$SHARE_ROOT/$STAGING_DIRNAME/"* && -d "$directory" && ! -L "$directory" ]] || return 1
+    current="$SHARE_ROOT/$STAGING_DIRNAME"
+    [[ -d "$current" && ! -L "$current" ]] || return 1
+    remaining="${directory#"$current/"}"
+    while [[ "$remaining" == */* ]]; do
+        part="${remaining%%/*}"
+        remaining="${remaining#*/}"
+        [[ -n "$part" ]] || continue
+        current="$current/$part"
+        [[ ! -L "$current" ]] || return 1
+    done
+}
+
+sync_transfer_lock_is_held() {
+    exec 8>"$SYNC_LOCK_FILE" || return 1
+    if flock -n 8; then
+        flock -u 8
+        exec 8>&-
+        return 1
+    fi
+    exec 8>&-
+    return 0
+}
+
+publish_file_matches() {
+    local file="$1" digest="$2" size="$3" mtime_ns="$4" actual_size actual_mtime digest_actual
+    [[ -f "$file" && ! -L "$file" ]] || return 1
+    actual_size=$(portable_file_size "$file" || true)
+    actual_mtime=$(portable_file_mtime "$file" || true)
+    [[ "$actual_size" == "$size" && "$actual_mtime" =~ ^[0-9]+$ ]] || return 1
+    [[ "$((actual_mtime * 1000000000))" == "$mtime_ns" ]] || return 1
+    digest_actual=$(portable_sha256 "$file" || true)
+    [[ "$digest_actual" == "$digest" ]]
+}
+
+append_put_journal_batch_unlocked() {
+    local paths_file="$1" device="$2" txid="$3" path digest size mtime server_timestamp tmp count=0
+    [[ -f "$paths_file" ]] || return 1
+    tmp="${JOURNAL_FILE}.put-batch.$$.$RANDOM"
+    server_timestamp=$(date '+%s')
+    : > "$tmp" || return 1
+    printf 'BEGIN\t%s\t%s\t%s\n' "$txid" "$server_timestamp" "$device" >> "$tmp" || { rm -f "$tmp"; return 1; }
+    while IFS= read -r -d '' path && IFS= read -r -d '' digest && IFS= read -r -d '' size && IFS= read -r -d '' mtime; do
+        printf 'PUT\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+            "$(encode_journal_field "$path")" "$digest" "$size" "$mtime" \
+            "$(encode_journal_field "$device")" "$server_timestamp" >> "$tmp" || { rm -f "$tmp"; return 1; }
+        (( count++ ))
+    done < "$paths_file"
+    (( count > 0 )) || { rm -f "$tmp"; return 1; }
+    printf 'COMMIT\t%s\n' "$txid" >> "$tmp" || { rm -f "$tmp"; return 1; }
+    # sync makes the completed journal visible to recovery before the marker is removed.
+    sync
+    cat "$tmp" >> "$JOURNAL_FILE" || { rm -f "$tmp"; return 1; }
+    sync
+    test_failpoint "publish_after_journal_append"
+    rm -f "$tmp"
+    bump_manifest_revision_unlocked
+}
+
+recover_publish_transaction_unlocked() {
+    local txfile="$1" device="$2" staging_dir="$3" paths_file="$4" txid="$5"
+    local path digest size mtime staged target
+    valid_staging_directory "$staging_dir" || { log ERROR "recovery publish staging non valido: $txid"; return 1; }
+    while IFS= read -r -d '' path && IFS= read -r -d '' digest && IFS= read -r -d '' size && IFS= read -r -d '' mtime; do
+        valid_sync_relative_path "$path" || { log ERROR "recovery publish percorso non valido: $txid"; return 1; }
+        staged="$staging_dir/$path"
+        target="$SHARE_ROOT/$path"
+        if [[ -e "$target" || -L "$target" ]]; then
+            # A target with the expected bytes is a completed prior move. A
+            # different target is never overwritten: keep the staged source.
+            if [[ -e "$staged" || -L "$staged" ]] || publish_file_matches "$target" "$digest" "$size" "$mtime"; then
+                [[ ! -e "$staged" && ! -L "$staged" ]] || { log ERROR "recovery publish conflitto: $path"; return 1; }
+                continue
+            fi
+            log ERROR "recovery publish target non verificabile: $path"
+            return 1
+        fi
+        publish_file_matches "$staged" "$digest" "$size" "$mtime" || { log ERROR "recovery publish staging non verificabile: $path"; return 1; }
+        mkdir -p "${target%/*}" || return 1
+        mv "$staged" "$target" || return 1
+        test_failpoint "publish_after_move"
+    done < "$paths_file"
+    # Persist the completed move set once, before exposing the journal commit.
+    # Calling sync for every one of a 3,000-file batch serializes the NAS disk
+    # and makes the short publish phase indistinguishable from a stalled sync.
+    sync
+    advance_move_transaction "$txfile" MOVED || return 1
+    append_put_journal_batch_unlocked "$paths_file" "$device" "$txid"
+}
+
+cmd_staging_publish() {
+    command -v flock >/dev/null 2>&1 || { echo "staging-publish: flock non disponibile" >&2; return 1; }
+    command -v sha256sum >/dev/null 2>&1 || { echo "staging-publish: sha256sum non disponibile" >&2; return 1; }
+    local magic staging_dir txid device count path digest size mtime index paths_file txfile target
+    local -A seen_paths
+    IFS= read -r -d '' magic || return 1
+    IFS= read -r -d '' staging_dir || return 1
+    IFS= read -r -d '' txid || return 1
+    IFS= read -r -d '' device || return 1
+    IFS= read -r -d '' count || return 1
+    [[ "$magic" == "STAGING_PUBLISH_V1" ]] || return 1
+    valid_staging_directory "$staging_dir" || return 1
+    [[ "$txid" =~ ^[A-Za-z0-9._:-]{1,128}$ && "$device" =~ ^[A-Za-z0-9._:-]{1,128}$ ]] || return 1
+    [[ "$count" =~ ^[1-9][0-9]*$ && "$count" -le 100000 ]] || return 1
+    paths_file="$TRANSACTION_DIR/$txid.paths"
+    txfile="$TRANSACTION_DIR/$txid.txn"
+    mkdir -p "$TRANSACTION_DIR" || return 1
+    [[ ! -e "$txfile" && ! -e "$paths_file" ]] || return 1
+    : > "$paths_file" || return 1
+    for ((index = 0; index < count; index++)); do
+        IFS= read -r -d '' path && IFS= read -r -d '' digest && IFS= read -r -d '' size && IFS= read -r -d '' mtime || { rm -f "$paths_file"; return 1; }
+        valid_sync_relative_path "$path" && [[ -z "${seen_paths[$path]:-}" ]] || { rm -f "$paths_file"; return 1; }
+        [[ "$digest" =~ ^[0-9a-f]{64}$ && "$size" =~ ^[0-9]+$ && "$mtime" =~ ^[0-9]+$ ]] || { rm -f "$paths_file"; return 1; }
+        publish_file_matches "$staging_dir/$path" "$digest" "$size" "$mtime" || { rm -f "$paths_file"; return 1; }
+        seen_paths["$path"]=1
+        printf '%s\0%s\0%s\0%s\0' "$path" "$digest" "$size" "$mtime" >> "$paths_file" || { rm -f "$paths_file"; return 1; }
+    done
+    # The caller's persistent SSH lease owns this lock. Refuse standalone use,
+    # but do not acquire it here: doing so would deadlock a valid lease.
+    if ! sync_transfer_lock_is_held; then
+        rm -f "$paths_file"
+        echo "staging-publish: sync-transfer.lock non detenuto" >&2
+        return 1
+    fi
+    exec 9>"$JOURNAL_LOCK_FILE"
+    flock -x 9 || { exec 9>&-; rm -f "$paths_file"; return 1; }
+    ensure_journal_files
+    recover_pending_transactions_unlocked || { flock -u 9; exec 9>&-; rm -f "$paths_file"; return 1; }
+    # Check the full batch before exposing any file, so an ordinary collision
+    # leaves every staged file untouched.
+    for path in "${!seen_paths[@]}"; do
+        target="$SHARE_ROOT/$path"
+        [[ ! -e "$target" && ! -L "$target" ]] || { flock -u 9; exec 9>&-; rm -f "$paths_file"; return 1; }
+    done
+    begin_move_transaction PUBLISH "$txid" "$device" "$(date '+%s')" "" "$staging_dir" "" "$paths_file" || { flock -u 9; exec 9>&-; rm -f "$paths_file"; return 1; }
+    sync
+    test_failpoint "publish_after_marker"
+    if recover_publish_transaction_unlocked "$txfile" "$device" "$staging_dir" "$paths_file" "$txid"; then
+        rm -f "$txfile" "$paths_file"
+        printf 'STAGING_PUBLISH_V1\0OK\0%s\0' "$count"
+    else
+        # Leave marker and staged files in place; a later locked command will
+        # finish after a transient journal or filesystem failure.
+        flock -u 9; exec 9>&-
+        return 1
+    fi
+    flock -u 9
+    exec 9>&-
+}
+
 cmd_checked_delete() {
     command -v sha256sum >/dev/null 2>&1 || {
         echo "checked-delete: sha256sum non disponibile" >&2
@@ -868,7 +1043,7 @@ cmd_browse_list() {
     while IFS= read -r -d '' entry; do
         name="${entry##*/}"
         case "$name" in
-            "$TRASH_DIRNAME"|.sync-partial|"$REPOSITORY_MARKER_NAME"|@eaDir) continue ;;
+            "$TRASH_DIRNAME"|.sync-partial|"$STAGING_DIRNAME"|"$REPOSITORY_MARKER_NAME"|@eaDir) continue ;;
         esac
         names+=("$name")
     done < <(find "$target" -mindepth 1 -maxdepth 1 -print0 2>/dev/null)
@@ -1507,12 +1682,6 @@ cmd_transfer_wait() {
     [[ "$request_id" =~ ^[A-Za-z0-9._:-]{8,128}$ ]] || return 1
     [[ "$owner_host" =~ ^[A-Za-z0-9._:-]{1,128}$ ]] || owner_host="unknown"
 
-    exec 9>"$JOURNAL_LOCK_FILE"
-    flock -x 9 || { exec 9>&-; return 1; }
-    recover_pending_transactions_unlocked || { flock -u 9; exec 9>&-; return 1; }
-    flock -u 9
-    exec 9>&-
-
     mkdir -p "$TRANSFER_QUEUE_DIR" || return 1
     TRANSFER_ACTIVE_TICKET="$TRANSFER_QUEUE_DIR/$request_id.ticket"
     now=$(date '+%s')
@@ -1540,6 +1709,17 @@ cmd_transfer_wait() {
         if [[ "$queue_head" == "$TRANSFER_ACTIVE_TICKET" ]]; then
             exec 8>"$SYNC_LOCK_FILE" || { flock -u 7; exec 7>&-; return 1; }
             if flock -n 8; then
+                # Recovery of a staged publish may itself move files, so do it
+                # only after this SSH session owns the global transfer lease.
+                exec 9>"$JOURNAL_LOCK_FILE" || { flock -u 8; exec 8>&-; flock -u 7; exec 7>&-; return 1; }
+                if ! flock -x 9 || ! recover_pending_transactions_unlocked; then
+                    flock -u 9; exec 9>&-
+                    flock -u 8; exec 8>&-
+                    flock -u 7; exec 7>&-
+                    return 1
+                fi
+                flock -u 9
+                exec 9>&-
                 rm -f "$TRANSFER_ACTIVE_TICKET"
                 owner_payload="$device|$owner_host|$(date '+%s')|||0|0"
                 owner_tmp="${SYNC_LOCK_OWNER_FILE}.$$"
@@ -1761,7 +1941,8 @@ Uso:
   $(basename "$0") --manifest-export            Esporta il manifest corrente
   $(basename "$0") --manifest-get PATH          Legge lo stato di un percorso
   $(basename "$0") --file-states               Stato batch file/tombstone (input/output NUL)
-  $(basename "$0") --checked-delete            Cancella solo la baseline attesa (input/output NUL)
+   $(basename "$0") --checked-delete            Cancella solo la baseline attesa (input/output NUL)
+   $(basename "$0") --staging-publish           Pubblica nuovi file staged (input/output NUL, lock client richiesto)
   $(basename "$0") --journal-status             Stato e dimensione journal/manifest
   $(basename "$0") --history-list              Elenco NUL dello storico sul NAS (per il client)
   $(basename "$0") --diagnostics               Diagnostica KEY=VALUE del NAS (per il client)
@@ -1796,6 +1977,7 @@ while [[ $# -gt 0 ]]; do
         --file-states) ACTION="file_states" ;;
         --file-states-current) ACTION="file_states_current" ;;
         --checked-delete) ACTION="checked_delete" ;;
+        --staging-publish) ACTION="staging_publish" ;;
         --browse-list) shift; BROWSE_PATH="${1:-}"; ACTION="browse_list" ;;
         --browse-delete) ACTION="browse_delete" ;;
         --browse-rename) ACTION="browse_rename" ;;
@@ -1830,6 +2012,7 @@ case "$ACTION" in
     file_states) cmd_file_states; exit $? ;;
     file_states_current) cmd_file_states false; exit $? ;;
     checked_delete) cmd_checked_delete; exit $? ;;
+    staging_publish) cmd_staging_publish; exit $? ;;
     browse_list) cmd_browse_list "$BROWSE_PATH"; exit $? ;;
     browse_delete) cmd_browse_delete; exit $? ;;
     browse_rename) cmd_browse_rename; exit $? ;;
