@@ -692,6 +692,9 @@ STRINGS: dict[str, dict[str, str]] = {
     "history.source_remote_description": {"it": "Fonte: NAS. Versioni conservate dal server quando un file sul NAS viene sostituito o eliminato.", "en": "Source: NAS. Versions kept by the server when a NAS file is replaced or deleted."},
     "history.prune_local_btn": {"it": "Pulisci storico locale ora", "en": "Clean local history now"},
     "history.prune_local_tooltip": {"it": "Rimuove subito le versioni locali più vecchie della retention impostata.", "en": "Immediately removes local versions older than the retention set above."},
+    "history.prune_local_scanning": {"it": "Analisi dello storico locale in corso: {count} elementi controllati...", "en": "Scanning local history: {count} items checked..."},
+    "history.prune_local_deleting": {"it": "Pulizia dello storico locale: {current} di {total} versioni elaborate...", "en": "Cleaning local history: {current} of {total} versions processed..."},
+    "history.prune_local_dirs": {"it": "Rimozione delle cartelle vuote dello storico locale...", "en": "Removing empty local history folders..."},
     "history.prune_remote_btn": {"it": "Chiedi al NAS di pulire ora", "en": "Ask the NAS to clean now"},
     "history.prune_remote_tooltip": {
         "it": "Chiede al demone sul NAS di pulire subito lo storico remoto secondo la retention configurata sul NAS.",

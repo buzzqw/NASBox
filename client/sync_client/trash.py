@@ -19,6 +19,7 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Callable
 
 from . import paths, rsync_ops
 from .config import Config
@@ -64,13 +65,17 @@ def _parse_suffix(name: str) -> tuple[str, float] | None:
     return ts_str, epoch
 
 
-def list_local_versions() -> list[TrashVersion]:
+def list_local_versions(progress: Callable[[tuple[str, int, int]], None] | None = None) -> list[TrashVersion]:
     root = paths.local_trash_dir()
     if not root.exists():
         return []
     out: list[TrashVersion] = []
     now = time.time()
+    scanned = 0
     for file_path in root.rglob("*"):
+        scanned += 1
+        if progress is not None and scanned % 250 == 0:
+            progress(("scan", scanned, 0))
         if not file_path.is_file():
             continue
         parsed = _parse_suffix(file_path.name)
@@ -103,13 +108,21 @@ def _prune_empty_dirs(root: Path) -> None:
             pass
 
 
-def prune_local(cfg: Config, logger: EventLogger) -> int:
+def prune_local(
+    cfg: Config, logger: EventLogger,
+    progress: Callable[[tuple[str, int, int]], None] | None = None,
+) -> int:
     """Delete local trash versions older than retention_days_local. Returns count removed."""
     retention_days = float(cfg.get("retention_days_local") or 0)
     if retention_days <= 0:
         return 0
+    if progress is not None:
+        progress(("scan", 0, 0))
+    versions = list_local_versions(progress)
+    if progress is not None:
+        progress(("delete", 0, len(versions)))
     removed = 0
-    for version in list_local_versions():
+    for index, version in enumerate(versions, start=1):
         if version.age_days > retention_days:
             try:
                 version.trash_path.unlink()
@@ -120,6 +133,10 @@ def prune_local(cfg: Config, logger: EventLogger) -> int:
                 )
             except OSError as exc:
                 logger.log("ERROR", version.relative_path, detail=f"prune failed: {exc}")
+        if progress is not None and (index % 25 == 0 or index == len(versions)):
+            progress(("delete", index, len(versions)))
+    if progress is not None:
+        progress(("dirs", 0, 0))
     _prune_empty_dirs(paths.local_trash_dir())
     return removed
 

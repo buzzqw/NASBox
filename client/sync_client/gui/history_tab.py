@@ -58,10 +58,10 @@ class HistoryTab(QWidget):
         root.addWidget(self.source_description)
 
         action_row = QHBoxLayout()
-        prune_local_btn = QPushButton(t("history.prune_local_btn"))
-        prune_local_btn.setToolTip(t("history.prune_local_tooltip"))
-        prune_local_btn.clicked.connect(self._prune_local)
-        action_row.addWidget(prune_local_btn)
+        self.prune_local_btn = QPushButton(t("history.prune_local_btn"))
+        self.prune_local_btn.setToolTip(t("history.prune_local_tooltip"))
+        self.prune_local_btn.clicked.connect(self._prune_local)
+        action_row.addWidget(self.prune_local_btn)
 
         self.prune_remote_btn = QPushButton(t("history.prune_remote_btn"))
         self.prune_remote_btn.setToolTip(t("history.prune_remote_tooltip"))
@@ -69,6 +69,10 @@ class HistoryTab(QWidget):
         action_row.addWidget(self.prune_remote_btn)
         action_row.addStretch(1)
         root.addLayout(action_row)
+        self.prune_local_status = QLabel()
+        self.prune_local_status.setWordWrap(True)
+        self.prune_local_status.setVisible(False)
+        root.addWidget(self.prune_local_status)
 
         search_row = QHBoxLayout()
         search_row.addWidget(QLabel(t("history.search_label")))
@@ -125,6 +129,7 @@ class HistoryTab(QWidget):
         root.addLayout(buttons_row)
 
         self._versions: list[trash.TrashVersion | trash.RemoteTrashVersion] = []
+        self._prune_local_busy = False
         self._prune_remote_busy = False
         self.refresh()
 
@@ -227,8 +232,44 @@ class HistoryTab(QWidget):
         QMessageBox.information(self, t("history.saved_title"), t("history.saved_body"))
 
     def _prune_local(self) -> None:
-        removed = self.engine.prune_now()
-        self.refresh()
+        if self._prune_local_busy:
+            return
+        self._prune_local_busy = True
+        self.prune_local_btn.setEnabled(False)
+        self.prune_local_status.setText(t("history.prune_local_scanning", count=0))
+        self.prune_local_status.setVisible(True)
+
+        def prune_and_list(progress):
+            removed = trash.prune_local(self.cfg, self.logger, progress)
+            return removed, trash.list_local_versions(progress)
+
+        run_in_background(
+            self, "_prune_local_call",
+            prune_and_list,
+            self._on_prune_local_done,
+            self._on_prune_local_progress,
+        )
+
+    def _on_prune_local_progress(self, update) -> None:
+        stage, current, total = update
+        if stage == "scan":
+            self.prune_local_status.setText(t("history.prune_local_scanning", count=current))
+        elif stage == "delete":
+            self.prune_local_status.setText(t("history.prune_local_deleting", current=current, total=total))
+        else:
+            self.prune_local_status.setText(t("history.prune_local_dirs"))
+
+    def _on_prune_local_done(self, result, exc: Exception | None) -> None:
+        self._prune_local_busy = False
+        self.prune_local_btn.setEnabled(True)
+        self.prune_local_status.setVisible(False)
+        if exc is not None:
+            QMessageBox.warning(self, t("history.prune_local_title"), str(exc))
+            return
+        removed, versions = result
+        if not self._showing_remote:
+            self._versions = versions
+            self._apply_filter()
         if removed == 0:
             # Not an error -- prune_local only ever removes versions OLDER
             # than retention_days_local, on purpose (retention is a safety

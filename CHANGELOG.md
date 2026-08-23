@@ -4,6 +4,12 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 1.19.4 - 2026-08-23
+
+- La pulizia dello storico locale ora viene eseguita in background: la finestra
+  resta utilizzabile e mostra avanzamento durante scansione, cancellazioni e
+  rimozione delle directory vuote.
+
 ## 1.19.3 - 2026-08-23
 
 - Un percorso assente adottato dopo una cancellazione Browse non viene piu

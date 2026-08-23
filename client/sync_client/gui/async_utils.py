@@ -22,6 +22,7 @@ class BackgroundCall(QThread):
     # forwarded rather than swallowed so the caller decides how to surface
     # them (this thread has no widgets of its own to show anything with).
     done = pyqtSignal(object, object)
+    progress = pyqtSignal(object)
 
     def __init__(self, fn: Callable[[], Any], parent=None) -> None:
         super().__init__(parent)
@@ -37,14 +38,23 @@ class BackgroundCall(QThread):
 
 
 def run_in_background(
-    owner: Any, attr: str, fn: Callable[[], Any], on_done: Callable[[Any, Optional[Exception]], None],
+    owner: Any, attr: str, fn: Callable[..., Any], on_done: Callable[[Any, Optional[Exception]], None],
+    on_progress: Optional[Callable[[Any], None]] = None,
 ) -> None:
     """Starts fn() on a BackgroundCall, keeping the thread alive as owner.<attr>
     (a bare local variable would let Python garbage-collect the QThread out
     from under itself the moment this function returns). Call this from a
     button handler; do the actual widget updates in on_done, which always
     runs back on the GUI thread."""
-    call = BackgroundCall(fn, parent=owner)
+    # The closure runs only after ``call`` has been assigned, so workers can
+    # report progress through a queued Qt signal without touching widgets.
+    call: BackgroundCall
+    call = BackgroundCall(
+        lambda: fn(call.progress.emit) if on_progress is not None else fn(),
+        parent=owner,
+    )
     setattr(owner, attr, call)
     call.done.connect(on_done)
+    if on_progress is not None:
+        call.progress.connect(on_progress)
     call.start()
