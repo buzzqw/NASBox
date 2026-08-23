@@ -19,6 +19,7 @@ import os
 import hashlib
 import fnmatch
 import re
+import selectors
 import shlex
 import socket
 import subprocess
@@ -60,7 +61,7 @@ DELETE_FLAG = "--delete-after"
 # Bump this whenever the client starts relying on a new --print-config field or
 # server-side capability, so an outdated NAS package gets flagged instead of
 # silently misbehaving.
-EXPECTED_SERVER_VERSION = "3.13.1"
+EXPECTED_SERVER_VERSION = "3.13.2"
 _SERVER_UPDATE_NAME_RE = re.compile(r"^sync-daemon-server-([0-9]+(?:\.[0-9]+)+)\.sh$")
 
 
@@ -200,6 +201,29 @@ class RemoteLock:
         self.owner_id = owner_id
         self.priority = priority
         self.proc: subprocess.Popen | None = None
+        self._stdout_buffer = bytearray()
+
+    def _read_stdout_line(self, timeout: float) -> bytes:
+        """Read one protocol line without allowing TextIO buffering to block."""
+        assert self.proc is not None and self.proc.stdout is not None
+        deadline = time.monotonic() + max(0, timeout)
+        while True:
+            newline = self._stdout_buffer.find(b"\n")
+            if newline >= 0:
+                line = bytes(self._stdout_buffer[:newline])
+                del self._stdout_buffer[:newline + 1]
+                return line
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise subprocess.TimeoutExpired(self.proc.args, timeout)
+            with selectors.DefaultSelector() as selector:
+                selector.register(self.proc.stdout, selectors.EVENT_READ)
+                if not selector.select(remaining):
+                    raise subprocess.TimeoutExpired(self.proc.args, timeout)
+            chunk = os.read(self.proc.stdout.fileno(), 4096)
+            if not chunk:
+                return bytes(self._stdout_buffer)
+            self._stdout_buffer.extend(chunk)
 
     def __enter__(self) -> "RemoteLock":
         lock_file = (self.cfg.get("server_lock_file_remote") or "").strip()
@@ -234,25 +258,36 @@ class RemoteLock:
         try:
             self.proc = subprocess.Popen(
                 ["ssh", *ssh_opts(self.cfg, self.conn), f"{user}@{self.conn.host}", remote_cmd],
-                stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             )
             if self.on_start:
                 self.on_start(self.proc)
             if scheduler_mode:
                 assert self.proc.stdin is not None
                 self.proc.stdin.write(
-                    "TRANSFER_WAIT_V1\0%s\0%d\0%s\0%s\0"
-                    % (owner, self.priority, uuid.uuid4().hex, hostname)
+                    (
+                        "TRANSFER_WAIT_V1\0%s\0%d\0%s\0%s\0"
+                        % (owner, self.priority, uuid.uuid4().hex, hostname)
+                    ).encode()
                 )
                 self.proc.stdin.flush()
-            assert self.proc.stdout is not None
-            response = self.proc.stdout.readline().strip()
+            try:
+                response = self._read_stdout_line(self.timeout).decode(errors="replace").strip()
+            except subprocess.TimeoutExpired as exc:
+                # A queued scheduler request does not read stdin until it owns
+                # the lease. Terminate SSH so the remote shell receives HUP and
+                # runs its EXIT trap, removing the ticket instead of leaving a
+                # ghost waiter.
+                self.release(abort=True)
+                if scheduler_mode:
+                    raise RemoteLockBusy("tempo massimo di attesa del lock NAS superato") from exc
+                raise RemoteLockError(f"impossibile acquisire il lock remoto: {exc}") from exc
             if response == "NASBOX_LOCKED":
                 return self
             owner_id = owner_host = ""
             started_at = 0
             if response == "NASBOX_LOCK_BUSY":
-                owner_line = self.proc.stdout.readline().strip()
+                owner_line = self._read_stdout_line(5).decode(errors="replace").strip()
                 owner_id, separator, remainder = owner_line.partition("|")
                 if separator:
                     owner_host, separator, started = remainder.partition("|")
@@ -261,7 +296,7 @@ class RemoteLock:
                     except ValueError:
                         started_at = 0
             _stdout, stderr = self.proc.communicate(timeout=5)
-            detail = _clean_ssh_stderr(stderr)
+            detail = _clean_ssh_stderr(stderr.decode(errors="replace"))
             if self.proc.returncode == REMOTE_LOCK_BUSY_EXIT_CODE:
                 error = RemoteLockBusy(
                     "lock occupato da un altro client", owner_id, owner_host, started_at,
@@ -272,17 +307,19 @@ class RemoteLock:
                 raise RemoteLockError("risposta inattesa durante l'acquisizione del lock remoto")
             raise RemoteLockError(detail)
         except (OSError, subprocess.TimeoutExpired) as exc:
-            self.release()
+            self.release(abort=True)
             raise RemoteLockError(f"impossibile acquisire il lock remoto: {exc}") from exc
 
-    def release(self) -> None:
+    def release(self, *, abort: bool = False) -> None:
         proc, self.proc = self.proc, None
         if proc is None:
             return
         try:
             if proc.stdin is not None:
                 proc.stdin.close()
-            proc.wait(timeout=10)
+            if abort:
+                proc.terminate()
+            proc.wait(timeout=5 if abort else 10)
         except (OSError, subprocess.TimeoutExpired):
             try:
                 proc.terminate()
@@ -710,7 +747,7 @@ def checked_delete_remote(
     cfg: Config, conn: NasConnection,
     requests: list[tuple[str, str, int]], run_ts: str, device_id: str,
 ) -> CheckedDeleteResult:
-    """Delete only files that still match the client's common baseline."""
+    """Delete only files that still match the live fingerprint just observed."""
     if not requests:
         return CheckedDeleteResult(True, [], set(), set())
     script_path = (cfg.get("remote_server_script") or "").strip()

@@ -114,10 +114,10 @@ def plan_path(
     if local_absent:
         if remote.kind in (RemoteKind.ABSENT, RemoteKind.TOMBSTONE):
             return Decision(Action.ADOPT)
-        remote_is_base = (
-            remote.digest == baseline.digest
-            and remote.mtime_ns // 1_000_000_000 == baseline.mtime_ns // 1_000_000_000
-        )
+        # Content identity is the deletion baseline. A timestamp-only NAS
+        # change must not turn a local deletion into an endless remote-wins
+        # retry; the observed live fingerprint remains the delete TOCTOU guard.
+        remote_is_base = remote.digest == baseline.digest
         if delete_enabled and remote_is_base:
             return Decision(Action.DELETE_REMOTE)
         if not delete_enabled:

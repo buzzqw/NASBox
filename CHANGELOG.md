@@ -4,6 +4,18 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 1.19.2 - 2026-08-23
+
+- Il pruning NAS non mantiene piu il lock dei trasferimenti durante la scansione
+  dello storico: Browse e sincronizzazioni restano disponibili anche con uno
+  storico molto grande.
+- Le richieste in coda per il lock NAS scadono correttamente invece di restare
+  bloccate senza limite; il relativo ticket viene rimosso alla chiusura SSH.
+- Una cancellazione locale puo eliminare dal NAS contenuti identici al baseline
+  anche se il timestamp NAS differisce; le divergenze di contenuto restano
+  protette. Le cancellazioni rifiutate dal NAS non vengono piu ritentate in
+  ciclo continuo.
+
 ## 1.19.1 - 2026-08-23
 
 - I mirror rifiutano destinazioni pericolose e symlink che puntano fuori dalla

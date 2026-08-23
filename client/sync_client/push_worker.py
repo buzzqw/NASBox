@@ -335,12 +335,19 @@ class PushWorker(TransferWorker):
                 return False, 0, False
             chunk_run_ts = rsync_ops.new_run_ts()
             self._conflict_journal_items = []
-            upload_paths, delete_requests, adopted_paths = self._build_plan(
+            upload_paths, delete_requests, adopted_paths, remote_wins_paths = self._build_plan(
                 chunk_set,
                 remote_progress_offset=remote_progress_done,
                 remote_progress_total=remote_progress_total,
                 compact_remote_manifest=chunk_index == 0,
             )
+            # The live NAS state has authoritatively won over this now-missing
+            # local file. Persist that local deletion as a tombstone as well as
+            # clearing the pending entry: changed_paths() then stops rediscovering
+            # the same absence on every fallback scan, while PullWorker still sees
+            # the remote file as a change to converge.
+            self.sync_state.record_fingerprints({path: None for path in remote_wins_paths})
+            self.sync_state.clear_pending(remote_wins_paths)
             if deletes_committed + len(delete_requests) > max_deletes:
                 return False, 0, True
 
@@ -504,9 +511,9 @@ class PushWorker(TransferWorker):
         self, relative_paths: set[str],
         remote_progress_offset: int = 0, remote_progress_total: int = 0,
         compact_remote_manifest: bool = True,
-    ) -> tuple[set[str], list[tuple[str, str, int]], set[str]]:
+    ) -> tuple[set[str], list[tuple[str, str, int]], set[str], set[str]]:
         if not relative_paths:
-            return set(), [], set()
+            return set(), [], set(), set()
         remote_progress = None
         if remote_progress_total:
             self._on_hash_progress(remote_progress_offset, remote_progress_total)
@@ -523,6 +530,7 @@ class PushWorker(TransferWorker):
         uploads: set[str] = set()
         deletes: list[tuple[str, str, int]] = []
         adopted: set[str] = set()
+        remote_wins: set[str] = set()
         for relative_path in sorted(relative_paths):
             local_fp = self.sync_state.fingerprint(Path(self.cfg.local_root(), relative_path))
             baseline = self.sync_state.get(relative_path)
@@ -534,8 +542,10 @@ class PushWorker(TransferWorker):
             if decision.action == Action.UPLOAD:
                 uploads.add(relative_path)
             elif decision.action == Action.DELETE_REMOTE:
-                assert baseline is not None and not baseline.is_tombstone
-                deletes.append((relative_path, baseline.digest, baseline.mtime_ns // 1_000_000_000))
+                # Precondition deletion on the exact live state just observed,
+                # not its older common baseline. This permits mtime-only NAS
+                # changes while rejecting a concurrent content replacement.
+                deletes.append((relative_path, remote.digest, remote.mtime_ns // 1_000_000_000))
             elif decision.action == Action.ADOPT:
                 adopted.add(relative_path)
             elif decision.action == Action.CONFLICT_LOCAL_WINS:
@@ -558,9 +568,10 @@ class PushWorker(TransferWorker):
             elif decision.action == Action.REMOTE_WINS:
                 if local_fp is None and baseline is not None and not baseline.is_tombstone:
                     self._log("STALE_DELETE", relative_path, decision.detail)
+                    remote_wins.add(relative_path)
             elif decision.action == Action.BLOCK:
                 raise rsync_ops.RemoteLockError(f"{relative_path}: {decision.detail}")
-        return uploads, deletes, adopted
+        return uploads, deletes, adopted, remote_wins
 
     def _set_current_process(self, proc) -> None:
         # The SSH session holding the NAS lock must be interruptible on exit,

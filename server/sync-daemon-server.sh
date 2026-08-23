@@ -30,7 +30,7 @@
 #
 set -uo pipefail
 
-VERSION="3.13.1"
+VERSION="3.13.2"
 SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -1185,49 +1185,73 @@ cmd_init_repository() {
     echo "Repository NASBox inizializzato (ID $id)."
 }
 
-prune_root() {
-    local trash="$1"
-    [[ -d "$trash" ]] || return 0
-
-    if [[ "$RETENTION_DAYS" == "0" ]]; then
-        return 0
-    fi
-
-    local now retention_seconds processed=0
+collect_prune_candidates() {
+    local trash="$1" candidates="$2"
+    local now retention_seconds processed=0 file epoch age_seconds
     now=$(date '+%s')
     retention_seconds=$(( RETENTION_DAYS * 86400 ))
 
-    find "$trash" -type f -print0 2>/dev/null | while IFS= read -r -d '' file; do
-        local epoch
+    # This metadata walk can take minutes on a large trash directory. It must
+    # remain outside SYNC_LOCK_FILE; paths are checked again before deletion.
+    while IFS= read -r -d '' file; do
         epoch="$(file_epoch "$file")"
         [[ -z "$epoch" ]] && continue
-        local age_seconds=$(( now - epoch ))
+        age_seconds=$(( now - epoch ))
         if (( age_seconds > retention_seconds )); then
-            local rel="${file#"$trash"/}"
-            local age_display
-            age_display="$(format_age_days "$age_seconds")"
-            if [[ "$DRY_RUN" == "true" ]]; then
-                log INFO "[dry-run] rimuoverei versione: $rel (età ${age_display}gg > retention ${RETENTION_DAYS}gg)"
-            else
-                if rm -f "$file"; then
-                    log INFO "Rimossa versione storica: $rel (età ${age_display}gg > retention ${RETENTION_DAYS}gg)"
-                    log_event "PRUNE_REMOTE_TRASH" "$rel" "age=${age_display}d retention=${RETENTION_DAYS}d"
-                else
-                    log ERROR "Impossibile rimuovere versione storica: $rel"
-                fi
-            fi
+            printf '%s\0' "$file" >> "$candidates"
             (( processed++ ))
             if (( processed >= PRUNE_MAX_FILES_PER_PASS )); then
                 log INFO "Pass di pruning limitato a $PRUNE_MAX_FILES_PER_PASS versioni; continuera' al prossimo intervallo."
                 break
             fi
         fi
-    done
+    done < <(find "$trash" -type f -print0 2>/dev/null)
+}
 
-    # tidy up now-empty subdirectories left behind (but keep trash_dir itself)
-    find "$trash" -mindepth 1 -type d -empty -delete 2>/dev/null || true
+prune_candidates() {
+    local trash="$1" candidates="$2"
+    local now retention_seconds file epoch age_seconds rel age_display
+    now=$(date '+%s')
+    retention_seconds=$(( RETENTION_DAYS * 86400 ))
 
-    return 0
+    while IFS= read -r -d '' file; do
+        # The unlocked scan may have raced a transfer; only remove a candidate
+        # that is still old while this shared lock excludes transfers.
+        [[ -f "$file" ]] || continue
+        epoch="$(file_epoch "$file")"
+        [[ -n "$epoch" ]] || continue
+        age_seconds=$(( now - epoch ))
+        (( age_seconds > retention_seconds )) || continue
+        rel="${file#"$trash"/}"
+        age_display="$(format_age_days "$age_seconds")"
+        if [[ "$DRY_RUN" == "true" ]]; then
+            log INFO "[dry-run] rimuoverei versione: $rel (età ${age_display}gg > retention ${RETENTION_DAYS}gg)"
+        elif rm -f "$file"; then
+            log INFO "Rimossa versione storica: $rel (età ${age_display}gg > retention ${RETENTION_DAYS}gg)"
+            log_event "PRUNE_REMOTE_TRASH" "$rel" "age=${age_display}d retention=${RETENTION_DAYS}d"
+        else
+            log ERROR "Impossibile rimuovere versione storica: $rel"
+        fi
+    done < "$candidates"
+}
+
+collect_empty_dirs() {
+    local trash="$1" candidates="$2"
+    local processed=0 directory
+    # As above, scan outside the transfer lock; rmdir is performed only after
+    # reacquiring it and succeeds only if the directory is still empty.
+    while IFS= read -r -d '' directory; do
+        printf '%s\0' "$directory" >> "$candidates"
+        (( processed++ ))
+        (( processed >= PRUNE_MAX_FILES_PER_PASS )) && break
+    done < <(find "$trash" -mindepth 1 -depth -type d -empty -print0 2>/dev/null)
+}
+
+remove_empty_dirs() {
+    local candidates="$1" directory
+    while IFS= read -r -d '' directory; do
+        rmdir "$directory" 2>/dev/null || true
+    done < "$candidates"
 }
 
 run_once_pass() {
@@ -1235,27 +1259,44 @@ run_once_pass() {
         log ERROR "Impossibile eseguire il pruning: flock non disponibile."
         return 1
     }
-    # Retention touches the same .sync-trash that rsync uses for backups. Do not
-    # prune while a client owns the transaction lock; a live transfer is never
-    # stale merely because it is long-running.
-    exec 8>"$SYNC_LOCK_FILE" || return 1
-    if ! flock -n 8; then
-        log INFO "Pass di pruning rimandato: trasferimento NASBox in corso."
-        exec 8>&-
-        return 0
-    fi
     log INFO "sync-daemon-server v$VERSION: avvio pass di pruning (SHARE_ROOT=$SHARE_ROOT, retention=${RETENTION_DAYS}gg, dry-run=$DRY_RUN)"
-    local trash
+    local trash file_candidates dir_candidates
     trash="$(trash_dir)"
     if [[ -d "$trash" ]]; then
-        prune_root "$trash"
+        if [[ "$RETENTION_DAYS" != "0" ]]; then
+            file_candidates="$(mktemp "$STATE_DIR/prune-files.XXXXXX")" || return 1
+            collect_prune_candidates "$trash" "$file_candidates"
+            if [[ -s "$file_candidates" ]]; then
+                exec 8>"$SYNC_LOCK_FILE" || { rm -f "$file_candidates"; return 1; }
+                if flock -n 8; then
+                    prune_candidates "$trash" "$file_candidates"
+                    flock -u 8
+                else
+                    log INFO "Pruning rimandato: trasferimento NASBox in corso."
+                fi
+                exec 8>&-
+            fi
+            rm -f "$file_candidates"
+
+            dir_candidates="$(mktemp "$STATE_DIR/prune-dirs.XXXXXX")" || return 1
+            collect_empty_dirs "$trash" "$dir_candidates"
+            if [[ -s "$dir_candidates" ]]; then
+                exec 8>"$SYNC_LOCK_FILE" || { rm -f "$dir_candidates"; return 1; }
+                if flock -n 8; then
+                    remove_empty_dirs "$dir_candidates"
+                    flock -u 8
+                else
+                    log INFO "Pulizia cartelle storiche rimandata: trasferimento NASBox in corso."
+                fi
+                exec 8>&-
+            fi
+            rm -f "$dir_candidates"
+        fi
     else
         log INFO "Nessuno storico ancora presente ($trash non esiste)."
     fi
     date '+%s' > "$STAMP_FILE"
     log INFO "Pass completato."
-    flock -u 8
-    exec 8>&-
 }
 
 # --- daemon loop ---
