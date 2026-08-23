@@ -45,6 +45,13 @@ TICK_SECONDS = 1
 # is what made this look frozen for tens of minutes with zero feedback.
 PUSH_CHUNK_SIZE = 100
 
+# A path with no live local baseline can only be a new upload or an out-of-band
+# NAS change. New uploads use the non-overwriting staging protocol, so they can
+# be grouped more aggressively without making an existing-path transfer hold
+# the lease for longer. If the NAS reports an existing path, _run_chunk falls
+# back to PUSH_CHUNK_SIZE before taking the conservative direct path.
+STAGING_CHUNK_SIZE = 500
+
 # How often (seconds) the local-hashing-phase progress signal is allowed to
 # fire -- hashing a huge batch can touch thousands of files, and a Qt signal
 # crossing threads for every single one would flood the GUI event queue for
@@ -248,7 +255,17 @@ class PushWorker(TransferWorker):
                     max_deletes = 1000
 
                 ordered_paths = sorted(resolved_paths)
-                chunks = list(_chunked(ordered_paths, PUSH_CHUNK_SIZE)) if ordered_paths else [[]]
+                staging_candidates = [
+                    path for path in ordered_paths if self._is_staging_candidate(path)
+                ]
+                staging_candidate_set = set(staging_candidates)
+                conservative_paths = [
+                    path for path in ordered_paths if path not in staging_candidate_set
+                ]
+                chunks = [
+                    *_chunked(staging_candidates, STAGING_CHUNK_SIZE),
+                    *_chunked(conservative_paths, PUSH_CHUNK_SIZE),
+                ] if ordered_paths else [[]]
                 has_work = bool(ordered_paths)
                 if has_work:
                     self.batch_size_known.emit(len(ordered_paths))
@@ -330,6 +347,7 @@ class PushWorker(TransferWorker):
     def _run_chunk(
         self, chunk_index: int, chunk_paths: list[str], remote_progress_done: int,
         remote_progress_total: int, max_deletes: int, deletes_committed: int, watcher,
+        *, allow_large_staging: bool = True,
     ) -> tuple[bool, int, bool]:
         """Process one chunk under a short-lived NAS lock.
 
@@ -344,6 +362,22 @@ class PushWorker(TransferWorker):
         )
         if staged_result is not None:
             return staged_result
+        if allow_large_staging and len(chunk_set) > PUSH_CHUNK_SIZE:
+            # An apparently new path exists on the NAS after all. Rebuild the
+            # conservative plan in small chunks, so an out-of-band edit cannot
+            # turn a large staging batch into a long lease holder.
+            deleted_count = 0
+            for offset, fallback_paths in enumerate(_chunked(sorted(chunk_set), PUSH_CHUNK_SIZE)):
+                ok, deleted, delete_limit_hit = self._run_chunk(
+                    chunk_index, fallback_paths,
+                    remote_progress_done + offset * PUSH_CHUNK_SIZE,
+                    remote_progress_total, max_deletes, deletes_committed + deleted_count,
+                    watcher, allow_large_staging=False,
+                )
+                deleted_count += deleted
+                if not ok or delete_limit_hit:
+                    return ok, deleted_count, delete_limit_hit
+            return True, deleted_count, False
         self.transfer_waiting_for_lock.emit("upload")
         with rsync_ops.remote_lock(
             self.cfg, self._conn, on_start=self._set_current_process,
@@ -613,6 +647,11 @@ class PushWorker(TransferWorker):
         except OSError:
             return 0
         return info.st_size if stat.S_ISREG(info.st_mode) else 0
+
+    def _is_staging_candidate(self, relative_path: str) -> bool:
+        local = self.sync_state.fingerprint(Path(self.cfg.local_root(), relative_path))
+        baseline = self.sync_state.get(relative_path)
+        return local is not None and (baseline is None or baseline.is_tombstone)
 
     def _build_plan(
         self, relative_paths: set[str],

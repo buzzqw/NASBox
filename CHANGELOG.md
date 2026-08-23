@@ -4,6 +4,13 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 1.21.3 - 2026-08-23
+
+- I batch di soli file nuovi usano fino a 500 percorsi per ciclo staging,
+  riducendo le connessioni SSH e il preflight ripetuto durante le importazioni
+  grandi. Percorsi gia presenti o non previsti mantengono blocchi conservativi
+  da 100 file.
+
 ## 1.21.2 - 2026-08-23
 
 - All'avvio o dopo la ricreazione del watcher, una cartella locale non vuota
