@@ -44,6 +44,7 @@ class ScanWorker(QThread):
         transfer_lock: threading.Lock | None = None,
         watchers: WatcherHandle | None = None,
         lock_coordinator: LockCoordinator | None = None,
+        push_requested: threading.Event | None = None,
     ) -> None:
         super().__init__()
         self.cfg = cfg
@@ -56,6 +57,7 @@ class ScanWorker(QThread):
         self.transfer_lock = transfer_lock
         self.watchers = watchers
         self.lock_coordinator = lock_coordinator or LockCoordinator()
+        self.push_requested = push_requested
         self._manifest_revision = -1
         self._manifest_entries: dict[str, rsync_ops.RemoteState] | None = None
 
@@ -113,6 +115,18 @@ class ScanWorker(QThread):
         if self._conn is None or not self.cfg.is_configured():
             return  # nothing to preview until a connection is resolved and the folder is set up
         if not self.lock_coordinator.can_attempt():
+            return
+        watcher = self.watchers.get() if self.watchers is not None else None
+        if (
+            (self.push_requested is not None and self.push_requested.is_set())
+            or
+            (watcher is not None and watcher.is_dirty())
+            or (self.sync_state is not None and self.sync_state.has_pending())
+        ):
+            # A preview can hash thousands of local paths. Never let it acquire
+            # the shared gate ahead of a real push: the latter makes the queue
+            # durable and clears the dirty marker, after which this preview can
+            # safely refresh from the committed state.
             return
         if self._transfer_active is not None and self._transfer_active.is_set():
             return  # never compete with a real transfer for NAS/CPU/IO

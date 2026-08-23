@@ -4,6 +4,15 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 1.21.4 - 2026-08-23
+
+- La preview non puo piu precedere un push locale: una richiesta di sync, una
+  modifica rilevata o una coda durevole sospendono il dry-run finche il batch
+  reale non e stato elaborato.
+- Le scansioni complete salvano i percorsi risolti nella coda durevole; dopo un
+  riavvio la preview e il push non possono piu divergere mostrando upload non
+  effettivamente pianificati.
+
 ## 1.21.3 - 2026-08-23
 
 - I batch di soli file nuovi usano fino a 500 percorsi per ciclo staging,

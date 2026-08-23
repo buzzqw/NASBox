@@ -61,6 +61,7 @@ class MainWindow(QMainWindow):
         watchers = WatcherHandle()
         transfer_scheduler = TransferScheduler()
         transfer_active = threading.Event()
+        push_requested = threading.Event()
         lock_coordinator = LockCoordinator()
         sync_state = SyncStateStore(self.cfg)
         self.sync_state = sync_state
@@ -69,11 +70,13 @@ class MainWindow(QMainWindow):
             transfer_lock=transfer_scheduler.permit("preview"),
             watchers=watchers,
             lock_coordinator=lock_coordinator,
+            push_requested=push_requested,
         )
         self.push_worker = PushWorker(
             self.cfg, self.logger, watchers, transfer_scheduler.permit("push"), sync_state,
             scan_worker=self.scan_worker, transfer_active=transfer_active,
             lock_coordinator=lock_coordinator,
+            force_sync=push_requested,
         )
         self.pull_worker = PullWorker(
             self.cfg, self.logger, watchers, transfer_scheduler.permit("pull"), sync_state,
@@ -208,9 +211,9 @@ class MainWindow(QMainWindow):
         self.tray.show()
 
         self.engine.start()
-        self.scan_worker.start()
         self.push_worker.start()
         self.pull_worker.start()
+        self.scan_worker.start()
         self.mirror_manager.start()
 
     def _open_status_action(self, action: str) -> None:

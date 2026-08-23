@@ -85,6 +85,7 @@ class PushWorker(TransferWorker):
         scan_worker: ScanWorker | None = None,
         transfer_active: threading.Event | None = None,
         lock_coordinator: LockCoordinator | None = None,
+        force_sync: threading.Event | None = None,
     ) -> None:
         super().__init__(cfg, logger, transfer_active=transfer_active)
         self.watchers = watchers
@@ -93,7 +94,7 @@ class PushWorker(TransferWorker):
         self._scan_worker = scan_worker
         self.lock_coordinator = lock_coordinator or LockCoordinator()
         self._wake = threading.Event()
-        self._force_sync = threading.Event()
+        self._force_sync = force_sync or threading.Event()
         self._last_hash_progress_emit = 0.0
         self._conflict_journal_items: list[rsync_ops.TransferItem] = []
         self._staging_upload_paths: set[str] = set()
@@ -147,6 +148,7 @@ class PushWorker(TransferWorker):
                 return  # preserve known local changes once their debounce has elapsed
         else:
             dirty_paths = set()
+        full_sweep = "" in dirty_paths or self._force_sync.is_set()
         try:
             pending_paths = set(self.sync_state.pending_paths())
         except (AttributeError, TypeError):
@@ -157,18 +159,31 @@ class PushWorker(TransferWorker):
             return
         if dirty_paths:
             if "" in dirty_paths:
+                # Keep the full-sweep sentinel durable while changed_paths()
+                # walks the tree. Otherwise ScanWorker can claim the scheduler
+                # in this gap and delay the real push behind its own preview.
+                self.sync_state.mark_pending({""})
                 dirty_paths = self.sync_state.changed_paths(self.cfg.local_root())
             dirty_paths = {
                 path for path in dirty_paths
                 if path and not rsync_ops.path_is_excluded(self.cfg, path)
             }
-            self.sync_state.mark_pending(dirty_paths)
+            if dirty_paths:
+                self.sync_state.mark_pending(dirty_paths)
 
         # Resolve local paths before any NAS preflight. Watchers also report
         # directory-only events (notably Git maintenance under a synced
         # checkout). They are not transfer items, but must not remain in the
         # durable queue and retrigger a lock attempt every tick.
         resolved_paths = self._resolve_paths(dirty_paths, force_sync)
+        # A full watcher sweep starts with the empty-path sentinel. Persist the
+        # real paths only after resolving that sentinel: otherwise a restart can
+        # retain an empty durable queue while the preview still shows thousands
+        # of uploads, leaving no reliable retry trigger.
+        if resolved_paths:
+            self.sync_state.mark_pending(resolved_paths)
+        if "" in pending_paths or full_sweep:
+            self.sync_state.clear_pending({""})
         stale_pending: set[str] = set()
         for path in pending_paths - resolved_paths:
             if rsync_ops.path_is_excluded(self.cfg, path):
