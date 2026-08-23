@@ -398,7 +398,14 @@ class PushWorker(TransferWorker):
             # the manifest recovers instead of silently retaining a blind spot.
             # Conflict copies are also real NAS writes and must be visible there.
             journal_items = [item for item in chunk_result.items if item.direction == "upload"]
-            journal_items.extend(rsync_ops.TransferItem("upload", path) for path in sorted(adopted_paths))
+            # Only an adopted local file can be an upload that completed before
+            # its journal write. An absent local path adopted from a NAS tombstone
+            # must update the local baseline, not be falsely journaled as upload.
+            journal_items.extend(
+                rsync_ops.TransferItem("upload", path)
+                for path in sorted(adopted_paths)
+                if self.sync_state.fingerprint(Path(self.cfg.local_root(), path)) is not None
+            )
             journal_items.extend(self._conflict_journal_items)
             remote_only_paths = {item.path for item in self._conflict_journal_items}
             authoritative = self._authoritative_fingerprints(

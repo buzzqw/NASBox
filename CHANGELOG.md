@@ -4,6 +4,12 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 1.19.3 - 2026-08-23
+
+- Un percorso assente adottato dopo una cancellazione Browse non viene piu
+  interpretato come un upload da registrare, evitando retry ed errori di
+  journalizzazione dopo una rimozione remota.
+
 ## 1.19.2 - 2026-08-23
 
 - Il pruning NAS non mantiene piu il lock dei trasferimenti durante la scansione
