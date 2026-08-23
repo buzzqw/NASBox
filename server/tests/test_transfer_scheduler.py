@@ -86,6 +86,46 @@ class TransferSchedulerTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(len(list(trash.glob("version-*.txt"))), 599)
 
+    def test_lease_activity_is_visible_without_releasing_the_lock(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            sandbox = Path(directory)
+            share = sandbox / "share"
+            share.mkdir()
+            script = sandbox / "server.sh"
+            script.write_bytes(SCRIPT.read_bytes())
+            script.chmod(0o755)
+            config = sandbox / "server.conf"
+            config.write_text(f"SHARE_ROOT={share}\nRETENTION_DAYS=30\n")
+            lease = subprocess.Popen(
+                [str(script), "-c", str(config), "--transfer-wait"],
+                stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            )
+            try:
+                assert lease.stdin is not None and lease.stdout is not None
+                lease.stdin.write(b"TRANSFER_WAIT_V1\0device-a\0" b"0\0request-a-123456\0host-a\0")
+                lease.stdin.flush()
+                self.assertEqual(lease.stdout.readline(), b"NASBOX_LOCKED\n")
+                lease.stdin.write(b"ACTIVITY_V1\0transferring\0" b"12\0" b"3000\0")
+                lease.stdin.flush()
+
+                status = subprocess.run(
+                    [str(script), "-c", str(config), "--print-config"],
+                    capture_output=True, text=True, timeout=5,
+                )
+                self.assertEqual(status.returncode, 0, status.stderr)
+                self.assertIn("SYNC_LOCK_HELD=true", status.stdout)
+                self.assertIn("SYNC_LOCK_PHASE=transferring", status.stdout)
+                self.assertIn("SYNC_LOCK_PROGRESS_DONE=12", status.stdout)
+                self.assertIn("SYNC_LOCK_PROGRESS_TOTAL=3000", status.stdout)
+            finally:
+                if lease.stdin is not None:
+                    lease.stdin.close()
+                lease.wait(timeout=5)
+                if lease.stdout is not None:
+                    lease.stdout.close()
+                if lease.stderr is not None:
+                    lease.stderr.close()
+
     def test_priority_ticket_waits_for_current_lease(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             sandbox = Path(directory)

@@ -168,7 +168,7 @@ class PullWorker(TransferWorker):
                 with rsync_ops.remote_lock(
                     self.cfg, self._conn, on_start=self._set_current_process,
                     owner_id=self.sync_state.device_id(), priority=1,
-                ):
+                ) as lock:
                     self.lock_coordinator.acquired()
                     if self._stop_flag.is_set():
                         self.transfer_finished.emit("download", False)
@@ -182,6 +182,8 @@ class PullWorker(TransferWorker):
                         self._last_pull = now
                         return
                     self.cfg.set("journal_error", "")
+                    self.transfer_phase.emit("download", "checking", 0, 0)
+                    lock.set_activity("checking")
                     try:
                         rsync_ops.validate_transfer_safety(
                             self.cfg, self._conn,
@@ -280,6 +282,8 @@ class PullWorker(TransferWorker):
                         and tombstone_count == 0
                     )
                     if checksum_paths:
+                        self.transfer_phase.emit("download", "checking", 0, len(checksum_paths))
+                        lock.set_activity("checking", 0, len(checksum_paths))
                         # A manifest can retain a FILE entry after an out-of-band
                         # NAS deletion. Verify the paths live before passing them
                         # to rsync --files-from, otherwise the same code-23 retry
@@ -356,11 +360,15 @@ class PullWorker(TransferWorker):
                         if self._self_cancelled:
                             result = rsync_ops.TransferResult(True, [])
                         else:
+                            self.transfer_phase.emit("download", "transferring", 0, len(safe_checksum_paths))
+                            lock.set_activity("transferring", 0, len(safe_checksum_paths))
                             result = self._run_transfer_tracked(
                                 rsync_ops.pull, run_ts, cancel_check=_cancel_check,
                                 emit_lifecycle=False, paths=safe_checksum_paths,
                             )
                     else:
+                        self.transfer_phase.emit("download", "transferring", 0, 0)
+                        lock.set_activity("transferring")
                         result = self._run_transfer_tracked(
                             rsync_ops.pull, run_ts, cancel_check=_cancel_check,
                             emit_lifecycle=False,
@@ -386,6 +394,8 @@ class PullWorker(TransferWorker):
                                     safe_checksum_paths.add(path)
                             checksum_paths = safe_checksum_paths
                         if result.ok and not self._self_cancelled and checksum_paths:
+                            self.transfer_phase.emit("download", "transferring", 0, len(checksum_paths))
+                            lock.set_activity("transferring", 0, len(checksum_paths))
                             checksum_result = self._run_transfer_tracked(
                                 rsync_ops.pull, run_ts, cancel_check=_cancel_check,
                                 reset_written_paths=False, emit_lifecycle=False, paths=checksum_paths,
@@ -398,6 +408,8 @@ class PullWorker(TransferWorker):
                     if self._scan_worker:
                         self._scan_worker.wake()
                     if result.ok:
+                        self.transfer_phase.emit("download", "confirming", 0, len(result.items))
+                        lock.set_activity("confirming", 0, len(result.items))
                         # Pulls only adopt the NAS authority; they must not create
                         # new NAS journal revisions for data already committed by
                         # another client.

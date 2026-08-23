@@ -30,7 +30,7 @@
 #
 set -uo pipefail
 
-VERSION="3.13.2"
+VERSION="3.14.0"
 SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -561,21 +561,36 @@ portable_sha256() {
 
 # Emits one path's FILE_STATES_V1 entry (path\0kind\0digest\0size\0mtime_ns\0)
 # to stdout; emits nothing on failure. One background job per path, see
-# cmd_file_states/FILE_STATES_PARALLELISM.
+# cmd_file_states/FILE_STATES_PARALLELISM. ``manifest_entries`` is populated
+# once by cmd_file_states and inherited by these jobs. A matching digest, size
+# and mtime is an authoritative unchanged state already committed by NASBox;
+# reuse its digest instead of re-reading the entire file on every batch.
 _file_state_entry() {
-    local path="$1" target digest size mtime encoded manifest_line tombstone_ts
+    local path="$1" target digest size mtime mtime_ns encoded manifest_line tombstone_ts
     target="$SHARE_ROOT/$path"
+    encoded=$(encode_journal_field "$path")
     if [[ -f "$target" && ! -L "$target" ]]; then
-        digest=$(portable_sha256 "$target" || true)
         size=$(portable_file_size "$target" || true)
         mtime=$(portable_file_mtime "$target" || true)
-        [[ "$digest" =~ ^[0-9a-f]{64}$ && "$size" =~ ^[0-9]+$ && "$mtime" =~ ^[0-9]+$ ]] || return 1
-        printf '%s\0FILE\0%s\0%s\0%s\0' "$path" "$digest" "$size" "$((mtime * 1000000000))"
+        [[ "$size" =~ ^[0-9]+$ && "$mtime" =~ ^[0-9]+$ ]] || return 1
+        mtime_ns=$((mtime * 1000000000))
+        manifest_line="${manifest_entries[$encoded]:-}"
+        if [[ -n "$manifest_line" ]]; then
+            IFS=$'\t' read -r _manifest_path manifest_digest manifest_size manifest_mtime _manifest_device _manifest_ts <<< "$manifest_line"
+            if [[ "$manifest_digest" =~ ^[0-9a-f]{64}$ && "$manifest_size" == "$size" && "$manifest_mtime" == "$mtime_ns" ]]; then
+                printf '%s\0FILE\0%s\0%s\0%s\0' "$path" "$manifest_digest" "$size" "$mtime_ns"
+                return 0
+            fi
+        fi
+        # A missing or mismatching manifest record can be an out-of-band NAS
+        # modification. Hash it rather than trusting metadata alone.
+        digest=$(portable_sha256 "$target" || true)
+        [[ "$digest" =~ ^[0-9a-f]{64}$ ]] || return 1
+        printf '%s\0FILE\0%s\0%s\0%s\0' "$path" "$digest" "$size" "$mtime_ns"
     elif [[ -e "$target" || -L "$target" ]]; then
         printf '%s\0%s\0%s\0%s\0%s\0' "$path" "OTHER" "" "0" "0"
     else
-        encoded=$(encode_journal_field "$path")
-        manifest_line=$(awk -F '\t' -v wanted="$encoded" '$1 == wanted { print; exit }' "$MANIFEST_FILE")
+        manifest_line="${manifest_entries[$encoded]:-}"
         if [[ -n "$manifest_line" ]]; then
             tombstone_ts=$(printf '%s\n' "$manifest_line" | awk -F '\t' '{ print $6 }')
             [[ "$tombstone_ts" =~ ^[0-9]+$ ]] || tombstone_ts=$(date '+%s')
@@ -593,8 +608,9 @@ cmd_file_states() {
         echo "file-states: sha256sum non disponibile" >&2
         return 1
     }
-    local magic count path index
+    local magic count path index encoded manifest_path manifest_line
     local -a paths
+    local -A requested_manifest_paths manifest_entries
     IFS= read -r -d '' magic || return 1
     IFS= read -r -d '' count || return 1
     [[ "$magic" == "FILE_STATES_V1" ]] || return 1
@@ -603,6 +619,7 @@ cmd_file_states() {
         IFS= read -r -d '' path || return 1
         valid_sync_relative_path "$path" || return 1
         paths[index]="$path"
+        requested_manifest_paths["$(encode_journal_field "$path")"]=1
     done
 
     if [[ "$compact_first" == "true" ]]; then
@@ -613,6 +630,15 @@ cmd_file_states() {
         printf 'FILE_STATES_V1\0%s\0' "$count"
         return 0
     fi
+
+    # Read the manifest once for the requested paths. Looking up each path with
+    # a separate awk scan turns a 3,000-file batch into millions of comparisons.
+    while IFS=$'\t' read -r manifest_path _manifest_digest _manifest_size _manifest_mtime _manifest_device _manifest_ts; do
+        [[ "$manifest_path" == "NASBOX_MANIFEST_V1" ]] && continue
+        if [[ -n "${requested_manifest_paths[$manifest_path]:-}" ]]; then
+            manifest_entries["$manifest_path"]="$manifest_path"$'\t'"$_manifest_digest"$'\t'"$_manifest_size"$'\t'"$_manifest_mtime"$'\t'"$_manifest_device"$'\t'"$_manifest_ts"
+        fi
+    done < "$MANIFEST_FILE"
 
     # Each path's digest/size/mtime -- a full-content sha256sum for anything
     # that exists -- used to be computed one file after another; on a large
@@ -1415,6 +1441,9 @@ read_sync_lock_diagnostics() {
     SYNC_LOCK_OWNER_ID=""
     SYNC_LOCK_OWNER_HOST=""
     SYNC_LOCK_STARTED_AT="0"
+    SYNC_LOCK_PHASE=""
+    SYNC_LOCK_PROGRESS_DONE="0"
+    SYNC_LOCK_PROGRESS_TOTAL="0"
     exec 8>"$SYNC_LOCK_FILE" || return 0
     if flock -n 8; then
         flock -u 8
@@ -1423,8 +1452,10 @@ read_sync_lock_diagnostics() {
     fi
     SYNC_LOCK_HELD="true"
     if [[ -f "$SYNC_LOCK_OWNER_FILE" ]]; then
-        IFS='|' read -r SYNC_LOCK_OWNER_ID SYNC_LOCK_OWNER_HOST SYNC_LOCK_STARTED_AT < "$SYNC_LOCK_OWNER_FILE"
+        IFS='|' read -r SYNC_LOCK_OWNER_ID SYNC_LOCK_OWNER_HOST SYNC_LOCK_STARTED_AT SYNC_LOCK_PHASE SYNC_LOCK_PROGRESS_DONE SYNC_LOCK_PROGRESS_TOTAL < "$SYNC_LOCK_OWNER_FILE"
         [[ "$SYNC_LOCK_STARTED_AT" =~ ^[0-9]+$ ]] || SYNC_LOCK_STARTED_AT="0"
+        [[ "$SYNC_LOCK_PROGRESS_DONE" =~ ^[0-9]+$ ]] || SYNC_LOCK_PROGRESS_DONE="0"
+        [[ "$SYNC_LOCK_PROGRESS_TOTAL" =~ ^[0-9]+$ ]] || SYNC_LOCK_PROGRESS_TOTAL="0"
     fi
     while read -r pid elapsed args; do
         case "$args" in
@@ -1462,7 +1493,7 @@ transfer_queue_head() {
 
 cmd_transfer_wait() {
     command -v flock >/dev/null 2>&1 || return 1
-    local magic device priority request_id owner_host queue_head now owner_payload owner_tmp
+    local magic device priority request_id owner_host queue_head now owner_payload owner_tmp phase done total
     TRANSFER_ACTIVE_TICKET=""
     TRANSFER_LEASE_HELD=false
     IFS= read -r -d '' magic || return 1
@@ -1510,7 +1541,7 @@ cmd_transfer_wait() {
             exec 8>"$SYNC_LOCK_FILE" || { flock -u 7; exec 7>&-; return 1; }
             if flock -n 8; then
                 rm -f "$TRANSFER_ACTIVE_TICKET"
-                owner_payload="$device|$owner_host|$(date '+%s')"
+                owner_payload="$device|$owner_host|$(date '+%s')|||0|0"
                 owner_tmp="${SYNC_LOCK_OWNER_FILE}.$$"
                 printf '%s\n' "$owner_payload" > "$owner_tmp" && mv -f "$owner_tmp" "$SYNC_LOCK_OWNER_FILE" || {
                     flock -u 8; exec 8>&-; flock -u 7; exec 7>&-; return 1;
@@ -1519,7 +1550,20 @@ cmd_transfer_wait() {
                 flock -u 7
                 exec 7>&-
                 printf 'NASBOX_LOCKED\n'
-                cat >/dev/null
+                # The client keeps this SSH session open for the whole lease.
+                # Activity frames update only its diagnostics record; they never
+                # affect the lock itself or filesystem/journal mutations.
+                while IFS= read -r -d '' magic; do
+                    [[ "$magic" == "ACTIVITY_V1" ]] || continue
+                    IFS= read -r -d '' phase || break
+                    IFS= read -r -d '' done || break
+                    IFS= read -r -d '' total || break
+                    [[ "$phase" =~ ^[a-z_]{1,32}$ ]] || continue
+                    [[ "$done" =~ ^[0-9]+$ && "$total" =~ ^[0-9]+$ ]] || continue
+                    owner_payload="$device|$owner_host|$(date '+%s')|$phase|$done|$total"
+                    owner_tmp="${SYNC_LOCK_OWNER_FILE}.$$"
+                    printf '%s\n' "$owner_payload" > "$owner_tmp" && mv -f "$owner_tmp" "$SYNC_LOCK_OWNER_FILE"
+                done
                 flock -u 8
                 exec 8>&-
                 return 0
@@ -1569,9 +1613,10 @@ cmd_status() {
     printf '%-18s %s\n' "Manifest (spazio):" "$(wc -c < "$MANIFEST_FILE" 2>/dev/null || echo 0) byte"
     read_sync_lock_diagnostics
     if [[ "$SYNC_LOCK_HELD" == "true" ]]; then
-        printf '%-18s occupato (host %s, device %s, PID %s, età %s secondi)\n' \
+        printf '%-18s occupato (host %s, device %s, PID %s, età %s secondi, fase %s %s/%s)\n' \
             "Lock trasferimenti:" "${SYNC_LOCK_OWNER_HOST:-sconosciuto}" \
-            "${SYNC_LOCK_OWNER_ID:-sconosciuto}" "${SYNC_LOCK_OWNER_PID:-sconosciuto}" "$SYNC_LOCK_AGE_SECONDS"
+            "${SYNC_LOCK_OWNER_ID:-sconosciuto}" "${SYNC_LOCK_OWNER_PID:-sconosciuto}" "$SYNC_LOCK_AGE_SECONDS" \
+            "${SYNC_LOCK_PHASE:-sconosciuta}" "$SYNC_LOCK_PROGRESS_DONE" "$SYNC_LOCK_PROGRESS_TOTAL"
     else
         printf '%-18s libero\n' "Lock trasferimenti:"
     fi
@@ -1606,6 +1651,9 @@ cmd_print_config() {
     echo "SYNC_LOCK_OWNER_ID=$SYNC_LOCK_OWNER_ID"
     echo "SYNC_LOCK_OWNER_HOST=$SYNC_LOCK_OWNER_HOST"
     echo "SYNC_LOCK_STARTED_AT=$SYNC_LOCK_STARTED_AT"
+    echo "SYNC_LOCK_PHASE=$SYNC_LOCK_PHASE"
+    echo "SYNC_LOCK_PROGRESS_DONE=$SYNC_LOCK_PROGRESS_DONE"
+    echo "SYNC_LOCK_PROGRESS_TOTAL=$SYNC_LOCK_PROGRESS_TOTAL"
     echo "CHECK_INTERVAL_MINUTES=$CHECK_INTERVAL_MINUTES"
     echo "PRUNE_MAX_FILES_PER_PASS=$PRUNE_MAX_FILES_PER_PASS"
     echo "JOURNAL_MAX_BYTES=$JOURNAL_MAX_BYTES"

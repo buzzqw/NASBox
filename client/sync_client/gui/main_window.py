@@ -163,6 +163,7 @@ class MainWindow(QMainWindow):
         for worker in (self.push_worker, self.pull_worker):
             worker.transfer_preparing.connect(self.transfers_tab.on_transfer_preparing)
             worker.transfer_preparing.connect(self.status_tab.on_transfer_preparing)
+            worker.transfer_phase.connect(self.transfers_tab.on_transfer_phase)
             worker.transfer_waiting_for_lock.connect(self.transfers_tab.on_transfer_waiting_for_lock)
             worker.transfer_waiting_for_lock.connect(self.status_tab.on_transfer_waiting_for_lock)
             worker.transfer_lock_unavailable.connect(self.transfers_tab.on_transfer_lock_unavailable)

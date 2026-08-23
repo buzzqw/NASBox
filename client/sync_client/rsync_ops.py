@@ -61,7 +61,7 @@ DELETE_FLAG = "--delete-after"
 # Bump this whenever the client starts relying on a new --print-config field or
 # server-side capability, so an outdated NAS package gets flagged instead of
 # silently misbehaving.
-EXPECTED_SERVER_VERSION = "3.13.2"
+EXPECTED_SERVER_VERSION = "3.14.0"
 _SERVER_UPDATE_NAME_RE = re.compile(r"^sync-daemon-server-([0-9]+(?:\.[0-9]+)+)\.sh$")
 
 
@@ -202,6 +202,7 @@ class RemoteLock:
         self.priority = priority
         self.proc: subprocess.Popen | None = None
         self._stdout_buffer = bytearray()
+        self._scheduler_mode = False
 
     def _read_stdout_line(self, timeout: float) -> bytes:
         """Read one protocol line without allowing TextIO buffering to block."""
@@ -244,6 +245,7 @@ class RemoteLock:
             "printf 'NASBOX_LOCKED\\n' && cat >/dev/null"
         )
         scheduler_mode = bool(remote_script)
+        self._scheduler_mode = scheduler_mode
         if scheduler_mode:
             remote_cmd = f"exec {shlex.quote(remote_script)} --transfer-wait"
         else:
@@ -326,12 +328,26 @@ class RemoteLock:
             except OSError:
                 pass
         finally:
+            self._scheduler_mode = False
             for stream in (proc.stdin, proc.stdout, proc.stderr):
                 if stream is not None:
                     try:
                         stream.close()
                     except OSError:
                         pass
+
+    def set_activity(self, phase: str, done: int = 0, total: int = 0) -> None:
+        """Publish diagnostics through the live scheduler lease, best-effort."""
+        proc = self.proc
+        if not self._scheduler_mode or proc is None or proc.stdin is None or proc.poll() is not None:
+            return
+        if not re.fullmatch(r"[a-z_]{1,32}", phase) or done < 0 or total < 0:
+            return
+        try:
+            proc.stdin.write(f"ACTIVITY_V1\0{phase}\0{done}\0{total}\0".encode())
+            proc.stdin.flush()
+        except (OSError, BrokenPipeError):
+            pass
 
     def __exit__(self, _exc_type, _exc, _tb) -> None:
         self.release()
@@ -1529,16 +1545,16 @@ def _run_transfer(
 
     files_from_path: str | None = None
     selection_args: list[str] = []
-    if direction == "upload":
-        # plan_path already selected only paths whose local version is allowed
-        # to win. --update here would silently undo that causal decision when a
-        # metadata-only touch made the unchanged NAS destination look newer.
-        selection_args += ["--checksum"]
     if paths is not None:
         if not paths:
             return TransferResult(ok=True, items=[])
+        # The reconciliation plan has already compared authoritative content
+        # fingerprints. Re-running rsync with --checksum would hash every file
+        # a second time on both machines, which dominates batches of thousands
+        # of small files. Force the selected paths instead: the NAS lease keeps
+        # another client from changing them between planning and transfer.
+        selection_args += ["--ignore-times"]
         if direction == "download":
-            selection_args += ["--checksum"]
             delete_flag = []  # tombstones are handled by the normal authoritative pull
         with tempfile.NamedTemporaryFile(prefix="nasbox-files-", delete=False) as stream:
             for relative_path in sorted(paths):
@@ -1546,6 +1562,10 @@ def _run_transfer(
                 stream.write(b"\0")
             files_from_path = stream.name
         selection_args += ["--from0", f"--files-from={files_from_path}", "--relative"]
+    elif direction == "upload":
+        # A full upload has no preceding per-path reconciliation plan, so it
+        # still needs rsync's content comparison.
+        selection_args += ["--checksum"]
     elif direction == "download":
         # Protect a local edit that lands after PullWorker's clean preflight.
         # Journal-changed canonical files are applied by the following targeted

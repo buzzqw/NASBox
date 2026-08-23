@@ -65,16 +65,10 @@ class PushWorker(TransferWorker):
     hash_progress = pyqtSignal(int, int)
 
     # Emitted once, right before the chunk loop starts: the true size of this
-    # tick's whole batch. TransfersTab's own queue "total" otherwise comes
-    # from ScanWorker's separate dry-run preview -- but ScanWorker only ever
-    # tries a *non-blocking* acquire of the same transfer_lock this push is
-    # holding for the entire (potentially many-chunk, many-minute) operation,
-    # so it can never refresh while a big push is running. Without this
-    # signal, TransfersTab's fallback logic (total = max(total, done)) simply
-    # degrades to "total always equals done" -- a progress readout that's
-    # always "N of N" and climbs with every completed chunk, which is exactly
-    # as useless as showing nothing. This signal gives it the real number
-    # up front, which this worker already knows before touching the network.
+    # tick's whole batch. ScanWorker can now refresh between chunks, but its
+    # preview is still only a best effort and can lag a fast initial import.
+    # This signal gives TransfersTab the authoritative total up front instead
+    # of degrading to a misleading "N of N" counter as chunks complete.
     batch_size_known = pyqtSignal(int)
     queue_items_known = pyqtSignal(list)
 
@@ -270,6 +264,8 @@ class PushWorker(TransferWorker):
                     remote_progress_done += len(chunk_paths)
                     if self._scan_worker:
                         self._scan_worker.wake()
+                    if chunk_ok and chunk_index + 1 < len(chunks):
+                        self._yield_local_transfer_lock()
                     if delete_limit_hit:
                         raise rsync_ops.RemoteLockError(
                             f"operazione bloccata: limite di sicurezza {max_deletes} cancellazioni raggiunto "
@@ -314,6 +310,22 @@ class PushWorker(TransferWorker):
                 self.transfer_finished.emit("upload", False)
                 raise
 
+    def _yield_local_transfer_lock(self) -> None:
+        """Let same-client pull, mirror and previews run between safe chunks.
+
+        _run_chunk has already released its NAS lease and committed its journal
+        transaction before this point. The following chunk rebuilds its plan
+        from live NAS state, so another local operation cannot make its older
+        decisions unsafe while it gets a turn.
+        """
+        self.transfer_lock.release()
+        try:
+            # Yield to a waiting thread before immediately queueing this push's
+            # next chunk again. Lock acquisition still serializes filesystem work.
+            time.sleep(0.01)
+        finally:
+            self.transfer_lock.acquire()
+
     def _run_chunk(
         self, chunk_index: int, chunk_paths: list[str], remote_progress_done: int,
         remote_progress_total: int, max_deletes: int, deletes_committed: int, watcher,
@@ -330,11 +342,14 @@ class PushWorker(TransferWorker):
         with rsync_ops.remote_lock(
             self.cfg, self._conn, on_start=self._set_current_process,
             owner_id=self.sync_state.device_id(), priority=0,
-        ):
+        ) as lock:
+            self.lock_coordinator.acquired()
             if self._stop_flag.is_set():
                 return False, 0, False
             chunk_run_ts = rsync_ops.new_run_ts()
             self._conflict_journal_items = []
+            self.transfer_phase.emit("upload", "checking", remote_progress_done, remote_progress_total)
+            lock.set_activity("checking", remote_progress_done, remote_progress_total)
             upload_paths, delete_requests, adopted_paths, remote_wins_paths = self._build_plan(
                 chunk_set,
                 remote_progress_offset=remote_progress_done,
@@ -363,6 +378,8 @@ class PushWorker(TransferWorker):
                 self.queue_items_known.emit(planned_items)
 
             if upload_paths:
+                self.transfer_phase.emit("upload", "transferring", remote_progress_done, remote_progress_total)
+                lock.set_activity("transferring", remote_progress_done, remote_progress_total)
                 push_result = self._run_transfer_tracked(
                     rsync_ops.push, chunk_run_ts, paths=upload_paths,
                     emit_lifecycle=False,
@@ -408,10 +425,14 @@ class PushWorker(TransferWorker):
             )
             journal_items.extend(self._conflict_journal_items)
             remote_only_paths = {item.path for item in self._conflict_journal_items}
+            self.transfer_phase.emit("upload", "confirming", remote_progress_done, remote_progress_total)
+            lock.set_activity("confirming", remote_progress_done, remote_progress_total)
             authoritative = self._authoritative_fingerprints(
                 journal_items, adopted_paths, delete_result.completed_paths, watcher,
                 remote_only_paths=remote_only_paths,
             )
+            self.transfer_phase.emit("upload", "committing", remote_progress_done, remote_progress_total)
+            lock.set_activity("committing", remote_progress_done, remote_progress_total)
             journal_ok, journal_detail = rsync_ops.append_remote_journal(
                 self.cfg, self._conn, self.sync_state.device_id(), journal_items,
                 authoritative,

@@ -26,6 +26,7 @@ class TransferWorker(QThread):
     log_event = pyqtSignal(str, str, str)              # action, path, detail
     transfer_waiting_for_lock = pyqtSignal(str)         # upload | download
     transfer_preparing = pyqtSignal(str)                # upload | download, reconciliation/preflight
+    transfer_phase = pyqtSignal(str, str, int, int)     # direction, phase, completed, total
     transfer_lock_unavailable = pyqtSignal(str, str)    # upload | download, detail
     transfer_started = pyqtSignal(str)                  # upload | download
     transfer_item_started = pyqtSignal(str, str, int)  # direction, path, size

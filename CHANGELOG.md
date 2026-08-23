@@ -4,6 +4,23 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 1.20.0 - 2026-08-23
+
+- I controlli remoti riusano il digest gia presente nel manifest quando
+  dimensione e mtime sul NAS coincidono; una modifica esterna continua invece
+  a richiedere SHA-256 completo. I batch di molti file piccoli evitano quindi
+  migliaia di hash ridondanti.
+- I trasferimenti mirati non eseguono un secondo checksum rsync dopo il piano
+  di riconciliazione: forzano soltanto i percorsi gia verificati, senza perdere
+  la protezione contro conflitti.
+- Un push cede il turno locale fra chunk gia completati, consentendo a pull,
+  mirror e anteprime dello stesso PC di avanzare senza attendere tutto il batch.
+- La scheda Trasferimenti mostra la fase reale del lavoro. Il lease NAS espone
+  anche proprietario, fase e contatori in `--status`/`--print-config`, per
+  distinguere attesa, verifica, trasferimento e commit.
+- Rafforzati i test di recovery delle rinomine NAS: un crash dopo il journal non
+  ripristina o perde il file gia spostato.
+
 ## 1.19.5 - 2026-08-23
 
 - Dopo un aggiornamento avviato dal servizio, il client termina con un codice

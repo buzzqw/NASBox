@@ -88,6 +88,7 @@ class TransfersTab(QWidget):
         self._active_transfers: set[str] = set()
         self._preparing_transfers: set[str] = set()
         self._lock_waiting: set[str] = set()
+        self._transfer_phases: dict[str, tuple[str, int, int]] = {}
         self._active_items: set[tuple[str, str]] = set()
         self._current_files: dict[str, str] = {}
         self._item_progress: dict[tuple[str, str], int] = {}
@@ -266,6 +267,10 @@ class TransfersTab(QWidget):
         self._apply_filter()
         self._refresh_activity()
 
+    def on_transfer_phase(self, direction: str, phase: str, done: int, total: int) -> None:
+        self._transfer_phases[direction] = (phase, done, total)
+        self._refresh_activity()
+
     def on_transfer_lock_unavailable(self, direction: str, detail: str) -> None:
         self._preparing_transfers.discard(direction)
         self._active_transfers.discard(direction)
@@ -351,6 +356,7 @@ class TransfersTab(QWidget):
         self._active_transfers.discard(direction)
         self._lock_waiting.discard(direction)
         self._current_files.pop(direction, None)
+        self._transfer_phases.pop(direction, None)
         self._item_progress = {
             key: percent for key, percent in self._item_progress.items()
             if key[0] != direction
@@ -576,6 +582,16 @@ class TransfersTab(QWidget):
                 messages.append(t(
                     "transfers.waiting_for_lock",
                     direction=self._direction_labels[direction], seconds=self._phase_elapsed(),
+                ))
+            elif direction in self._transfer_phases:
+                phase, done, total = self._transfer_phases[direction]
+                detail = t(f"transfers.phase_{phase}")
+                if total > 0:
+                    detail = f"{detail} ({done}/{total})"
+                messages.append(t(
+                    "transfers.phase_activity",
+                    direction=self._direction_labels[direction], phase=detail,
+                    seconds=self._phase_elapsed(),
                 ))
                 continue
             if direction in self._preparing_transfers:
