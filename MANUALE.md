@@ -57,10 +57,11 @@ problema semplicemente non può più presentarsi.
   un'unica cartella sul NAS: rileva le modifiche locali quasi in tempo reale
   e le manda al NAS (push), e periodicamente scarica quello che gli altri PC
   hanno mandato nel frattempo (pull).
-- **Server** (`server/`): demone bash autonomo installato sul NAS. Non
-  partecipa al trasferimento file (quello lo fanno i client via SSH/rsync
-  direttamente sul NAS) — si occupa solo di far rispettare la retention dello
-  storico, in modo indipendente da quali client sono accesi o spenti. È anche
+- **Server** (`server/`): demone bash autonomo installato sul NAS. I client
+  trasferiscono i dati via SSH/rsync, mentre il server gestisce retention,
+  journal, manifest e il publish atomico dei file nella staging privata. I
+  nuovi file vengono prima caricati fuori dall'albero visibile e poi spostati
+  nel repository solo sotto il lease globale, con recovery dopo crash. È anche
   l'unica fonte di verità per la cartella NASBox lato NAS e per la retention:
   i client la leggono da lì invece di doverla ridigitare ognuno per conto
   proprio (vedi [§6](#6-connessione-al-nas-tab-impostazioni)).
@@ -568,6 +569,14 @@ la sincronizzazione.
   trasferimento grosso vedi il conteggio scendere via via, non restare
   fermo fino alla fine.
 - **Cerca**: filtro live per nome file, sopra la tabella.
+- **Fase corrente**: durante un batch la riga di attività distingue verifica
+  NAS, trasferimento, conferma e commit. Per un batch composto solo da file
+  nuovi il trasferimento avviene nella staging privata e non trattiene il
+  lease NAS; il lock viene usato solo per il publish finale e il journal.
+
+Un batch che contiene file gia presenti, conflitti o cancellazioni continua a
+usare il percorso conservativo: tali operazioni devono verificare lo stato live
+e non vengono mai pubblicate dalla staging sovrascrivendo un percorso esistente.
 
 ## 13. Icona nella tray
 
@@ -740,9 +749,11 @@ PRUNE_MAX_FILES_PER_PASS=500     # limite per passata, per non monopolizzare il 
 ```
 
 Il comando `--status` e `--print-config` mostrano anche se il lock globale di
-trasferimento è occupato, da quanto tempo e, quando il sistema lo consente, il
-PID del processo che lo possiede. Questo aiuta a distinguere una sincronizzazione
-lunga da un problema di connessione.
+trasferimento è occupato, da quanto tempo, il client proprietario, la fase
+(`checking`, `transferring`, `confirming` o `committing`) e i contatori del
+batch. Quando il sistema lo consente riportano anche il PID del processo. Questo
+aiuta a distinguere una sincronizzazione lunga, una verifica di molti file e un
+problema di connessione.
 
 Durante l'installazione viene creato anche `SHARE_ROOT/.nasbox-root`. Il
 comando `--print-config` espone `REPOSITORY_ID` e `REPOSITORY_READY`; i client

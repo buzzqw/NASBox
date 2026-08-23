@@ -48,6 +48,11 @@ NASBox is a synchronization tool, not a backup by itself.
 - Transfer queue with preview, live speed, pause and manual synchronization.
 - Global NAS transfer scheduler shared by all clients, with priority tickets
   and a session-bound lease instead of independent lock retries.
+- New-file batches are uploaded to a private NAS staging area without holding
+  the global lease; an atomic, crash-recoverable publish makes them visible
+  only after the complete batch is ready.
+- Lease diagnostics identify the owner, phase and batch counters, so a queued
+  client can distinguish checking, transfer and manifest commit.
 - Local and remote history, restore and local trash cleanup.
 - Crash-safe server transactions for checked deletions, with recovery after an
   interruption between moving a file to trash and recording the journal.
@@ -227,6 +232,11 @@ backup autonomo.
   manuale.
 - Scheduler globale sul NAS condiviso da tutti i client, con ticket a priorita'
   e lease legato alla sessione invece di retry indipendenti del lock.
+- I batch di soli file nuovi vengono caricati in una staging privata del NAS
+  senza trattenere il lease globale; un publish atomico e recuperabile dopo
+  crash li rende visibili solo quando il batch e pronto.
+- La diagnostica del lease mostra proprietario, fase e contatori del batch,
+  distinguendo attesa, verifica, trasferimento e commit del manifest.
 - Storico locale e remoto, ripristino e pulizia del cestino locale.
 - Transazioni server sicure dai crash per le cancellazioni controllate, con
   recovery dopo un'interruzione tra spostamento nel cestino e journal.
