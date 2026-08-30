@@ -62,7 +62,7 @@ DELETE_FLAG = "--delete-after"
 # Bump this whenever the client starts relying on a new --print-config field or
 # server-side capability, so an outdated NAS package gets flagged instead of
 # silently misbehaving.
-EXPECTED_SERVER_VERSION = "3.15.1"
+EXPECTED_SERVER_VERSION = "3.16.0"
 _SERVER_UPDATE_NAME_RE = re.compile(r"^sync-daemon-server-([0-9]+(?:\.[0-9]+)+)\.sh$")
 
 
@@ -162,6 +162,12 @@ class CheckedDeleteResult:
 class NasConnection:
     host: str            # NAS address to SSH into as the final destination (its LAN IP, usually)
     via_jump: bool = False  # True if reached through the bastion rather than directly
+
+
+@dataclass(frozen=True)
+class RemoteRevisionWait:
+    result: str  # "CHANGED" | "TIMEOUT"
+    revision: int
 
 
 class RemoteLockError(RuntimeError):
@@ -427,7 +433,8 @@ def _clean_ssh_stderr(text: str) -> str:
 
 
 def run_remote_script(
-    cfg: Config, conn: NasConnection, script_path: str, args: list[str], timeout: float = 30
+    cfg: Config, conn: NasConnection, script_path: str, args: list[str], timeout: float = 30,
+    on_start: Optional[Callable[[subprocess.Popen], None]] = None,
 ) -> tuple[bool, str, str]:
     """Run the NAS-side sync-daemon-server.sh (or any remote command) over SSH,
     reusing whatever connection path (direct or via bastion) is currently active."""
@@ -435,12 +442,71 @@ def run_remote_script(
     remote_cmd = " ".join(shlex.quote(part) for part in [script_path, *args])
     cmd = ["ssh", *ssh_opts(cfg, conn), f"{user}@{conn.host}", remote_cmd]
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        if isinstance(exc, OSError):
-            return False, "", str(exc)
-        return False, "", "timeout durante l'esecuzione remota"
-    return proc.returncode == 0, proc.stdout, _clean_ssh_stderr(proc.stderr)
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        if on_start is not None:
+            on_start(proc)
+        try:
+            stdout, stderr = proc.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            stdout, stderr = proc.communicate()
+            return False, stdout or "", "timeout durante l'esecuzione remota"
+    except OSError as exc:
+        return False, "", str(exc)
+    return proc.returncode == 0, stdout, _clean_ssh_stderr(stderr)
+
+
+def parse_remote_revision_wait(output: str) -> RemoteRevisionWait | None:
+    """Parse the deliberately small, line-oriented change-feed response."""
+    lines = output.splitlines()
+    if len(lines) != 3 or lines[0] != "NASBOX_CHANGE_WAIT_V1":
+        return None
+    values: dict[str, str] = {}
+    for line in lines[1:]:
+        key, separator, value = line.partition("=")
+        if separator != "=" or key in values or key not in {"RESULT", "REVISION"}:
+            return None
+        values[key] = value
+    result = values.get("RESULT", "")
+    revision = values.get("REVISION", "")
+    if result not in {"CHANGED", "TIMEOUT"} or not re.fullmatch(r"[0-9]{1,18}", revision):
+        return None
+    return RemoteRevisionWait(result, int(revision))
+
+
+def wait_for_remote_revision(
+    cfg: Config, conn: NasConnection, previous_revision: int,
+    timeout: int | None = None, on_start: Optional[Callable[[subprocess.Popen], None]] = None,
+) -> RemoteRevisionWait | None:
+    """Wait remotely without taking the transfer lock or listing the share."""
+    script_path = (cfg.get("remote_server_script") or "").strip()
+    if not script_path or not isinstance(previous_revision, int) or isinstance(previous_revision, bool):
+        return None
+    if previous_revision < 0 or previous_revision >= 10**18:
+        return None
+    if timeout is None:
+        timeout = cfg.get("change_feed_wait_seconds", 55)
+    try:
+        timeout = int(timeout)
+    except (TypeError, ValueError):
+        return None
+    if timeout < 0 or timeout > 3600:
+        return None
+    ok, output, _error = run_remote_script(
+        cfg, conn, script_path,
+        ["--wait-for-revision", str(previous_revision), str(timeout)],
+        timeout=max(20, timeout + 20), on_start=on_start,
+    )
+    if not ok:
+        return None
+    response = parse_remote_revision_wait(output)
+    if response is None or response.revision < previous_revision:
+        return None
+    if response.result == "CHANGED" and response.revision == previous_revision:
+        return None
+    if response.result == "TIMEOUT" and response.revision != previous_revision:
+        return None
+    return response
 
 
 def run_remote_script_bytes(
@@ -955,7 +1021,7 @@ def browse_delete(cfg: Config, conn: NasConnection, relative_path: str, device_i
         # Browse mutations must use the same NAS transaction lock as push/pull.
         # The server command also takes the journal lock, so filesystem and
         # history updates cannot interleave with an rsync transaction.
-        with remote_lock(cfg, conn):
+        with remote_lock(cfg, conn, owner_id=device_id):
             ok, output, error = run_remote_script_input_bytes(
                 cfg, conn, script_path, ["--browse-delete"], payload, timeout=120,
             )
@@ -992,7 +1058,7 @@ def browse_rename(
         os.fsencode(src_relative), os.fsencode(dst_relative),
     )) + b"\0"
     try:
-        with remote_lock(cfg, conn):
+        with remote_lock(cfg, conn, owner_id=device_id):
             ok, output, error = run_remote_script_input_bytes(
                 cfg, conn, script_path, ["--browse-rename"], payload, timeout=120,
             )

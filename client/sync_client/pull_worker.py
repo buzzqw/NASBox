@@ -80,11 +80,21 @@ class PullWorker(TransferWorker):
         self._last_pull = 0.0
         self._last_full_pull = 0.0
         self._last_manifest_revision = -1
+        self._skip_change_feed_once = False
         self._self_cancelled = False  # set by the cancel_check right before it terminates the process
         self._cancel_dirty_paths: set[str] = set()
 
     def _wake_now(self) -> None:
         self._wake.set()
+
+    def set_connection(self, conn) -> None:
+        if conn != self._conn:
+            # A reconnect may point at a different route or repository. Never
+            # carry the old feed cursor into that session.
+            self._last_manifest_revision = -1
+            self._last_full_pull = 0.0
+            self._skip_change_feed_once = False
+        super().set_connection(conn)
 
     def _defer_if_local_changes_pending(
         self, watcher, *, full_pull_required: bool, tombstone_count: int,
@@ -148,14 +158,30 @@ class PullWorker(TransferWorker):
         now = time.time()
         if not self.lock_coordinator.can_attempt(now):
             return
-        if now - self._last_pull < poll_interval:
-            return
-
         watcher = self.watchers.get()
         if watcher and watcher.is_dirty():
             # Not pushed yet -- pulling now risks deleting/overwriting it before
             # PushWorker gets to it. Leave the timer untouched so this is retried
             # on the very next tick instead of waiting out a full poll_interval.
+            return
+
+        # Once the first manifest cursor is known, keep this worker asleep in a
+        # read-only SSH command. The command runs on this QThread, never on the
+        # GUI thread, and is intentionally outside both local and NAS transfer
+        # locks. A timeout or an unavailable endpoint falls back to the old
+        # poll_interval cadence below.
+        feed_result = None
+        skip_change_feed = self._skip_change_feed_once
+        self._skip_change_feed_once = False
+        feed_enabled = bool(self.cfg.get("remote_change_feed_available"))
+        if feed_enabled and self._last_manifest_revision >= 0 and not skip_change_feed:
+            feed_result = rsync_ops.wait_for_remote_revision(
+                self.cfg, self._conn, self._last_manifest_revision,
+                on_start=self._set_current_process,
+            )
+            if feed_result is None and now - self._last_pull < poll_interval:
+                return
+        elif now - self._last_pull < poll_interval:
             return
 
         # Blocks only if a push is currently running -- there's only ever one
@@ -254,12 +280,13 @@ class PullWorker(TransferWorker):
                     def _cancel_check(w=watcher) -> bool:
                         if w is None or not w.is_dirty():
                             return False
+                        own_paths = self._self_written_snapshot()
                         external = {
                             path for path in w.dirty_paths()
                             if not any(
                                 path == own_path
                                 or path.startswith(own_path.rstrip("/") + "/")
-                                for own_path in self._self_written_paths
+                                for own_path in own_paths
                             )
                         }
                         # Rsync creates destination directories before the
@@ -439,6 +466,9 @@ class PullWorker(TransferWorker):
                 pass
             except rsync_ops.RemoteLockBusy as exc:
                 self._record_lock_owner(exc)
+                # A lock retry is already due; do not add another full feed
+                # timeout before attempting the same transaction again.
+                self._skip_change_feed_once = True
                 retry_after = self.lock_coordinator.defer()
                 detail = f"{t('lock.busy_retry')} Nuovo tentativo tra {retry_after}s."
                 self.transfer_lock_unavailable.emit("download", detail)

@@ -25,12 +25,15 @@
 #   sync-daemon-server.sh --status             Is it running? + trash/retention info
 #   sync-daemon-server.sh --run-foreground      Run the loop in this terminal (debug/supervisor use)
 #   sync-daemon-server.sh --run-once [--dry-run]  One pruning pass, then exit
+#   sync-daemon-server.sh --metrics              Read-only NAS load metrics
+#   sync-daemon-server.sh --wait-for-revision REVISION TIMEOUT
+#                                                   Wait for manifest.revision
 #   sync-daemon-server.sh -c FILE               Use an alternate config file
 #   sync-daemon-server.sh --help
 #
 set -uo pipefail
 
-VERSION="3.15.1"
+VERSION="3.16.0"
 SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -51,6 +54,7 @@ JOURNAL_LOCK_FILE="$STATE_DIR/transfer-journal.lock"
 MANIFEST_REVISION_FILE="$STATE_DIR/manifest.revision"
 TRANSACTION_DIR="$STATE_DIR/transactions"
 STAGING_DIRNAME=".nasbox-staging"
+CHANGE_WAIT_MAX_TIMEOUT_SECONDS=3600
 
 # How many sha256sum/stat lookups cmd_file_states runs concurrently -- see
 # that function for why. 8 is a conservative default: enough to stop a single
@@ -135,6 +139,8 @@ load_config() {
     SYNC_LOCK_MAX_AGE_MINUTES=0
     CHECK_INTERVAL_MINUTES=60
     PRUNE_MAX_FILES_PER_PASS=500
+    STAGING_RETENTION_HOURS=168
+    PRUNE_MAX_STAGING_PER_PASS=20
     LOG_MAX_BYTES=5242880
     JOURNAL_MAX_BYTES=10485760
     local key value
@@ -147,6 +153,8 @@ load_config() {
             SYNC_LOCK_MAX_AGE_MINUTES) SYNC_LOCK_MAX_AGE_MINUTES="$value" ;;
             CHECK_INTERVAL_MINUTES) CHECK_INTERVAL_MINUTES="$value" ;;
             PRUNE_MAX_FILES_PER_PASS) PRUNE_MAX_FILES_PER_PASS="$value" ;;
+            STAGING_RETENTION_HOURS) STAGING_RETENTION_HOURS="$value" ;;
+            PRUNE_MAX_STAGING_PER_PASS) PRUNE_MAX_STAGING_PER_PASS="$value" ;;
             LOG_MAX_BYTES)
                 # Numeric values may carry an explanatory inline comment in
                 # server.conf.example. Remove it and every surrounding space
@@ -168,6 +176,8 @@ load_config() {
     [[ "$SYNC_LOCK_MAX_AGE_MINUTES" =~ ^[0-9]+$ ]] || { log ERROR "SYNC_LOCK_MAX_AGE_MINUTES deve essere un intero >= 0"; exit 1; }
     [[ "$CHECK_INTERVAL_MINUTES" =~ ^[1-9][0-9]*$ ]] || { log ERROR "CHECK_INTERVAL_MINUTES deve essere un intero >= 1"; exit 1; }
     [[ "$PRUNE_MAX_FILES_PER_PASS" =~ ^[1-9][0-9]*$ ]] || { log ERROR "PRUNE_MAX_FILES_PER_PASS deve essere un intero >= 1"; exit 1; }
+    [[ "$STAGING_RETENTION_HOURS" =~ ^[1-9][0-9]*$ ]] || { log ERROR "STAGING_RETENTION_HOURS deve essere un intero >= 1"; exit 1; }
+    [[ "$PRUNE_MAX_STAGING_PER_PASS" =~ ^[1-9][0-9]*$ ]] || { log ERROR "PRUNE_MAX_STAGING_PER_PASS deve essere un intero >= 1"; exit 1; }
     [[ "$LOG_MAX_BYTES" =~ ^[1-9][0-9]*$ ]] || { log ERROR "LOG_MAX_BYTES deve essere un intero >= 1"; exit 1; }
     [[ "$JOURNAL_MAX_BYTES" =~ ^[1-9][0-9]*$ ]] || { log ERROR "JOURNAL_MAX_BYTES deve essere un intero >= 1"; exit 1; }
 
@@ -444,6 +454,7 @@ cmd_journal_append() {
     [[ "$device" =~ ^[A-Za-z0-9._:-]{1,128}$ ]] || return 1
     [[ "$timestamp" =~ ^[0-9]+$ ]] || return 1
     [[ "$count" =~ ^[0-9]+$ && "$count" -le 100000 ]] || return 1
+    require_sync_transfer_owner "$device" || return $?
     server_timestamp=$(date '+%s')
 
     {
@@ -478,6 +489,13 @@ cmd_journal_append() {
         return 1
     fi
     recover_pending_transactions_unlocked || { flock -u 9; exec 9>&-; return 1; }
+    if grep -Fq $'COMMIT\t'"$txid" "$JOURNAL_FILE" 2>/dev/null; then
+        rm -f "$tmp"
+        flock -u 9
+        exec 9>&-
+        echo "Journal già aggiornato: transazione $txid già committata."
+        return 0
+    fi
     cat "$tmp" >> "$JOURNAL_FILE"
     local append_status=$?
     rm -f "$tmp"
@@ -796,6 +814,23 @@ sync_transfer_lock_is_held() {
     return 0
 }
 
+sync_transfer_lock_owned_by() {
+    local expected="$1" owner_id
+    sync_transfer_lock_is_held || return 1
+    [[ -f "$SYNC_LOCK_OWNER_FILE" ]] || return 1
+    IFS='|' read -r owner_id _ < "$SYNC_LOCK_OWNER_FILE" || return 1
+    [[ "$owner_id" == "$expected" ]]
+}
+
+require_sync_transfer_owner() {
+    local device="$1"
+    if ! sync_transfer_lock_owned_by "$device"; then
+        echo "operazione mutante rifiutata: lease NAS non posseduto dal device $device" >&2
+        return 75
+    fi
+    return 0
+}
+
 publish_file_matches() {
     local file="$1" digest="$2" size="$3" mtime_ns="$4" actual_size actual_mtime digest_actual expected_mtime
     [[ -f "$file" && ! -L "$file" ]] || return 1
@@ -897,10 +932,10 @@ cmd_staging_publish() {
     done
     # The caller's persistent SSH lease owns this lock. Refuse standalone use,
     # but do not acquire it here: doing so would deadlock a valid lease.
-    if ! sync_transfer_lock_is_held; then
+    if ! require_sync_transfer_owner "$device"; then
         rm -f "$paths_file"
-        echo "staging-publish: sync-transfer.lock non detenuto" >&2
-        return 1
+        echo "staging-publish: lease NAS non posseduto dal device" >&2
+        return 75
     fi
     exec 9>"$JOURNAL_LOCK_FILE"
     flock -x 9 || { exec 9>&-; rm -f "$paths_file"; return 1; }
@@ -957,6 +992,8 @@ cmd_checked_delete() {
         digests[index]="$expected_digest"
         mtimes[index]="$expected_mtime"
     done
+
+    require_sync_transfer_owner "$device" || return $?
 
     exec 9>"$JOURNAL_LOCK_FILE"
     flock -x 9 || { exec 9>&-; return 1; }
@@ -1081,6 +1118,10 @@ cmd_browse_delete() {
     [[ "$magic" == "BROWSE_DELETE_V1" ]] || return 1
     [[ "$run_ts" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}--[0-9]{2}-[0-9]{2}-[0-9]{2}-[0-9]{6}Z$ ]] || return 1
     [[ "$device" =~ ^[A-Za-z0-9._:-]{1,128}$ ]] || return 1
+    require_sync_transfer_owner "$device" || {
+        printf 'BROWSE_DELETE_V1\0ERROR\0lease NAS non posseduto dal device\0'
+        return 75
+    }
     if ! valid_sync_relative_path "$relative"; then
         printf 'BROWSE_DELETE_V1\0ERROR\0percorso non valido\0'; return 1
     fi
@@ -1170,6 +1211,10 @@ cmd_browse_rename() {
     [[ "$magic" == "BROWSE_RENAME_V1" ]] || return 1
     [[ "$run_ts" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}--[0-9]{2}-[0-9]{2}-[0-9]{2}-[0-9]{6}Z$ ]] || return 1
     [[ "$device" =~ ^[A-Za-z0-9._:-]{1,128}$ ]] || return 1
+    require_sync_transfer_owner "$device" || {
+        printf 'BROWSE_RENAME_V1\0ERROR\0lease NAS non posseduto dal device\0'
+        return 75
+    }
     if ! valid_sync_relative_path "$src" || ! valid_sync_relative_path "$dst"; then
         printf 'BROWSE_RENAME_V1\0ERROR\0percorso non valido\0'; return 1
     fi
@@ -1267,6 +1312,109 @@ cmd_journal_status() {
     printf 'MANIFEST_BYTES=%s\n' "$(wc -c < "$MANIFEST_FILE" 2>/dev/null || echo 0)"
     printf 'JOURNAL_MAX_BYTES=%s\n' "$JOURNAL_MAX_BYTES"
     printf 'MANIFEST_REVISION=%s\n' "$(cat "$MANIFEST_REVISION_FILE" 2>/dev/null || echo 0)"
+}
+
+read_manifest_revision() {
+    local revision
+    if [[ ! -f "$MANIFEST_REVISION_FILE" ]]; then
+        printf '0'
+        return 0
+    fi
+    revision=$(<"$MANIFEST_REVISION_FILE")
+    # Keep the value within bash arithmetic's portable signed range. The
+    # revision writer only emits decimal integers, so anything else is a
+    # corrupt protocol state rather than a reason to inspect SHARE_ROOT.
+    [[ "$revision" =~ ^[0-9]{1,18}$ ]] || return 1
+    printf '%s' "$((10#$revision))"
+}
+
+print_change_wait_response() {
+    printf 'NASBOX_CHANGE_WAIT_V1\nRESULT=%s\nREVISION=%s\n' "$1" "$2"
+}
+
+cmd_wait_for_revision() {
+    local requested="$1" timeout="$2" current started remaining event event_status
+    local use_inotify="false"
+    local revision_name="${MANIFEST_REVISION_FILE##*/}"
+
+    if [[ ! "$requested" =~ ^[0-9]{1,18}$ || ! "$timeout" =~ ^[0-9]+$ ]]; then
+        print_change_wait_response "ERROR" "0"
+        printf 'wait revision: argomenti non validi\n' >&2
+        return 2
+    fi
+    requested=$((10#$requested))
+    if (( timeout > CHANGE_WAIT_MAX_TIMEOUT_SECONDS )); then
+        print_change_wait_response "ERROR" "0"
+        printf 'wait revision: timeout fuori limite\n' >&2
+        return 2
+    fi
+
+    current=$(read_manifest_revision) || {
+        print_change_wait_response "ERROR" "0"
+        printf 'wait revision: manifest.revision non valido\n' >&2
+        return 1
+    }
+    if (( current > requested )); then
+        print_change_wait_response "CHANGED" "$current"
+        return 0
+    fi
+    if (( timeout == 0 )); then
+        print_change_wait_response "TIMEOUT" "$current"
+        return 0
+    fi
+
+    started=$SECONDS
+    if command -v inotifywait >/dev/null 2>&1; then
+        use_inotify="true"
+    fi
+    while :; do
+        current=$(read_manifest_revision) || {
+            print_change_wait_response "ERROR" "0"
+            printf 'wait revision: manifest.revision non valido\n' >&2
+            return 1
+        }
+        if (( current > requested )); then
+            print_change_wait_response "CHANGED" "$current"
+            return 0
+        fi
+        remaining=$((timeout - (SECONDS - started)))
+        if (( remaining <= 0 )); then
+            print_change_wait_response "TIMEOUT" "$current"
+            return 0
+        fi
+
+        if [[ "$use_inotify" == "true" ]]; then
+            # The directory is watched because revisions are replaced
+            # atomically. Filter the event name so unrelated state files never
+            # turn this into a repository scan.
+            event=$(inotifywait -q -t "$remaining" \
+                -e close_write,moved_to,create,delete --format '%f' \
+                "$STATE_DIR" 2>/dev/null)
+            event_status=$?
+            if (( event_status == 0 )); then
+                [[ "$event" == "$revision_name" ]] || continue
+                continue
+            fi
+            if (( event_status == 2 )); then
+                current=$(read_manifest_revision) || {
+                    print_change_wait_response "ERROR" "0"
+                    printf 'wait revision: manifest.revision non valido\n' >&2
+                    return 1
+                }
+                if (( current > requested )); then
+                    print_change_wait_response "CHANGED" "$current"
+                else
+                    print_change_wait_response "TIMEOUT" "$current"
+                fi
+                return 0
+            fi
+            # An installed but incompatible/broken inotifywait must not make
+            # the feed unavailable: fall back to a one-second file poll.
+            use_inotify="false"
+        else
+            sleep $((remaining < 1 ? remaining : 1))
+        fi
+    done
 }
 
 # --- pruning ---
@@ -1461,13 +1609,57 @@ remove_empty_dirs() {
     done < "$candidates"
 }
 
+collect_staging_candidates() {
+    local staging="$1" candidates="$2"
+    [[ -d "$staging" ]] || return 0
+    # Directory mtime changes as files are created. A generous age threshold
+    # avoids touching an active upload while still reclaiming abandoned batches.
+    find "$staging" -mindepth 1 -maxdepth 1 -type d \
+        -mmin "+$((STAGING_RETENTION_HOURS * 60))" -print0 2>/dev/null \
+        | while IFS= read -r -d '' directory; do
+            printf '%s\0' "$directory" >> "$candidates"
+        done
+}
+
+staging_is_referenced() {
+    local directory="$1" txfile
+    shopt -s nullglob
+    for txfile in "$TRANSACTION_DIR"/*.txn; do
+        if grep -Fq -- "$directory" "$txfile" 2>/dev/null; then
+            shopt -u nullglob
+            return 0
+        fi
+    done
+    shopt -u nullglob
+    return 1
+}
+
+prune_staging_candidates() {
+    local candidates="$1" directory removed=0 processed=0
+    while IFS= read -r -d '' directory; do
+        (( processed >= PRUNE_MAX_STAGING_PER_PASS )) && break
+        (( processed++ ))
+        [[ "$directory" == "$SHARE_ROOT/$STAGING_DIRNAME/"* ]] || continue
+        if staging_is_referenced "$directory"; then
+            log INFO "Staging conservata: transazione ancora recuperabile ($directory)"
+            continue
+        fi
+        if rm -rf -- "$directory"; then
+            (( removed++ ))
+        else
+            log ERROR "Impossibile rimuovere staging abbandonata: $directory"
+        fi
+    done < "$candidates"
+    (( removed > 0 )) && log INFO "Staging abbandonate rimosse: $removed"
+}
+
 run_once_pass() {
     command -v flock >/dev/null 2>&1 || {
         log ERROR "Impossibile eseguire il pruning: flock non disponibile."
         return 1
     }
     log INFO "sync-daemon-server v$VERSION: avvio pass di pruning (SHARE_ROOT=$SHARE_ROOT, retention=${RETENTION_DAYS}gg, dry-run=$DRY_RUN)"
-    local trash file_candidates dir_candidates
+    local trash file_candidates dir_candidates staging_candidates
     trash="$(trash_dir)"
     if [[ -d "$trash" ]]; then
         if [[ "$RETENTION_DAYS" != "0" ]]; then
@@ -1502,6 +1694,19 @@ run_once_pass() {
     else
         log INFO "Nessuno storico ancora presente ($trash non esiste)."
     fi
+    staging_candidates="$(mktemp "$STATE_DIR/prune-staging.XXXXXX")" || return 1
+    collect_staging_candidates "$SHARE_ROOT/$STAGING_DIRNAME" "$staging_candidates"
+    if [[ -s "$staging_candidates" ]]; then
+        exec 8>"$SYNC_LOCK_FILE" || { rm -f "$staging_candidates"; return 1; }
+        if flock -n 8; then
+            prune_staging_candidates "$staging_candidates"
+            flock -u 8
+        else
+            log INFO "Pulizia staging rimandata: trasferimento NASBox in corso."
+        fi
+        exec 8>&-
+    fi
+    rm -f "$staging_candidates"
     date '+%s' > "$STAMP_FILE"
     log INFO "Pass completato."
 }
@@ -1843,6 +2048,7 @@ cmd_print_config() {
     echo "CHECK_INTERVAL_MINUTES=$CHECK_INTERVAL_MINUTES"
     echo "PRUNE_MAX_FILES_PER_PASS=$PRUNE_MAX_FILES_PER_PASS"
     echo "JOURNAL_MAX_BYTES=$JOURNAL_MAX_BYTES"
+    echo "CHANGE_FEED_AVAILABLE=true"
     if [[ -f "$JOURNAL_FILE" ]]; then echo "JOURNAL_READY=true"; else echo "JOURNAL_READY=false"; fi
     # Own runtime state dir (PID file, lock, log) -- self-reported so clients whose
     # synced tree happens to contain this install can exclude it from sync instead
@@ -1925,6 +2131,109 @@ cmd_diagnostics() {
     if [[ -w "$STATE_DIR" ]]; then echo "STATE_WRITABLE=true"; else echo "STATE_WRITABLE=false"; fi
 }
 
+cmd_metrics() {
+    # Deliberately read only: this endpoint never walks SHARE_ROOT. The client
+    # derives rates from cumulative counters across successive samples.
+    local uptime load1 load5 load15 cpu_values memory_values disk_values io_values network_values
+    local lock_held="false" lock_owner="" lock_host="" lock_phase="" lock_started="0"
+    local lock_done="0" lock_total="0" queue_count="0" staging_count="0" journal_bytes="0" manifest_bytes="0"
+    uptime=$(awk '{printf "%.0f", $1; exit}' /proc/uptime 2>/dev/null || true)
+    read -r load1 load5 load15 _ < /proc/loadavg 2>/dev/null || true
+    cpu_values=$(awk '$1 == "cpu" {
+        total = $2 + $3 + $4 + $5 + $6 + $7 + $8 + $9
+        idle = $5 + $6
+        printf "%.0f %.0f %.0f", total, idle, $6
+        exit
+    }' /proc/stat 2>/dev/null || true)
+    memory_values=$(awk '
+        $1 == "MemTotal:" { total = $2 }
+        $1 == "MemAvailable:" { available = $2 }
+        $1 == "MemFree:" { free = $2 }
+        $1 == "Buffers:" { buffers = $2 }
+        $1 == "Cached:" { cached = $2 }
+        $1 == "SwapTotal:" { swap_total = $2 }
+        $1 == "SwapFree:" { swap_free = $2 }
+        END {
+            if (!available) available = free + buffers + cached
+            printf "%.0f %.0f %.0f %.0f", total * 1024, available * 1024,
+                swap_total * 1024, swap_free * 1024
+        }
+    ' /proc/meminfo 2>/dev/null || true)
+    disk_values=$(df -Pk "$SHARE_ROOT" 2>/dev/null | awk 'NR == 2 {
+        total = $2 * 1024; used = $3 * 1024; available = $4 * 1024
+        percent = $5; sub(/%$/, "", percent)
+        printf "%.0f %.0f %.0f %s", total, used, available, percent
+    }' || true)
+    io_values=$(awk '$3 ~ /^(sd|hd|vd|xvd|nvme|mmcblk|md|dm-)/ {
+        reads += $6; writes += $10
+    }
+    END { printf "%.0f %.0f", reads * 512, writes * 512 }' /proc/diskstats 2>/dev/null || true)
+    network_values=$(awk '
+        NR > 2 {
+            interface = $1
+            sub(/:$/, "", interface)
+            if (interface != "lo" && interface != "") {
+                rx_bytes += $2; rx_packets += $3
+                tx_bytes += $10; tx_packets += $11
+                interfaces++
+            }
+        }
+        END { printf "%.0f %.0f %.0f %.0f %d", rx_bytes, tx_bytes,
+            rx_packets, tx_packets, interfaces }
+    ' /proc/net/dev 2>/dev/null || true)
+
+    if [[ -e "$SYNC_LOCK_FILE" ]]; then
+        exec 8>"$SYNC_LOCK_FILE" 2>/dev/null || true
+        if ! flock -n 8 2>/dev/null; then
+            lock_held="true"
+            if [[ -f "$SYNC_LOCK_OWNER_FILE" ]]; then
+                IFS='|' read -r lock_owner lock_host lock_started lock_phase lock_done lock_total _ \
+                    < "$SYNC_LOCK_OWNER_FILE" || true
+            fi
+        else
+            flock -u 8 2>/dev/null || true
+        fi
+        exec 8>&- 2>/dev/null || true
+    fi
+    if [[ -d "$TRANSFER_QUEUE_DIR" ]]; then
+        queue_count=$(find "$TRANSFER_QUEUE_DIR" -maxdepth 1 -type f -name '*.ticket' 2>/dev/null | wc -l | tr -d '[:space:]')
+    fi
+    if [[ -d "$SHARE_ROOT/$STAGING_DIRNAME" ]]; then
+        staging_count=$(find "$SHARE_ROOT/$STAGING_DIRNAME" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l | tr -d '[:space:]')
+    fi
+    journal_bytes=$(wc -c < "$JOURNAL_FILE" 2>/dev/null || echo 0)
+    manifest_bytes=$(wc -c < "$MANIFEST_FILE" 2>/dev/null || echo 0)
+
+    # Keep every value on a simple KEY=VALUE line. Unknown future keys can be
+    # ignored by older clients without making this read-only command unsafe.
+    printf 'NASBOX_METRICS_V1\n'
+    printf 'COLLECTED_AT_EPOCH=%s\n' "$(date '+%s')"
+    printf 'UPTIME_SECONDS=%s\n' "${uptime:-0}"
+    printf 'LOAD_1=%s\nLOAD_5=%s\nLOAD_15=%s\n' "${load1:-0}" "${load5:-0}" "${load15:-0}"
+    read -r cpu_total_ticks cpu_idle_ticks cpu_iowait_ticks <<< "${cpu_values:-0 0 0}"
+    printf 'CPU_TOTAL_TICKS=%s\nCPU_IDLE_TICKS=%s\nCPU_IOWAIT_TICKS=%s\n' \
+        "${cpu_total_ticks:-0}" "${cpu_idle_ticks:-0}" "${cpu_iowait_ticks:-0}"
+    read -r memory_total memory_available swap_total swap_free <<< "${memory_values:-0 0 0 0}"
+    printf 'MEM_TOTAL_BYTES=%s\nMEM_AVAILABLE_BYTES=%s\n' "${memory_total:-0}" "${memory_available:-0}"
+    printf 'SWAP_TOTAL_BYTES=%s\nSWAP_FREE_BYTES=%s\n' "${swap_total:-0}" "${swap_free:-0}"
+    read -r disk_total disk_used disk_available disk_percent <<< "${disk_values:-0 0 0 0}"
+    printf 'DISK_TOTAL_BYTES=%s\nDISK_USED_BYTES=%s\nDISK_AVAILABLE_BYTES=%s\nDISK_USAGE_PERCENT=%s\n' \
+        "${disk_total:-0}" "${disk_used:-0}" "${disk_available:-0}" "${disk_percent:-0}"
+    read -r disk_read_bytes disk_write_bytes <<< "${io_values:-0 0}"
+    printf 'DISK_READ_BYTES=%s\nDISK_WRITE_BYTES=%s\n' "${disk_read_bytes:-0}" "${disk_write_bytes:-0}"
+    read -r net_rx net_tx net_rx_packets net_tx_packets net_interfaces <<< "${network_values:-0 0 0 0 0}"
+    printf 'NET_RX_BYTES=%s\nNET_TX_BYTES=%s\nNET_RX_PACKETS=%s\nNET_TX_PACKETS=%s\nNET_INTERFACE_COUNT=%s\n' \
+        "${net_rx:-0}" "${net_tx:-0}" "${net_rx_packets:-0}" "${net_tx_packets:-0}" "${net_interfaces:-0}"
+    printf 'NASBOX_LOCK_HELD=%s\nNASBOX_LOCK_OWNER=%s\nNASBOX_LOCK_HOST=%s\n' \
+        "$lock_held" "${lock_owner:-}" "${lock_host:-}"
+    printf 'NASBOX_LOCK_PHASE=%s\nNASBOX_LOCK_STARTED_AT=%s\n' \
+        "${lock_phase:-}" "${lock_started:-0}"
+    printf 'NASBOX_LOCK_PROGRESS_DONE=%s\nNASBOX_LOCK_PROGRESS_TOTAL=%s\n' \
+        "${lock_done:-0}" "${lock_total:-0}"
+    printf 'NASBOX_QUEUE_COUNT=%s\nNASBOX_STAGING_COUNT=%s\nJOURNAL_BYTES=%s\nMANIFEST_BYTES=%s\n' \
+        "${queue_count:-0}" "${staging_count:-0}" "${journal_bytes:-0}" "${manifest_bytes:-0}"
+}
+
 cmd_help() {
     cat <<EOF
 sync-daemon-server v$VERSION
@@ -1940,6 +2249,9 @@ Uso:
   $(basename "$0") --status                    Stato + storico/retention + ultimo pass
   $(basename "$0") --run-foreground            Esegue il loop in questo terminale
   $(basename "$0") --run-once [--dry-run]      Un solo pass di pruning, poi esce
+  $(basename "$0") --metrics                   Metriche read-only del carico NAS
+  $(basename "$0") --wait-for-revision REVISION TIMEOUT
+                                                   Attende solo manifest.revision
   $(basename "$0") --print-config              Dump KEY=VALUE (per l'auto-configurazione dei client)
   $(basename "$0") --init-repository           Crea il marker persistente del repository
   $(basename "$0") --journal-append             Registra una transazione (input NUL)
@@ -1972,6 +2284,8 @@ while [[ $# -gt 0 ]]; do
         --restart) ACTION="restart" ;;
         --run-foreground) ACTION="run_foreground" ;;
         --run-once) ACTION="run_once" ;;
+        --metrics) ACTION="metrics" ;;
+        --wait-for-revision) shift; WAIT_REVISION="${1:-}"; shift; WAIT_TIMEOUT="${1:-}"; ACTION="wait_revision" ;;
         --dry-run) DRY_RUN="true" ;;
         --status) ACTION="status" ;;
         --print-config) ACTION="print_config" ;;
@@ -1998,6 +2312,26 @@ while [[ $# -gt 0 ]]; do
     shift
 done
 
+if [[ "$ACTION" == "metrics" ]]; then
+    # A valid existing config is enough; unlike all daemon commands, metrics
+    # must not create state/journal files as a side effect of being queried.
+    [[ -f "$CONFIG_FILE" ]] || { printf 'Config non trovato: %s\n' "$CONFIG_FILE" >&2; exit 1; }
+    load_config || exit $?
+    cmd_metrics
+    exit $?
+fi
+
+if [[ "$ACTION" == "wait_revision" ]]; then
+    # This endpoint is intentionally independent from journal initialization
+    # and from both locks. It only needs the configured state directory and
+    # the single atomically replaced revision file.
+    [[ -f "$CONFIG_FILE" ]] || { printf 'Config non trovato: %s\n' "$CONFIG_FILE" >&2; exit 1; }
+    load_config || exit $?
+    mkdir -p "$STATE_DIR" || exit 1
+    cmd_wait_for_revision "${WAIT_REVISION:-}" "${WAIT_TIMEOUT:-}"
+    exit $?
+fi
+
 mkdir -p "$STATE_DIR"
 load_config
 ensure_journal_files
@@ -2008,6 +2342,7 @@ case "$ACTION" in
     restart) cmd_restart ;;
     run_foreground) run_foreground ;;
     run_once) run_once_pass; exit $? ;;
+    metrics) cmd_metrics; exit $? ;;
     status) cmd_status; exit $? ;;
     print_config) cmd_print_config; exit $? ;;
     init_repository) cmd_init_repository; exit $? ;;

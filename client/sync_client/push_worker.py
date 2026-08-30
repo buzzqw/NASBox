@@ -572,6 +572,26 @@ class PushWorker(TransferWorker):
         if not stage_result.ok:
             return False, 0, False
 
+        # The source may have changed while rsync was uploading the private
+        # staging tree. Never publish bytes that no longer match the local
+        # version that produced this batch; leave the fresh edit for the next
+        # watcher-driven attempt.
+        changed_during_stage = set()
+        for path, expected in fingerprints.items():
+            current = self.sync_state.fingerprint(Path(self.cfg.local_root(), path))
+            if current != expected:
+                changed_during_stage.add(path)
+        if changed_during_stage:
+            for path in changed_during_stage:
+                if watcher is not None:
+                    watcher.mark_dirty(path)
+            rsync_ops.cleanup_remote_staging(self.cfg, self._conn, staging_dir)
+            self._log(
+                "STAGING_DEFERRED", ", ".join(sorted(changed_during_stage)[:5]),
+                "file modificato durante il caricamento staging",
+            )
+            return False, 0, False
+
         self.transfer_waiting_for_lock.emit("upload")
         with rsync_ops.remote_lock(
             self.cfg, self._conn, on_start=self._set_current_process,

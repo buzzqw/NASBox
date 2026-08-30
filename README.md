@@ -6,7 +6,7 @@ NASBox synchronizes one folder between multiple PCs through a NAS using SSH
 and rsync. The PyQt6 client manages uploads, downloads, queues, history and
 trash; the small NAS daemon applies remote history retention.
 
-Current protocol versions: client `1.19.0`, NAS server `3.13.0`.
+Current protocol versions: client `1.22.0`, NAS server `3.16.0`.
 
 ### What NASBox Is
 
@@ -53,6 +53,12 @@ NASBox is a synchronization tool, not a backup by itself.
   only after the complete batch is ready.
 - Lease diagnostics identify the owner, phase and batch counters, so a queued
   client can distinguish checking, transfer and manifest commit.
+- Remote clients wait for a journal revision change instead of polling the NAS
+  file tree continuously; polling remains as a compatibility fallback.
+- Read-only NAS load monitor for CPU, memory, swap, disk, network, lock, queue,
+  journal and manifest activity. Fast metric samples never scan the NASBox tree.
+- Abandoned staging batches are reclaimed only during pruning, after a
+  configurable grace period and only when no recoverable transaction references them.
 - Local and remote history, restore and local trash cleanup.
 - Crash-safe server transactions for checked deletions, with recovery after an
   interruption between moving a file to trash and recording the journal.
@@ -155,7 +161,12 @@ python3 -m venv .venv
 PYTHONPATH=client .venv/bin/python -m unittest discover -s client/tests -v
 python3 -m unittest discover -s server/tests -v
 bash -n server/install.sh server/sync-daemon-server.sh server/uninstall.sh client/install.sh
+PYTHONPATH=client .venv/bin/python tools/nasbox_load_test.py --files 1000 --size 4096
 ```
+
+The disposable load harness measures the shell protocol, journal, manifest,
+change feed and metrics endpoint without touching a production NAS. Real SSH,
+rsync and two-client tests are documented in [tests/LOAD_TESTS.md](tests/LOAD_TESTS.md).
 
 ### Security
 
@@ -188,7 +199,7 @@ NASBox sincronizza una cartella tra piu PC tramite un NAS, usando SSH e rsync.
 Il client grafico PyQt6 gestisce caricamenti, scaricamenti, coda, storico e
 cestino; il piccolo demone sul NAS applica la retention dello storico remoto.
 
-Versioni correnti del protocollo: client `1.19.0`, server NAS `3.13.0`.
+Versioni correnti del protocollo: client `1.22.0`, server NAS `3.16.0`.
 
 ### Che cos'e NASBox
 
@@ -237,6 +248,12 @@ backup autonomo.
   crash li rende visibili solo quando il batch e pronto.
 - La diagnostica del lease mostra proprietario, fase e contatori del batch,
   distinguendo attesa, verifica, trasferimento e commit del manifest.
+- I client attendono le nuove revisioni del journal senza scansionare
+  continuamente l'albero NAS; il polling resta disponibile come fallback.
+- Il Monitor NAS mostra carico, memoria, swap, disco, rete, lock, coda, journal
+  e manifest con campioni read-only che non eseguono scansioni dei file.
+- Le staging abbandonate vengono eliminate solo durante il pruning, dopo una
+  finestra configurabile e se nessuna transazione le può ancora recuperare.
 - Storico locale e remoto, ripristino e pulizia del cestino locale.
 - Transazioni server sicure dai crash per le cancellazioni controllate, con
   recovery dopo un'interruzione tra spostamento nel cestino e journal.

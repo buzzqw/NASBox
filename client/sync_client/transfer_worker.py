@@ -53,6 +53,19 @@ class TransferWorker(QThread):
         # external changed" while a pull with real work to do is in flight -- a
         # dirty path this transfer itself just wrote doesn't count as external.
         self._self_written_paths: set[str] = set()
+        self._self_written_lock = threading.RLock()
+
+    def _reset_self_written_paths(self) -> None:
+        with self._self_written_lock:
+            self._self_written_paths.clear()
+
+    def _mark_self_written(self, path: str) -> None:
+        with self._self_written_lock:
+            self._self_written_paths.add(path)
+
+    def _self_written_snapshot(self) -> set[str]:
+        with self._self_written_lock:
+            return set(self._self_written_paths)
 
     # --- external controls (mirrors the old SyncEngine API so callers don't change) ---
 
@@ -128,7 +141,7 @@ class TransferWorker(QThread):
         last_item_progress_key: list[tuple[str, str] | None] = [None]
         started = [False]
         if reset_written_paths:
-            self._self_written_paths = set()
+            self._reset_self_written_paths()
         watchdog_stop = threading.Event()
 
         def _watchdog() -> None:
@@ -158,7 +171,7 @@ class TransferWorker(QThread):
                 # The watcher can observe rsync's local write before rsync emits
                 # the completion marker. Mark it now so PullWorker does not
                 # cancel its own transfer and retry the same file forever.
-                self._self_written_paths.add(item.path)
+                self._mark_self_written(item.path)
             self.transfer_item_started.emit(item.direction, item.path, item.size)
 
         def _on_item_progress(item: "rsync_ops.TransferItem", percent: int) -> None:
@@ -208,7 +221,7 @@ class TransferWorker(QThread):
 
     def _on_item_complete(self, item: "rsync_ops.TransferItem") -> None:
         if item.direction in ("download", "delete_local"):
-            self._self_written_paths.add(item.path)
+            self._mark_self_written(item.path)
         action_map = {
             "upload": "UPLOAD",
             "download": "DOWNLOAD",

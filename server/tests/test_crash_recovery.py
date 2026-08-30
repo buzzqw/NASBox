@@ -48,12 +48,25 @@ class ServerCrashRecoveryTests(unittest.TestCase):
         lock_path.parent.mkdir(exist_ok=True)
         lock = lock_path.open("w")
         fcntl.flock(lock, fcntl.LOCK_EX)
+        (sandbox / "state" / "sync-transfer.lock.owner").write_text(
+            "device-a|test-host|0|idle|0|0\n"
+        )
         return lock
 
     @staticmethod
     def release_lock(lock) -> None:
         fcntl.flock(lock, fcntl.LOCK_UN)
         lock.close()
+
+    @classmethod
+    def run_with_global_lock(cls, sandbox: Path, command: list[str], **kwargs):
+        lock = cls.hold_global_lock(sandbox)
+        try:
+            return subprocess.run(command, **kwargs)
+        finally:
+            owner = sandbox / "state" / "sync-transfer.lock.owner"
+            owner.unlink(missing_ok=True)
+            cls.release_lock(lock)
 
     @staticmethod
     def empty_checked_delete_payload() -> bytes:
@@ -90,8 +103,8 @@ class ServerCrashRecoveryTests(unittest.TestCase):
             )
             environment = os.environ.copy()
             environment["NASBOX_TEST_FAILPOINT"] = "checked_delete_after_move"
-            crashed = subprocess.run(
-                [str(script), "-c", str(config), "--checked-delete"],
+            crashed = self.run_with_global_lock(
+                sandbox, [str(script), "-c", str(config), "--checked-delete"],
                 input=payload, capture_output=True, env=environment,
             )
 
@@ -100,8 +113,8 @@ class ServerCrashRecoveryTests(unittest.TestCase):
             trash_files = list((share / ".sync-trash").rglob("manuale.txt-*"))
             self.assertEqual(len(trash_files), 1)
 
-            recovered = subprocess.run(
-                [str(script), "-c", str(config), "--checked-delete"],
+            recovered = self.run_with_global_lock(
+                sandbox, [str(script), "-c", str(config), "--checked-delete"],
                 input=payload, capture_output=True,
             )
             self.assertEqual(recovered.returncode, 0, recovered.stderr.decode())
@@ -246,8 +259,8 @@ class ServerCrashRecoveryTests(unittest.TestCase):
             )
             environment = os.environ.copy()
             environment["NASBOX_TEST_FAILPOINT"] = "browse_delete_after_move"
-            crashed = subprocess.run(
-                [str(script), "-c", str(config), "--browse-delete"],
+            crashed = self.run_with_global_lock(
+                sandbox, [str(script), "-c", str(config), "--browse-delete"],
                 input=payload, capture_output=True, env=environment,
             )
 
@@ -255,8 +268,8 @@ class ServerCrashRecoveryTests(unittest.TestCase):
             self.assertFalse((share / "folder").exists())
             self.assertTrue((share / ".sync-trash").is_dir())
 
-            recovered = subprocess.run(
-                [str(script), "-c", str(config), "--checked-delete"],
+            recovered = self.run_with_global_lock(
+                sandbox, [str(script), "-c", str(config), "--checked-delete"],
                 input=self.empty_checked_delete_payload(), capture_output=True,
             )
             self.assertEqual(recovered.returncode, 0, recovered.stderr.decode())
@@ -282,8 +295,8 @@ class ServerCrashRecoveryTests(unittest.TestCase):
             )
             environment = os.environ.copy()
             environment["NASBOX_TEST_FAILPOINT"] = "browse_rename_after_move"
-            crashed = subprocess.run(
-                [str(script), "-c", str(config), "--browse-rename"],
+            crashed = self.run_with_global_lock(
+                sandbox, [str(script), "-c", str(config), "--browse-rename"],
                 input=payload, capture_output=True, env=environment,
             )
 
@@ -291,8 +304,8 @@ class ServerCrashRecoveryTests(unittest.TestCase):
             self.assertFalse((share / "old.txt").exists())
             self.assertTrue((share / "new.txt").is_file())
 
-            recovered = subprocess.run(
-                [str(script), "-c", str(config), "--checked-delete"],
+            recovered = self.run_with_global_lock(
+                sandbox, [str(script), "-c", str(config), "--checked-delete"],
                 input=self.empty_checked_delete_payload(), capture_output=True,
             )
             self.assertEqual(recovered.returncode, 0, recovered.stderr.decode())
@@ -318,8 +331,8 @@ class ServerCrashRecoveryTests(unittest.TestCase):
             )
             environment = os.environ.copy()
             environment["NASBOX_TEST_FAILPOINT"] = "browse_rename_after_journal"
-            crashed = subprocess.run(
-                [str(script), "-c", str(config), "--browse-rename"],
+            crashed = self.run_with_global_lock(
+                sandbox, [str(script), "-c", str(config), "--browse-rename"],
                 input=payload, capture_output=True, env=environment,
             )
 
@@ -327,8 +340,8 @@ class ServerCrashRecoveryTests(unittest.TestCase):
             self.assertFalse((share / "old.txt").exists())
             self.assertEqual((share / "new.txt").read_text(), "must remain moved")
 
-            recovered = subprocess.run(
-                [str(script), "-c", str(config), "--checked-delete"],
+            recovered = self.run_with_global_lock(
+                sandbox, [str(script), "-c", str(config), "--checked-delete"],
                 input=self.empty_checked_delete_payload(), capture_output=True,
             )
             self.assertEqual(recovered.returncode, 0, recovered.stderr.decode())

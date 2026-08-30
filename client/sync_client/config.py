@@ -28,7 +28,10 @@ DEFAULTS: dict[str, Any] = {
                                    # instead of the same values being retyped by hand and drifting out of sync
     "client_update_path": "",      # optional local client-update bundle path
     "client_update_remote_path": ".nasbox-client-update",  # relative to remote_prefix by default
-    "poll_interval": 60,       # seconds between pull-from-NAS cycles (discover other clients' changes)
+    "poll_interval": 60,       # legacy/fallback seconds between pull-from-NAS checks
+    "change_feed_wait_seconds": 55,  # maximum read-only wait for a new NAS manifest revision
+    "remote_change_feed_available": False,  # learned from the NAS server's capability dump
+    "metrics_refresh_seconds": 15,  # seconds between read-only NAS load samples
     "debounce_seconds": 2,     # seconds of local quiet before pushing a change
     "file_stability_seconds": 0.75,  # one local stat interval before a queued file is eligible
     "notify_sync_completion": False,  # show a tray notification after completed file transfers

@@ -183,6 +183,12 @@ class SettingsTab(QWidget):
         self.poll_spin.setValue(int(cfg.get("poll_interval") or 60))
         self.poll_spin.setToolTip(t("settings.cadence_note"))
         cadence_form.addRow(t("settings.poll_label"), self.poll_spin)
+        self.metrics_refresh_spin = QSpinBox()
+        self.metrics_refresh_spin.setRange(5, 3600)
+        self.metrics_refresh_spin.setSuffix(" s")
+        self.metrics_refresh_spin.setValue(int(cfg.get("metrics_refresh_seconds") or 15))
+        self.metrics_refresh_spin.setToolTip(t("settings.metrics_refresh_note"))
+        cadence_form.addRow(t("settings.metrics_refresh_label"), self.metrics_refresh_spin)
         cadence_note = QLabel(t("settings.cadence_note"))
         cadence_note.setWordWrap(True)
         cadence_form.addRow(cadence_note)
@@ -339,6 +345,7 @@ class SettingsTab(QWidget):
         for spin in (
             self.ssh_port, self.jump_port, self.max_delete_spin,
             self.bw_upload_spin, self.bw_download_spin, self.poll_spin,
+            self.metrics_refresh_spin,
         ):
             spin.valueChanged.connect(self._mark_dirty)
         for checkbox in (
@@ -362,6 +369,9 @@ class SettingsTab(QWidget):
 
     def _apply_poll_interval(self) -> None:
         self.cfg.set("poll_interval", self.poll_spin.value(), persist=False)
+
+    def _apply_metrics_refresh_interval(self) -> None:
+        self.cfg.set("metrics_refresh_seconds", self.metrics_refresh_spin.value(), persist=False)
 
     def _add_exclude(self) -> None:
         pattern = self.exclude_input.text().strip()
@@ -400,6 +410,7 @@ class SettingsTab(QWidget):
         self.cfg.set("max_delete_files", self.max_delete_spin.value(), persist=False)
         self._apply_bandwidth()
         self._apply_poll_interval()
+        self._apply_metrics_refresh_interval()
         self.cfg.set("notify_sync_completion", self.notify_sync_checkbox.isChecked(), persist=False)
         self.cfg.set("animate_sync_icon", self.animate_sync_checkbox.isChecked(), persist=False)
         self.cfg.set("tray_single_click", self.tray_click_combo.currentData() or "menu", persist=False)

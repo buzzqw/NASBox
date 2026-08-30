@@ -307,6 +307,9 @@ class SyncEngine(QThread):
         journal_ready = values.get("JOURNAL_READY", "").lower() == "true"
         if journal_ready != self.cfg.get("remote_journal_ready"):
             self.cfg.set("remote_journal_ready", journal_ready)
+        change_feed_available = values.get("CHANGE_FEED_AVAILABLE", "").lower() == "true"
+        if change_feed_available != self.cfg.get("remote_change_feed_available"):
+            self.cfg.set("remote_change_feed_available", change_feed_available)
 
         if not values.get("running"):
             self._log("SERVER_DOWN", "-", "il demone server sul NAS non è attivo: avvio automatico in corso")

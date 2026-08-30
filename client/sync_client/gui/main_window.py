@@ -32,6 +32,7 @@ from .browse_tab import BrowseTab
 from .conflicts_tab import ConflictsTab
 from .history_tab import HistoryTab
 from .log_tab import LogTab
+from .metrics_tab import MetricsTab
 from .mirrors_tab import MirrorsTab
 from .settings_tab import SettingsTab
 from .status_tab import StatusTab
@@ -126,6 +127,7 @@ class MainWindow(QMainWindow):
         self.status_tab = StatusTab(
             self.cfg, self.engine, self.scan_worker, logger=self.logger,
         )
+        self.metrics_tab = MetricsTab(self.cfg, self.engine)
         self.settings_tab = SettingsTab(self.cfg, self.engine)
         self.transfers_tab = TransfersTab()
         self.log_tab = LogTab(self.logger)
@@ -135,6 +137,7 @@ class MainWindow(QMainWindow):
         self.mirrors_tab = MirrorsTab(self.cfg, self.mirror_manager)
 
         tabs.addTab(self.status_tab, t("main_window.tab_status"))
+        tabs.addTab(self.metrics_tab, t("main_window.tab_metrics"))
         tabs.addTab(self.transfers_tab, t("main_window.tab_transfers"))
         tabs.addTab(self.history_tab, t("main_window.tab_history"))
         tabs.addTab(self.conflicts_tab, t("main_window.tab_conflicts"))
@@ -142,14 +145,16 @@ class MainWindow(QMainWindow):
         tabs.addTab(self.log_tab, t("main_window.tab_log"))
         tabs.addTab(self.mirrors_tab, t("main_window.tab_mirrors"))
         tabs.addTab(self.settings_tab, t("main_window.tab_settings"))
+        tabs.currentChanged.connect(lambda index: self.metrics_tab.set_active(index == 1))
         tabs.setTabToolTip(0, t("main_window.tab_status_tooltip"))
-        tabs.setTabToolTip(1, t("main_window.tab_transfers_tooltip"))
-        tabs.setTabToolTip(2, t("main_window.tab_history_tooltip"))
-        tabs.setTabToolTip(3, t("main_window.tab_conflicts_tooltip"))
-        tabs.setTabToolTip(4, t("main_window.tab_browse_tooltip"))
-        tabs.setTabToolTip(5, t("main_window.tab_log_tooltip"))
-        tabs.setTabToolTip(6, t("main_window.tab_mirrors_tooltip"))
-        tabs.setTabToolTip(7, t("main_window.tab_settings_tooltip"))
+        tabs.setTabToolTip(1, t("main_window.tab_metrics_tooltip"))
+        tabs.setTabToolTip(2, t("main_window.tab_transfers_tooltip"))
+        tabs.setTabToolTip(3, t("main_window.tab_history_tooltip"))
+        tabs.setTabToolTip(4, t("main_window.tab_conflicts_tooltip"))
+        tabs.setTabToolTip(5, t("main_window.tab_browse_tooltip"))
+        tabs.setTabToolTip(6, t("main_window.tab_log_tooltip"))
+        tabs.setTabToolTip(7, t("main_window.tab_mirrors_tooltip"))
+        tabs.setTabToolTip(8, t("main_window.tab_settings_tooltip"))
         shell_layout.addWidget(tabs, 1)
         self.setCentralWidget(shell)
 
@@ -158,6 +163,8 @@ class MainWindow(QMainWindow):
         self.engine.connection_changed.connect(self.scan_worker.set_connection)
         self.engine.connection_changed.connect(self.push_worker.set_connection)
         self.engine.connection_changed.connect(self.pull_worker.set_connection)
+        self.engine.connection_changed.connect(self.metrics_tab.on_connection_changed)
+        self.metrics_tab.set_active(tabs.currentIndex() == 1)
         self.scan_worker.queue_updated.connect(self.transfers_tab.on_queue_updated)
         self.scan_worker.scan_started.connect(self.transfers_tab.on_queue_scan_started)
         self.scan_worker.scan_finished.connect(self.transfers_tab.on_queue_scan_finished)
@@ -391,3 +398,7 @@ class MainWindow(QMainWindow):
                 worker.stop()
             except Exception as exc:
                 self.logger.log("ERROR", "-", detail=f"errore durante chiusura: {exc}")
+        try:
+            self.metrics_tab.stop()
+        except Exception as exc:
+            self.logger.log("ERROR", "-", detail=f"errore durante chiusura monitor NAS: {exc}")

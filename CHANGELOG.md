@@ -4,6 +4,20 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 1.22.0 - 2026-08-30
+
+- Aggiunto il change feed remoto: i client attendono la revisione del manifest
+  senza scansionare continuamente l'albero NAS, mantenendo il polling come
+  fallback per server o connessioni legacy.
+- Le mutazioni remote verificano che il lease globale appartenga al device che
+  invia journal, cancellazione, publish staging o operazione Browse.
+- Aggiunto il Monitor NAS con metriche read-only aggregate, contatori CPU/I/O,
+  grafici rolling e diagnostica di lock, coda, journal e manifest.
+- Le staging vecchie non referenziate da transazioni recuperabili vengono
+  ripulite con un limite per passaggio, senza interferire con upload attivi.
+- Ripristinata la fondazione dei test client, aggiunti contratti di protocollo,
+  fixture isolate, test di recovery e un harness di carico senza dati reali.
+
 ## 1.21.4 - 2026-08-23
 
 - La preview non puo piu precedere un push locale: una richiesta di sync, una

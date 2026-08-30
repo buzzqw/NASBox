@@ -86,6 +86,42 @@ class TransferSchedulerTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(len(list(trash.glob("version-*.txt"))), 599)
 
+    def test_staging_pruning_removes_only_old_unreferenced_batches(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            sandbox = Path(directory)
+            share = sandbox / "share"
+            staging = share / ".nasbox-staging"
+            staging.mkdir(parents=True)
+            abandoned = staging / "abandoned"
+            referenced = staging / "referenced"
+            abandoned.mkdir()
+            referenced.mkdir()
+            old_time = time.time() - 3 * 3600
+            os.utime(abandoned, (old_time, old_time))
+            os.utime(referenced, (old_time, old_time))
+            state = sandbox / "state" / "transactions"
+            state.mkdir(parents=True)
+            (state / "keep.txn").write_bytes(f"PUBLISH\0keep\0MOVED\0{referenced}\0".encode())
+            script = sandbox / "server.sh"
+            script.write_bytes(SCRIPT.read_bytes())
+            script.chmod(0o755)
+            config = sandbox / "server.conf"
+            config.write_text(
+                f"SHARE_ROOT={share}\nRETENTION_DAYS=0\n"
+                "STAGING_RETENTION_HOURS=1\nPRUNE_MAX_STAGING_PER_PASS=2\n"
+            )
+
+            result = subprocess.run(
+                [str(script), "-c", str(config), "--run-once"],
+                capture_output=True, text=True, timeout=10,
+            )
+            abandoned_removed = not abandoned.exists()
+            referenced_kept = referenced.exists()
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(abandoned_removed)
+        self.assertTrue(referenced_kept)
+
     def test_lease_activity_is_visible_without_releasing_the_lock(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             sandbox = Path(directory)

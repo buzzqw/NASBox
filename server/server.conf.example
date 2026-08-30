@@ -28,5 +28,11 @@ CHECK_INTERVAL_MINUTES=60
 # Older versions continue at the next CHECK_INTERVAL_MINUTES pass.
 PRUNE_MAX_FILES_PER_PASS=500
 
+# --- Abandoned private staging retention ---
+# A staging batch older than this is removed only during a pruning pass and
+# only when no recoverable transaction references it.
+STAGING_RETENTION_HOURS=168
+PRUNE_MAX_STAGING_PER_PASS=20
+
 # --- Housekeeping ---
 LOG_MAX_BYTES=5242880   # rotate server.log past this size (bytes)
