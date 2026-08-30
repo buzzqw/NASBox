@@ -31,6 +31,10 @@ from .sync_state import SyncStateStore
 from .watcher import WatcherHandle
 
 FALLBACK_INTERVAL_SECONDS = 60
+# The scheduler-backed SSH lock needs one round-trip even when it is free.
+# Zero makes RemoteLock time out before the NAS can answer, forcing the
+# timestamp-based rsync dry-run fallback and producing false queue entries.
+PREVIEW_LOCK_TIMEOUT_SECONDS = 2
 
 
 class ScanWorker(QThread):
@@ -174,7 +178,7 @@ class ScanWorker(QThread):
             lock_file = self.cfg.get("server_lock_file_remote")
             if isinstance(lock_file, str) and lock_file.strip().endswith("sync-transfer.lock"):
                 with rsync_ops.remote_lock(
-                    self.cfg, self._conn, timeout=0,
+                    self.cfg, self._conn, timeout=PREVIEW_LOCK_TIMEOUT_SECONDS,
                     owner_id=self.sync_state.device_id() if self.sync_state is not None else "preview",
                     priority=3,
                 ):
@@ -239,7 +243,7 @@ class ScanWorker(QThread):
                 lock_file = self.cfg.get("server_lock_file_remote")
                 if isinstance(lock_file, str) and lock_file.strip().endswith("sync-transfer.lock"):
                     with rsync_ops.remote_lock(
-                        self.cfg, self._conn, timeout=0,
+                        self.cfg, self._conn, timeout=PREVIEW_LOCK_TIMEOUT_SECONDS,
                         owner_id=self.sync_state.device_id() if self.sync_state is not None else "preview",
                         priority=3,
                     ):
