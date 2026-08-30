@@ -6,7 +6,7 @@ NASBox synchronizes one folder between multiple PCs through a NAS using SSH
 and rsync. The PyQt6 client manages uploads, downloads, queues, history and
 trash; the small NAS daemon applies remote history retention.
 
-Current protocol versions: client `1.22.1`, NAS server `3.16.0`.
+Current protocol versions: client `1.23.1`, NAS server `3.17.0`.
 
 ### What NASBox Is
 
@@ -32,7 +32,7 @@ replacement in every respect:
 | Control | You manage storage, users, SSH keys, backups and access | Dropbox manages hosted storage and service infrastructure |
 | Connectivity | LAN, direct WAN or an SSH bastion | Dropbox service endpoints |
 | Cost model | Uses your existing NAS and network | Uses a hosted account and plan limits |
-| Synchronization model | One NASBox root mirrored root-to-root, with exclusions | Dropbox folders with broader cloud collaboration features |
+| Synchronization model | One NASBox root mirrored root-to-root, with modes and exclusions | Dropbox folders with broader cloud collaboration features |
 | History/trash | Local trash plus NAS-side retention daemon | Dropbox-managed recovery and version history |
 | Sharing/collaboration | Not the main goal; no Dropbox-style public links or suite | Sharing, links and collaboration are core features |
 
@@ -45,11 +45,12 @@ NASBox is a synchronization tool, not a backup by itself.
 
 - One NASBox folder per PC, synchronized root-to-root with the NAS.
 - Configurable synchronization modes: bidirectional, push-only, pull-only, and
-  archive (local to NAS without propagating remote deletions).
+  archive (local to NAS without propagating local deletions to the NAS).
 - SSH/rsync transfers with LAN, direct WAN and SSH bastion support.
 - Transfer queue with preview, live speed, pause and manual synchronization.
-- Global NAS transfer scheduler shared by all clients, with priority tickets
-  and a session-bound lease instead of independent lock retries.
+- Shared local transfer scheduler for push, pull, mirrors and previews, with
+  priority aging/fairness and a persistent diagnostic queue; the NAS lease still
+  serializes filesystem mutations between different clients.
 - New-file batches are uploaded to a private NAS staging area without holding
   the global lease; an atomic, crash-recoverable publish makes them visible
   only after the complete batch is ready.
@@ -57,6 +58,12 @@ NASBox is a synchronization tool, not a backup by itself.
   client can distinguish checking, transfer and manifest commit.
 - Remote clients wait for a journal revision change instead of polling the NAS
   file tree continuously; polling remains as a compatibility fallback.
+- Per-path causal versions distinguish ordered changes from concurrent edits;
+  older clients and servers fall back to the timestamp-based protocol.
+- Conservative local file and non-empty directory renames use one journaled NAS
+  transaction. Empty directories are not entries in the file manifest.
+- Interrupted canonical transfers keep resumable partial data; private staging
+  can use `--append-verify`, while final publication remains atomic.
 - Read-only NAS load monitor for CPU, memory, swap, disk, network, lock, queue,
   journal and manifest activity. Fast metric samples never scan the NASBox tree.
 - Abandoned staging batches are reclaimed only during pruning, after a
@@ -201,7 +208,7 @@ NASBox sincronizza una cartella tra piu PC tramite un NAS, usando SSH e rsync.
 Il client grafico PyQt6 gestisce caricamenti, scaricamenti, coda, storico e
 cestino; il piccolo demone sul NAS applica la retention dello storico remoto.
 
-Versioni correnti del protocollo: client `1.22.1`, server NAS `3.16.0`.
+Versioni correnti del protocollo: client `1.23.1`, server NAS `3.17.0`.
 
 ### Che cos'e NASBox
 
@@ -241,17 +248,23 @@ backup autonomo.
 
 - Una cartella NASBox per ogni PC, sincronizzata root-to-root con il NAS.
 - Modalità configurabili: bidirezionale, solo locale (push-only), solo NAS
-  (pull-only) e archivio locale -> NAS senza propagare cancellazioni remote.
+  (pull-only) e archivio locale -> NAS senza propagare cancellazioni locali al NAS.
 - Trasferimenti SSH/rsync con supporto LAN, WAN diretta e bastione SSH.
 - Coda trasferimenti con anteprima, velocita live, pausa e sincronizzazione
   manuale.
-- Scheduler globale sul NAS condiviso da tutti i client, con ticket a priorita'
-  e lease legato alla sessione invece di retry indipendenti del lock.
+- Scheduler locale condiviso da push, pull, mirror e anteprime, con aging/fairness
+  e coda diagnostica persistente; il lease NAS serializza le mutazioni tra PC.
 - I batch di soli file nuovi vengono caricati in una staging privata del NAS
   senza trattenere il lease globale; un publish atomico e recuperabile dopo
   crash li rende visibili solo quando il batch e pronto.
 - La diagnostica del lease mostra proprietario, fase e contatori del batch,
   distinguendo attesa, verifica, trasferimento e commit del manifest.
+- Le versioni causali per percorso distinguono modifiche ordinate da modifiche
+  concorrenti; con server legacy resta il fallback basato sui timestamp.
+- Le rinomine locali non ambigue di file e directory non vuote usano una singola
+  transazione journalizzata sul NAS. Le directory vuote non sono nel manifest.
+- I trasferimenti interrotti conservano dati parziali riprendibili; `--append-verify`
+  è usato solo nella staging privata, mentre la pubblicazione finale resta atomica.
 - I client attendono le nuove revisioni del journal senza scansionare
   continuamente l'albero NAS; il polling resta disponibile come fallback.
 - Il Monitor NAS mostra carico, memoria, swap, disco, rete, lock, coda, journal

@@ -1,6 +1,6 @@
 # NASBox backlog
 
-Aggiornato il 2026-08-30 dopo la release client 1.23.0 e server 3.17.0.
+Aggiornato il 2026-08-30 dopo la release client 1.23.1 e server 3.17.0.
 Le voci sotto descrivono il lavoro ancora utile senza confondere le funzioni
 gia' implementate con quelle solo da verificare in laboratorio.
 

@@ -4,6 +4,11 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 1.23.1 - 2026-08-30
+
+- Corretto il ciclo push del client: una guardia su un risultato non ancora
+  definito causava `push tick failed` a ogni secondo dopo l'avvio.
+
 ## 1.23.0 - 2026-08-30
 
 - Aggiunte versioni causali per percorso nel manifest e nel journal, con

@@ -6,6 +6,8 @@ cartella NASBox** — con il NAS; il NAS gira un demone leggero che applica la
 retention dello storico. Tutti i PC collegati vedono, con un ritardo di al
 più qualche decina di secondi, i file che gli altri ci mettono dentro.
 
+Versione documentata: client `1.23.1`, server NAS `3.17.0`.
+
 Il modello è deliberatamente quello di Dropbox: **una** cartella per PC,
 niente elenchi di condivisioni da aggiungere/modificare/rimuovere a mano.
 Meno cose da configurare vuol dire anche meno modi di fare danni: la vecchia
@@ -57,6 +59,11 @@ problema semplicemente non può più presentarsi.
   un'unica cartella sul NAS: rileva le modifiche locali quasi in tempo reale
   e le manda al NAS (push), e periodicamente scarica quello che gli altri PC
   hanno mandato nel frattempo (pull).
+- **Coordinamento locale**: push, pull, mirror e anteprima usano uno scheduler
+  comune. Le priorità ricevono aging dopo l'attesa, così una preview o un mirror
+  non possono restare affamati da push continui. La coda scheduler viene
+  conservata nel database locale per la diagnostica; il NAS mantiene comunque
+  il lease globale tra PC diversi.
 - **Server** (`server/`): demone bash autonomo installato sul NAS. I client
   trasferiscono i dati via SSH/rsync, mentre il server gestisce retention,
   journal, manifest e il publish atomico dei file nella staging privata. I
@@ -65,6 +72,10 @@ problema semplicemente non può più presentarsi.
   l'unica fonte di verità per la cartella NASBox lato NAS e per la retention:
   i client la leggono da lì invece di doverla ridigitare ognuno per conto
   proprio (vedi [§6](#6-connessione-al-nas-tab-impostazioni)).
+- **Versioni causali**: ogni file può portare una versione per-device nel
+  manifest/journal. Una versione che domina causalmente l'altra vince prima del
+  confronto temporale; se il server non supporta il protocollo nuovo, il client
+  usa automaticamente il formato precedente.
 - **Storico/cestino**: ogni volta che un file viene sovrascritto o cancellato,
   la versione precedente non sparisce: viene rinominata con un timestamp UTC
   ad alta precisione e
@@ -313,6 +324,11 @@ La modalità archivio non crea copie datate aggiuntive né un namespace separato
 sostituzioni. Non viene introdotto alcun refresh automatico della vista
 **Conflitti**; la gestione esistente resta invariata.
 
+Il cambio di modalità vale per l'unica cartella NASBox configurata sul PC e non
+riscrive retroattivamente lo storico. Prima di passare a una modalità più
+restrittiva verifica la coda e lo storico; eventuali file già presenti non
+vengono cancellati automaticamente solo per effetto del cambio.
+
 **Pulsante "Rileva dal NAS"** (accanto al campo Cartella NASBox sul NAS): si
 collega al NAS con i parametri sopra. Se "Script server sul NAS" è vuoto,
 prova prima a trovarlo da solo cercando il processo del demone in esecuzione
@@ -454,6 +470,11 @@ una voce sincronizzata sul NAS; gli eventi directory vengono consumati e non
 restano nella coda pending. Le directory che contengono file vengono comunque
 gestite tramite i file contenuti e, quando possibile, tramite rinomina atomica
 della directory.
+
+La transazione di rename verifica che la sorgente NAS abbia ancora digest,
+dimensione e percorso attesi e che la destinazione sia libera. Se la verifica
+fallisce, l'operazione non forza lo spostamento: viene ritentata oppure degrada
+al normale percorso di riconciliazione, conservando le versioni concorrenti.
 
 ### Cartelle esterne (mirror)
 
@@ -598,6 +619,14 @@ L'elenco è un'anteprima della **coda corrente** calcolata con un controllo
 senza scritture; non è lo storico delle operazioni. Si aggiorna durante e dopo
 la sincronizzazione.
 
+Lo scheduler locale mostra inoltre l'operazione attiva e le richieste in attesa
+di eseguire push, pull, mirror o anteprima. Le richieste più recenti non possono
+posticipare indefinitamente una richiesta vecchia: dopo circa 30 secondi di
+attesa l'aging ne aumenta progressivamente la priorità. Se l'app viene chiusa,
+le richieste in corso vengono ricostruite dal watcher e dalla coda pending al
+riavvio; le righe dello scheduler lasciate da un arresto anomalo vengono
+riconosciute come stale e non bloccano il client.
+
 - **Velocità live**: due indicatori ("↑ Carica" / "↓ Scarica") mostrano la
   velocità in tempo reale mentre un trasferimento è in corso (letta
   direttamente dal progresso di rsync), non un valore medio a posteriori.
@@ -611,6 +640,9 @@ la sincronizzazione.
   NAS, trasferimento, conferma e commit. Per un batch composto solo da file
   nuovi il trasferimento avviene nella staging privata e non trattiene il
   lease NAS; il lock viene usato solo per il publish finale e il journal.
+- Un file interrotto mantiene il parziale in `.sync-partial/` e viene ripreso
+  dal ciclo successivo. I file canonici restano pubblicati in modo atomico; il
+  resume append con verifica completa è riservato alla staging privata.
 
 Un batch che contiene file gia presenti, conflitti o cancellazioni continua a
 usare il percorso conservativo: tali operazioni devono verificare lo stato live
@@ -724,6 +756,7 @@ numero limitato di giorni su un piano gratuito.
 | `~/.local/state/sync-daemon/client.log` | Log testuale |
 | `~/.local/state/sync-daemon/events.jsonl` | Log strutturato (eventi) |
 | `~/.local/state/sync-daemon/trash/` | Cestino/storico locale |
+| `~/.local/state/sync-daemon/sync-state.sqlite3` | Baseline, pending, versioni causali e coda scheduler persistente |
 | `<pacchetto_server>/server.conf` | Configurazione demone NAS (fonte di verità) |
 | `<pacchetto_server>/state/server.log` | Log del demone NAS |
 | `<pacchetto_server>/state/daemon.pid` | PID del demone NAS (se in esecuzione) |
@@ -856,7 +889,15 @@ cancella `server.conf` né i log.
   davvero a `SHARE_ROOT` sul NAS.
 - Controlla anche il tab Impostazioni → "Escludi dalla sincronizzazione": un
   pattern troppo largo (es. `*` per errore) esclude tutto senza dare nessun
-  errore, semplicemente non c'è niente da trasferire.
+   errore, semplicemente non c'è niente da trasferire.
+
+**Un trasferimento grande è stato interrotto**
+- Non eliminare `.sync-partial/`: contiene i dati riprendibili del trasferimento.
+- Riavvia o riattiva il client; il file viene ritentato dopo la verifica di
+  stabilità e la pubblicazione canonica avviene solo a completamento.
+- La ripresa automatica è coperta da test unitari; la prova end-to-end con file
+  multi-GB richiede una share NAS di laboratorio e non va eseguita sulla share
+  di produzione senza una finestra controllata.
 
 **Il demone server non riparte dopo un riavvio del NAS**
 - `./sync-daemon-server.sh --status` per vedere se è attivo.

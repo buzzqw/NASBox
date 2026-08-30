@@ -168,8 +168,6 @@ class PushWorker(TransferWorker):
             return
         if not self.lock_coordinator.can_attempt():
             return
-        if result.cancelled or self._stop_flag.is_set() or self.cfg.is_paused():
-            return
         debounce = float(self.cfg.get("debounce_seconds") or 2)
         watcher = self.watchers.get()
         force_sync = self._force_sync.is_set()

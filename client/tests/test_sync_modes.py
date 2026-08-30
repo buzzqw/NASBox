@@ -68,6 +68,21 @@ class SyncModeTests(unittest.TestCase):
         worker = PushWorker(cfg, Mock(), Mock(), threading.Lock(), Mock())
         worker._tick()
 
+    def test_push_tick_without_changes_does_not_reference_transfer_result(self) -> None:
+        cfg = Mock()
+        cfg.allows_push.return_value = True
+        cfg.is_paused.return_value = False
+        cfg.is_configured.return_value = True
+        cfg.get.return_value = 2
+        cfg.local_root.return_value = "/tmp/nasbox-test"
+        watchers = Mock()
+        watchers.get.return_value = None
+        sync_state = Mock()
+        sync_state.pending_paths.return_value = set()
+        worker = PushWorker(cfg, Mock(), watchers, threading.Lock(), sync_state)
+        worker.set_connection(object())
+        worker._tick()
+
     def test_pull_worker_does_not_run_in_push_only_or_archive(self) -> None:
         for mode in (SYNC_MODE_PUSH_ONLY, SYNC_MODE_ARCHIVE):
             with self.subTest(mode=mode):
