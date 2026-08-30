@@ -4,6 +4,13 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 1.23.2 - 2026-08-30
+
+- Aggiunti avvisi urgenti nella tray quando il NAS diventa irraggiungibile o
+  il demone server non risponde, con deduplicazione per transizione di stato.
+- Aggiunta la notifica di ripristino della connessione NAS e ridotto a un
+  minuto il controllo della salute del demone.
+
 ## 1.23.1 - 2026-08-30
 
 - Corretto il ciclo push del client: una guardia su un risultato non ancora

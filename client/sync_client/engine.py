@@ -40,7 +40,7 @@ from .watcher import FolderWatcher, WatcherHandle
 TICK_SECONDS = 1
 HOST_RECHECK_SECONDS = 30
 PRUNE_INTERVAL_SECONDS = 24 * 3600
-HEALTH_CHECK_INTERVAL_SECONDS = 15 * 60  # is the NAS-side server daemon actually running?
+HEALTH_CHECK_INTERVAL_SECONDS = 60  # is the NAS-side server daemon actually running?
 VERSION_WARNING_REPEAT_SECONDS = 6 * 3600  # don't re-nag about an outdated server package more than this often
 PENDING_STATUS_INTERVAL_SECONDS = 5
 
@@ -53,6 +53,7 @@ class SyncEngine(QThread):
     server_outdated = pyqtSignal(str)             # friendly message, emitted whenever detected
     server_update_available = pyqtSignal(str, str, str)  # message, path, version
     server_restarted = pyqtSignal(str)            # friendly message -- NAS daemon was found down and (attempted to be) restarted
+    server_health_changed = pyqtSignal(str)       # unknown | ok | down | unresponsive | outdated
 
     def __init__(
         self, cfg: Config, logger: EventLogger, watchers: WatcherHandle,
@@ -79,6 +80,7 @@ class SyncEngine(QThread):
         self._last_pending_status = 0.0
         self._pending_summary: dict[str, object] = {}
         self._offered_server_update = ""
+        self._server_health = "unknown"
 
     # --- external controls ---
 
@@ -163,6 +165,8 @@ class SyncEngine(QThread):
             self._conn = rsync_ops.resolve_connection(self.cfg)
             self._last_host_check = time.time()
             self.connection_changed.emit(self._conn)
+            if self._conn is None:
+                self._set_server_health("unknown")
 
         paused = self.cfg.is_paused()
         watcher = self.watchers.get()
@@ -191,6 +195,7 @@ class SyncEngine(QThread):
             "watcher_detail": watcher_detail,
             "pending_summary": self._pending_summary,
             "scheduler": self.transfer_scheduler.snapshot() if self.transfer_scheduler else {},
+            "server_health": self._server_health,
             "cycle_ts": now,
         })
 
@@ -260,19 +265,29 @@ class SyncEngine(QThread):
 
     # --- NAS-side server daemon health (running? outdated?) ---
 
+    def _set_server_health(self, state: str) -> None:
+        if state == self._server_health:
+            return
+        self._server_health = state
+        self.server_health_changed.emit(state)
+
     def _check_server_health(self) -> None:
         if not self.cfg.get("remote_server_script") or self._conn is None:
+            self._set_server_health("unknown")
             return  # nothing configured yet / not connected -- nothing to check
 
         ok, values, err = trash.fetch_remote_config(self.cfg, self._conn)
         if not ok:
             if "precedente" in err or "sconosciuta" in err.lower():
+                self._set_server_health("outdated")
                 message = (
                     f"{err}\n\nLo script server aggiornato è nella cartella server/, "
                     "accanto allo script attivo. Copialo sul NAS e riavvia sync-daemon-server.sh."
                 )
                 self._log("SERVER_OUTDATED", "-", message)
                 self.server_outdated.emit(message)
+            else:
+                self._set_server_health("unresponsive")
             return  # other failures (transient connectivity, misconfigured path) stay quiet here
 
         state_dir = values.get("STATE_DIR", "")
@@ -327,8 +342,11 @@ class SyncEngine(QThread):
             self.cfg.set("remote_causal_versions_available", causal_versions_available)
 
         if not values.get("running"):
+            self._set_server_health("down")
             self._log("SERVER_DOWN", "-", "il demone server sul NAS non è attivo: avvio automatico in corso")
             self._restart_server_daemon()
+        else:
+            self._set_server_health("ok")
 
         remote_version = values.get("VERSION", "")
         versioned_update = rsync_ops.discover_remote_server_update(
@@ -385,10 +403,12 @@ class SyncEngine(QThread):
         detail = (stdout + stderr).strip()
         if ok:
             message = detail or "demone riavviato con successo"
+            self._set_server_health("ok")
             self._log("SERVER_RESTARTED", "-", message)
             self.server_restarted.emit(f"Il demone server sul NAS non era attivo: riavviato.\n\n{message}")
         else:
             message = detail or "errore sconosciuto"
+            self._set_server_health("unresponsive")
             self._log("ERROR", "-", f"impossibile riavviare il demone sul NAS: {message}")
             self.server_restarted.emit(
                 f"Il demone server sul NAS non è attivo e il tentativo di riavvio automatico è fallito:\n\n{message}\n\n"

@@ -212,6 +212,7 @@ class MainWindow(QMainWindow):
             )
             worker.transfer_item_done.connect(item_done_slot)
         self.engine.status_changed.connect(self.tray.on_status_changed)
+        self.engine.server_health_changed.connect(self.tray.on_server_health_changed)
         self.scan_worker.queue_updated.connect(self.tray.on_queue_updated)
         self.engine.server_outdated.connect(self._on_server_outdated)
         self.engine.server_update_available.connect(self._on_server_update_available)

@@ -870,6 +870,21 @@ STRINGS: dict[str, dict[str, str]] = {
     },
     "tray.not_configured": {"it": "⚠️ Cartella NASBox non configurata", "en": "⚠️ NASBox folder not set up"},
     "tray.nas_unreachable": {"it": "⚠️ NAS non raggiungibile", "en": "⚠️ NAS unreachable"},
+    "tray.nas_lost_title": {"it": "Connessione NAS persa", "en": "NAS connection lost"},
+    "tray.nas_lost_body": {
+        "it": "Il NAS non è più raggiungibile. Le operazioni in attesa verranno ritentate automaticamente.",
+        "en": "The NAS is no longer reachable. Pending operations will be retried automatically.",
+    },
+    "tray.nas_restored_title": {"it": "Connessione NAS ripristinata", "en": "NAS connection restored"},
+    "tray.nas_restored_body": {
+        "it": "Il collegamento al NAS è nuovamente disponibile.",
+        "en": "The NAS connection is available again.",
+    },
+    "tray.server_unresponsive_title": {"it": "Servizio NAS non responsivo", "en": "NAS service not responding"},
+    "tray.server_unresponsive_body": {
+        "it": "Il demone NAS non risponde. Il client proverà a riavviarlo via SSH e continuerà a ritentare.",
+        "en": "The NAS daemon is not responding. The client will try to restart it over SSH and keep retrying.",
+    },
     "tray.paused": {"it": "⏸ In pausa", "en": "⏸ Paused"},
     "tray.active": {"it": "✅ Attivo — {where}", "en": "✅ Active — {where}"},
     "tray.via_bastion": {"it": "(via bastione)", "en": "(via bastion)"},

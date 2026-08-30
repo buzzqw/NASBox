@@ -36,6 +36,8 @@ class TrayIcon(QSystemTrayIcon):
         # so the icon is re-resolved from whichever changed most recently.
         self._configured = False
         self._connected = False
+        self._connection_seen = False
+        self._server_health = "unknown"
         self._paused = False
         self._pending_count = 0
         self._active_transfers: set[str] = set()
@@ -241,6 +243,8 @@ class TrayIcon(QSystemTrayIcon):
     # --- signals from engine / scan_worker ---
 
     def on_status_changed(self, status: dict) -> None:
+        was_connected = self._connected
+        had_status = self._connection_seen
         self._paused = status.get("paused", False)
         self._connected = status.get("connected", False)
         self._configured = status.get("configured", True)
@@ -258,6 +262,35 @@ class TrayIcon(QSystemTrayIcon):
             self._status_text = t("tray.active", where=where)
 
         self._apply_icon()
+
+        if had_status and was_connected and not self._connected:
+            self.showMessage(
+                t("tray.nas_lost_title"),
+                t("tray.nas_lost_body"),
+                QSystemTrayIcon.MessageIcon.Critical,
+                30_000,
+            )
+        elif had_status and not was_connected and self._connected:
+            self.showMessage(
+                t("tray.nas_restored_title"),
+                t("tray.nas_restored_body"),
+                QSystemTrayIcon.MessageIcon.Information,
+                8_000,
+            )
+        self._connection_seen = True
+
+    @pyqtSlot(str)
+    def on_server_health_changed(self, health: str) -> None:
+        previous = self._server_health
+        self._server_health = health
+        if health not in {"down", "unresponsive"} or previous in {"down", "unresponsive"}:
+            return
+        self.showMessage(
+            t("tray.server_unresponsive_title"),
+            t("tray.server_unresponsive_body"),
+            QSystemTrayIcon.MessageIcon.Critical,
+            30_000,
+        )
 
     def on_queue_updated(self, items: list[TransferItem]) -> None:
         self._pending_count = len(items)
