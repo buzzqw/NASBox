@@ -105,6 +105,21 @@ class MetricsTab(QWidget):
         toolbar.addWidget(self.refresh_btn)
         root.addLayout(toolbar)
 
+        self.sync_state_box = QFrame()
+        self.sync_state_box.setObjectName("syncStateBox")
+        state_layout = QVBoxLayout(self.sync_state_box)
+        state_layout.setContentsMargins(14, 10, 14, 10)
+        state_layout.setSpacing(2)
+        self.sync_state_title = QLabel()
+        self.sync_state_title.setObjectName("syncStateTitle")
+        self.sync_state_detail = QLabel()
+        self.sync_state_detail.setObjectName("syncStateDetail")
+        self.sync_state_detail.setWordWrap(True)
+        state_layout.addWidget(self.sync_state_title)
+        state_layout.addWidget(self.sync_state_detail)
+        root.addWidget(self.sync_state_box)
+        self._set_sync_state("unknown", t("metrics.sync_unknown_title"), t("metrics.sync_unknown_detail"))
+
         cards = QGridLayout()
         cards.setHorizontalSpacing(12)
         cards.setVerticalSpacing(12)
@@ -192,12 +207,15 @@ class MetricsTab(QWidget):
         self._timer.stop()
         if not self._connected:
             self.status_label.setText(t("metrics.status_offline"))
+            self._set_sync_state("error", t("metrics.sync_offline_title"), t("metrics.sync_offline_detail"))
             self.refresh_btn.setEnabled(True)
             return
         if not self._active:
             self.status_label.setText(t("metrics.status_unknown"))
+            self._set_sync_state("unknown", t("metrics.sync_unknown_title"), t("metrics.sync_unknown_detail"))
             return
         self.status_label.setText(t("metrics.status_loading"))
+        self._set_sync_state("loading", t("metrics.sync_loading_title"), t("metrics.sync_loading_detail"))
         self._timer.start(0)
 
     def set_active(self, active: bool) -> None:
@@ -242,6 +260,7 @@ class MetricsTab(QWidget):
         if connection is None:
             self._connected = False
             self.status_label.setText(t("metrics.status_offline"))
+            self._set_sync_state("error", t("metrics.sync_offline_title"), t("metrics.sync_offline_detail"))
             return
         self._connected = True
         self._busy = True
@@ -249,6 +268,7 @@ class MetricsTab(QWidget):
         self._metrics_proc = None
         self.refresh_btn.setEnabled(False)
         self.status_label.setText(t("metrics.status_loading"))
+        self._set_sync_state("loading", t("metrics.sync_loading_title"), t("metrics.sync_loading_detail"))
         run_in_background(
             self, "_metrics_call",
             lambda: self._collector.collect(self.cfg, connection, on_start=self._set_metrics_process),
@@ -275,19 +295,23 @@ class MetricsTab(QWidget):
             return
         if exc is not None:
             self.status_label.setText(t("metrics.status_failed", detail=str(exc)))
+            self._set_sync_state("error", t("metrics.sync_error_title"), str(exc))
             self._schedule_next()
             return
         if result is None:
             self.status_label.setText(t("metrics.status_failed", detail=t("metrics.invalid_response")))
+            self._set_sync_state("error", t("metrics.sync_error_title"), t("metrics.invalid_response"))
             self._schedule_next()
             return
         if not result.supported:
             self._supported = False
             self.status_label.setText(t("metrics.status_unsupported"))
+            self._set_sync_state("error", t("metrics.sync_error_title"), t("metrics.status_unsupported"))
             self._timer.stop()
             return
         if result.metrics is None:
             self.status_label.setText(t("metrics.status_failed", detail=result.detail or t("metrics.invalid_response")))
+            self._set_sync_state("error", t("metrics.sync_error_title"), result.detail or t("metrics.invalid_response"))
             self._schedule_next()
             return
         self._supported = True
@@ -302,7 +326,62 @@ class MetricsTab(QWidget):
         if self._connected and self._supported:
             self._timer.start(self._refresh_interval_ms())
 
+    def _set_sync_state(self, state: str, title: str, detail: str) -> None:
+        colors = {
+            "idle": ("#f0fdf4", "#bbf7d0", "#166534", "#15803d"),
+            "busy": ("#eff6ff", "#bfdbfe", "#1e40af", "#1d4ed8"),
+            "queue": ("#fffbeb", "#fde68a", "#92400e", "#b45309"),
+            "loading": ("#eff6ff", "#bfdbfe", "#1e40af", "#1d4ed8"),
+            "error": ("#fef2f2", "#fecaca", "#991b1b", "#b91c1c"),
+            "unknown": ("#f3f4f6", "#d1d5db", "#374151", "#4b5563"),
+        }
+        background, border, detail_color, title_color = colors.get(state, colors["unknown"])
+        self.sync_state_box.setStyleSheet(
+            "QFrame#syncStateBox { "
+            f"background-color: {background}; border: 1px solid {border}; border-radius: 8px; "
+            "} "
+            f"QLabel#syncStateTitle {{ color: {title_color}; font-size: 18px; font-weight: 600; }} "
+            f"QLabel#syncStateDetail {{ color: {detail_color}; font-size: 12px; }}"
+        )
+        self.sync_state_title.setText(title)
+        self.sync_state_detail.setText(detail)
+
+    def _display_sync_state(self, metrics: NasMetrics) -> None:
+        if metrics.nasbox_lock_held:
+            phase_keys = {
+                "checking": "metrics.phase_checking",
+                "transferring": "metrics.phase_transferring",
+                "confirming": "metrics.phase_confirming",
+            }
+            phase = t(phase_keys.get(metrics.nasbox_lock_phase, "metrics.phase_unknown"))
+            progress = ""
+            if metrics.nasbox_lock_progress_total:
+                progress = t(
+                    "metrics.sync_progress",
+                    done=metrics.nasbox_lock_progress_done,
+                    total=metrics.nasbox_lock_progress_total,
+                )
+            detail = t("metrics.sync_busy_detail", phase=phase, progress=progress)
+            self._set_sync_state("busy", t("metrics.sync_busy_title"), detail)
+            return
+        if metrics.nasbox_queue_count:
+            self._set_sync_state(
+                "queue",
+                t("metrics.sync_queue_title"),
+                t("metrics.sync_queue_detail", count=metrics.nasbox_queue_count),
+            )
+            return
+        if metrics.nasbox_staging_count:
+            self._set_sync_state(
+                "queue",
+                t("metrics.sync_staging_title"),
+                t("metrics.sync_staging_detail", count=metrics.nasbox_staging_count),
+            )
+            return
+        self._set_sync_state("idle", t("metrics.sync_idle_title"), t("metrics.sync_idle_detail"))
+
     def _display(self, metrics: NasMetrics) -> None:
+        self._display_sync_state(metrics)
         self.load_label.setText(
             f"{metrics.load_1:.2f} / {metrics.load_5:.2f} / {metrics.load_15:.2f}"
         )

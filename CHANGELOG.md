@@ -4,6 +4,11 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 1.22.1 - 2026-08-30
+
+- Reso immediato lo stato della sincronizzazione nel Monitor NAS con un
+  indicatore semplice per attività, coda, attesa e assenza di trasferimenti.
+
 ## 1.22.0 - 2026-08-30
 
 - Aggiunto il change feed remoto: i client attendono la revisione del manifest
