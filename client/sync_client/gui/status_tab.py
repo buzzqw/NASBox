@@ -59,6 +59,7 @@ class StatusTab(QWidget):
         self._diagnostics_available = False
         self._nas_available_bytes: int | None = None
         self._queue_items = None
+        self._scheduler_status: dict[str, object] = {}
         self._transfer_phases: dict[str, str] = {}
         self._current_paths: dict[str, str] = {}
         self._last_success: tuple[float, str] | None = None
@@ -332,6 +333,7 @@ class StatusTab(QWidget):
         self._refresh_sync_state(paused, remaining)
         self._refresh_remote_lock(status)
         self._refresh_watcher(status)
+        self._scheduler_status = status.get("scheduler") or {}
         self._refresh_queue_label()
         self._refresh_pending_summary(status)
         self._refresh_attention()
@@ -418,14 +420,25 @@ class StatusTab(QWidget):
         if not self._connected:
             self.queue_label.setText(t("status.queue_offline"))
             return
-        if not self._queue_items:
-            self.queue_label.setText(t("status.queue_empty"))
-            return
-        items = self._queue_items
-        uploads = sum(1 for item in items if item.direction == "upload")
+        items = self._queue_items or []
+        uploads = sum(1 for item in items if item.direction in ("upload", "rename_remote"))
         downloads = sum(1 for item in items if item.direction == "download")
         deletes = sum(1 for item in items if item.direction.startswith("delete_"))
-        self.queue_label.setText(t("status.queue_summary", uploads=uploads, downloads=downloads, deletes=deletes))
+        scheduler = self._scheduler_status
+        active = str(scheduler.get("active") or "")
+        waiting = scheduler.get("waiting") or []
+        waiting_count = len(waiting) if isinstance(waiting, list) else 0
+        if not items and not active and not waiting_count:
+            self.queue_label.setText(t("status.queue_empty"))
+            return
+        self.queue_label.setText(t(
+            "status.queue_summary",
+            uploads=uploads,
+            downloads=downloads,
+            deletes=deletes,
+            active=active or "nessuna",
+            scheduler_waiting=waiting_count,
+        ))
 
     def on_transfer_preparing(self, direction: str) -> None:
         self._transfer_phases[direction] = "preparing"

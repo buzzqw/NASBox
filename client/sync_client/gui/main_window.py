@@ -60,11 +60,11 @@ class MainWindow(QMainWindow):
             self._run_first_time_setup()
 
         watchers = WatcherHandle()
-        transfer_scheduler = TransferScheduler()
+        sync_state = SyncStateStore(self.cfg)
+        transfer_scheduler = TransferScheduler(sync_state)
         transfer_active = threading.Event()
         push_requested = threading.Event()
         lock_coordinator = LockCoordinator()
-        sync_state = SyncStateStore(self.cfg)
         self.sync_state = sync_state
         self.scan_worker = ScanWorker(
             self.cfg, transfer_active=transfer_active, sync_state=sync_state,
@@ -88,6 +88,7 @@ class MainWindow(QMainWindow):
             self.cfg, self.logger, watchers,
             push_worker=self.push_worker, pull_worker=self.pull_worker,
             sync_state=sync_state,
+            transfer_scheduler=transfer_scheduler,
         )
         self.mirror_manager = MirrorManager(self.cfg, self.logger, transfer_scheduler.permit("mirror"))
 

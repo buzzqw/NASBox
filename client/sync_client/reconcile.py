@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 
-from .sync_state import Fingerprint
+from .sync_state import CausalVersion, Fingerprint
 
 
 class RemoteKind(str, Enum):
@@ -20,6 +20,7 @@ class RemoteState:
     digest: str = ""
     size: int = 0
     mtime_ns: int = 0
+    causal: CausalVersion | None = None
 
     @property
     def is_file(self) -> bool:
@@ -35,6 +36,7 @@ class Action(str, Enum):
     CONFLICT_LOCAL_WINS = "conflict_local_wins"
     CONFLICT_REMOTE_WINS = "conflict_remote_wins"
     BLOCK = "block"
+    RENAME = "rename"
 
 
 @dataclass(frozen=True)
@@ -58,12 +60,26 @@ def _event_is_newer(local: Fingerprint, remote: RemoteState) -> bool:
     return local.mtime_ns // 1_000_000_000 > remote.mtime_ns // 1_000_000_000
 
 
+def _causal_winner(
+    local: Fingerprint | None, remote: RemoteState,
+    local_causal: CausalVersion | None = None,
+) -> str | None:
+    """Return a winner only when the two versions are causally ordered."""
+    local_version = local.causal if local is not None else local_causal
+    if local_version is not None and local_version.dominates(remote.causal):
+        return "local"
+    if remote.causal is not None and remote.causal.dominates(local_version):
+        return "remote"
+    return None
+
+
 def plan_path(
     baseline: Fingerprint | None,
     local: Fingerprint | None,
     remote: RemoteState,
     *,
     delete_enabled: bool,
+    local_causal: CausalVersion | None = None,
 ) -> Decision:
     """Choose one convergent action from the common base and both live states."""
     if remote.kind == RemoteKind.OTHER:
@@ -91,6 +107,10 @@ def plan_path(
             return Decision(Action.CONFLICT_REMOTE_WINS, "storia locale sconosciuta rispetto alla cancellazione NAS")
         if _same_file(local, remote):
             return Decision(Action.ADOPT)
+        if _causal_winner(local, remote, local_causal) == "local":
+            return Decision(Action.CONFLICT_LOCAL_WINS, "versione locale causalmente successiva")
+        if _causal_winner(local, remote, local_causal) == "remote":
+            return Decision(Action.CONFLICT_REMOTE_WINS, "versione NAS causalmente successiva")
         if _event_is_newer(local, remote):
             return Decision(Action.CONFLICT_LOCAL_WINS, "file locale piu' recente")
         return Decision(Action.CONFLICT_REMOTE_WINS, "file NAS piu' recente o contemporaneo")
@@ -103,9 +123,15 @@ def plan_path(
         if remote.kind == RemoteKind.TOMBSTONE:
             # This client had already adopted the deletion, therefore the
             # recreated local file is causally newer regardless of clock skew.
+            if _causal_winner(local, remote, local_causal) == "remote":
+                return Decision(Action.CONFLICT_REMOTE_WINS, "cancellazione NAS causalmente successiva")
             return Decision(Action.UPLOAD, "ricreazione locale successiva alla cancellazione NAS")
         if _same_file(local, remote):
             return Decision(Action.ADOPT)
+        if _causal_winner(local, remote, local_causal) == "local":
+            return Decision(Action.CONFLICT_LOCAL_WINS, "versione locale causalmente successiva")
+        if _causal_winner(local, remote, local_causal) == "remote":
+            return Decision(Action.CONFLICT_REMOTE_WINS, "versione NAS causalmente successiva")
         if _event_is_newer(local, remote):
             return Decision(Action.CONFLICT_LOCAL_WINS, "ricreazione locale piu' recente")
         return Decision(Action.CONFLICT_REMOTE_WINS, "versione NAS piu' recente o contemporanea")
@@ -118,6 +144,11 @@ def plan_path(
         # change must not turn a local deletion into an endless remote-wins
         # retry; the observed live fingerprint remains the delete TOCTOU guard.
         remote_is_base = remote.digest == baseline.digest
+        causal_winner = _causal_winner(None, remote, local_causal)
+        if causal_winner == "local" and delete_enabled:
+            return Decision(Action.DELETE_REMOTE, "cancellazione locale causalmente successiva")
+        if causal_winner == "remote":
+            return Decision(Action.REMOTE_WINS, "cancellazione locale stantia: versione NAS causalmente successiva")
         if delete_enabled and remote_is_base:
             return Decision(Action.DELETE_REMOTE)
         if not delete_enabled:
@@ -128,6 +159,11 @@ def plan_path(
     if remote.kind in (RemoteKind.ABSENT, RemoteKind.TOMBSTONE):
         if not local_changed:
             return Decision(Action.REMOTE_WINS)
+        causal_winner = _causal_winner(local, remote, local_causal)
+        if causal_winner == "local":
+            return Decision(Action.UPLOAD, "modifica locale causalmente successiva alla cancellazione NAS")
+        if causal_winner == "remote":
+            return Decision(Action.CONFLICT_REMOTE_WINS, "cancellazione NAS causalmente successiva")
         return Decision(Action.CONFLICT_REMOTE_WINS, "modifica locale concorrente con cancellazione NAS")
 
     if _same_file(local, remote):
@@ -140,6 +176,11 @@ def plan_path(
         return Decision(Action.REMOTE_WINS)
     if not local_changed and not remote_changed:
         return Decision(Action.ADOPT)
+    causal_winner = _causal_winner(local, remote, local_causal)
+    if causal_winner == "local":
+        return Decision(Action.CONFLICT_LOCAL_WINS, "modifiche: versione locale causalmente successiva")
+    if causal_winner == "remote":
+        return Decision(Action.CONFLICT_REMOTE_WINS, "modifiche: versione NAS causalmente successiva")
     if _event_is_newer(local, remote):
         return Decision(Action.CONFLICT_LOCAL_WINS, "modifiche concorrenti: file locale piu' recente")
     return Decision(Action.CONFLICT_REMOTE_WINS, "modifiche concorrenti: file NAS piu' recente o contemporaneo")

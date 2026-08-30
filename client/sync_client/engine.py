@@ -34,6 +34,7 @@ from .pull_worker import PullWorker
 from .push_worker import PushWorker
 from .repository_safety import RepositorySafetyError
 from .sync_state import SyncStateStore
+from .transfer_scheduler import TransferScheduler
 from .watcher import FolderWatcher, WatcherHandle
 
 TICK_SECONDS = 1
@@ -57,6 +58,7 @@ class SyncEngine(QThread):
         self, cfg: Config, logger: EventLogger, watchers: WatcherHandle,
         push_worker: Optional[PushWorker] = None, pull_worker: Optional[PullWorker] = None,
         sync_state: Optional[SyncStateStore] = None,
+        transfer_scheduler: Optional[TransferScheduler] = None,
     ) -> None:
         super().__init__()
         self.cfg = cfg
@@ -65,6 +67,7 @@ class SyncEngine(QThread):
         self._push_worker = push_worker
         self._pull_worker = pull_worker
         self.sync_state = sync_state
+        self.transfer_scheduler = transfer_scheduler
         self._stop_flag = threading.Event()
         self._wake = threading.Event()
         self._conn: rsync_ops.NasConnection | None = None
@@ -103,9 +106,9 @@ class SyncEngine(QThread):
         a watcher change: doing so used to make PushWorker calculate a checksum
         conflict check for every known local file before rsync could start.
         """
-        if self._push_worker:
+        if self._push_worker and self.cfg.allows_push():
             self._push_worker.request_full_sync()
-        if self._pull_worker:
+        if self._pull_worker and self.cfg.allows_pull():
             self._pull_worker.reset_schedule()
         self.wake()
 
@@ -187,6 +190,7 @@ class SyncEngine(QThread):
             "watcher_mode": watcher_mode,
             "watcher_detail": watcher_detail,
             "pending_summary": self._pending_summary,
+            "scheduler": self.transfer_scheduler.snapshot() if self.transfer_scheduler else {},
             "cycle_ts": now,
         })
 
@@ -201,6 +205,14 @@ class SyncEngine(QThread):
 
     def _reconcile_watcher(self) -> None:
         local_root = self.cfg.local_root()
+
+        if not self.cfg.allows_push():
+            old = self.watchers.get()
+            if old is not None:
+                old.stop()
+            self.watchers.set(None)
+            self._watched_path = None
+            return
 
         if local_root != self._watched_path:
             old = self.watchers.get()
@@ -310,6 +322,9 @@ class SyncEngine(QThread):
         change_feed_available = values.get("CHANGE_FEED_AVAILABLE", "").lower() == "true"
         if change_feed_available != self.cfg.get("remote_change_feed_available"):
             self.cfg.set("remote_change_feed_available", change_feed_available)
+        causal_versions_available = values.get("CAUSAL_VERSIONS_AVAILABLE", "").lower() == "true"
+        if causal_versions_available != self.cfg.get("remote_causal_versions_available"):
+            self.cfg.set("remote_causal_versions_available", causal_versions_available)
 
         if not values.get("running"):
             self._log("SERVER_DOWN", "-", "il demone server sul NAS non è attivo: avvio automatico in corso")

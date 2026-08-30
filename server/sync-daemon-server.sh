@@ -33,7 +33,7 @@
 #
 set -uo pipefail
 
-VERSION="3.16.0"
+VERSION="3.17.0"
 SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -202,23 +202,23 @@ ensure_journal_files() {
 
 write_move_transaction() {
     local file="$1" kind="$2" txid="$3" stage="$4" device="$5" run_ts="$6"
-    local relative="$7" target="$8" backup="$9" paths_file="${10:-}" tmp
+    local relative="$7" target="$8" backup="$9" paths_file="${10:-}" protocol="${11:-STAGING_PUBLISH_V1}" tmp
     tmp="${file}.tmp.$$"
-    printf '%s\0%s\0%s\0%s\0%s\0%s\0%s\0%s\0%s\0%s\0' \
+    printf '%s\0%s\0%s\0%s\0%s\0%s\0%s\0%s\0%s\0%s\0%s\0' \
         "$kind" "$txid" "$stage" "$device" "$run_ts" "$relative" "$target" "$backup" \
-        "$paths_file" > "$tmp" && mv -f "$tmp" "$file"
+        "$paths_file" "$protocol" > "$tmp" && mv -f "$tmp" "$file"
 }
 
 begin_move_transaction() {
-    local kind="$1" txid="$2" device="$3" run_ts="$4" relative="$5" target="$6" backup="$7" paths_file="${8:-}"
+    local kind="$1" txid="$2" device="$3" run_ts="$4" relative="$5" target="$6" backup="$7" paths_file="${8:-}" protocol="${9:-STAGING_PUBLISH_V1}"
     mkdir -p "$TRANSACTION_DIR" || return 1
     write_move_transaction "$TRANSACTION_DIR/$txid.txn" "$kind" "$txid" STARTED \
-        "$device" "$run_ts" "$relative" "$target" "$backup" "$paths_file"
+        "$device" "$run_ts" "$relative" "$target" "$backup" "$paths_file" "$protocol"
 }
 
 advance_move_transaction() {
     local file="$1" stage="$2"
-    local kind txid old_stage device run_ts relative target backup paths_file
+    local kind txid old_stage device run_ts relative target backup paths_file protocol
     exec 3< "$file" || return 1
     IFS= read -r -d '' kind <&3 || { exec 3<&-; return 1; }
     IFS= read -r -d '' txid <&3 || { exec 3<&-; return 1; }
@@ -229,14 +229,15 @@ advance_move_transaction() {
     IFS= read -r -d '' target <&3 || { exec 3<&-; return 1; }
     IFS= read -r -d '' backup <&3 || { exec 3<&-; return 1; }
     IFS= read -r -d '' paths_file <&3 || paths_file=""
+    IFS= read -r -d '' protocol <&3 || protocol="STAGING_PUBLISH_V1"
     exec 3<&-
     write_move_transaction "$file" "$kind" "$txid" "$stage" "$device" "$run_ts" \
-        "$relative" "$target" "$backup" "$paths_file"
+        "$relative" "$target" "$backup" "$paths_file" "$protocol"
 }
 
 recover_pending_transactions_unlocked() {
     mkdir -p "$TRANSACTION_DIR" || return 1
-    local file kind txid stage device run_ts relative target backup paths_file
+    local file kind txid stage device run_ts relative target backup paths_file protocol
     shopt -s nullglob
     for file in "$TRANSACTION_DIR"/*.txn; do
         exec 3< "$file"
@@ -249,6 +250,7 @@ recover_pending_transactions_unlocked() {
         IFS= read -r -d '' target <&3 || { exec 3<&-; continue; }
         IFS= read -r -d '' backup <&3 || { exec 3<&-; continue; }
         IFS= read -r -d '' paths_file <&3 || paths_file=""
+        IFS= read -r -d '' protocol <&3 || protocol="STAGING_PUBLISH_V1"
         exec 3<&-
 
         case "$kind" in
@@ -286,6 +288,23 @@ recover_pending_transactions_unlocked() {
                     rm -f "$file" "$paths_file"
                     continue
                 fi
+                if [[ "$kind" == "BROWSE_RENAME" && "$protocol" == "BROWSE_RENAME_V2" ]]; then
+                    # V2's paths file contains source/destination metadata. A
+                    # crash after mv must complete both journal sides; it must
+                    # never be downgraded to a source-only tombstone.
+                    if [[ -e "$target" || -L "$target" ]] && [[ ! -e "$backup" && ! -L "$backup" ]]; then
+                        rm -f "$file" "$paths_file"
+                        continue
+                    fi
+                    if [[ ! -e "$target" && ! -L "$target" && ( -e "$backup" || -L "$backup" ) ]]; then
+                        if append_rename_journal_batch_unlocked "$paths_file" "$device" "$txid"; then
+                            rm -f "$file" "$paths_file"
+                        fi
+                        continue
+                    fi
+                    log ERROR "recovery rename transazione ambigua: $txid ($relative)"
+                    continue
+                fi
                 if [[ "$stage" == "STARTED" && ( -e "$target" || -L "$target" ) ]]; then
                     rm -f "$file" "$paths_file"
                     continue
@@ -316,7 +335,7 @@ recover_pending_transactions_unlocked() {
                     rm -f "$file" "$paths_file"
                     continue
                 fi
-                if recover_publish_transaction_unlocked "$file" "$device" "$target" "$paths_file" "$txid"; then
+                if recover_publish_transaction_unlocked "$file" "$device" "$target" "$paths_file" "$txid" "$protocol"; then
                     rm -f "$file" "$paths_file"
                 fi
                 ;;
@@ -395,9 +414,9 @@ compact_manifest_unlocked() {
                 for (i = 1; i <= pending_count; i++) {
                     split(pending[i], fields, FS)
                     if (fields[1] == "DELETE") {
-                        state[fields[2]] = fields[2] FS "" FS "0" FS "0" FS fields[6] FS fields[7]
+                        state[fields[2]] = fields[2] FS "" FS "0" FS "0" FS fields[6] FS fields[7] FS fields[8]
                     } else if (fields[1] == "PUT" && length(fields[2]) > 0) {
-                        state[fields[2]] = fields[2] FS fields[3] FS fields[4] FS fields[5] FS fields[6] FS fields[7]
+                        state[fields[2]] = fields[2] FS fields[3] FS fields[4] FS fields[5] FS fields[6] FS fields[7] FS fields[8]
                     }
                 }
                 tx = ""
@@ -433,10 +452,10 @@ cmd_journal_append() {
         echo "journal: repository marker assente o non valido" >&2
         return 1
     }
-    local magic txid device timestamp count action path digest size mtime server_timestamp
+    local magic txid device timestamp count action path digest size mtime causal server_timestamp
     local tmp="${JOURNAL_FILE}.append.$$"
     IFS= read -r -d '' magic || { echo "journal: intestazione mancante" >&2; return 1; }
-    if [[ "$magic" == "JOURNAL_V2" ]]; then
+    if [[ "$magic" == "JOURNAL_V2" || "$magic" == "JOURNAL_V3" ]]; then
         IFS= read -r -d '' payload_repository_id || return 1
         [[ "$payload_repository_id" == "$actual_repository_id" ]] || {
             echo "journal: repository non corrispondente" >&2
@@ -466,13 +485,26 @@ cmd_journal_append() {
             IFS= read -r -d '' digest || { rm -f "$tmp"; return 1; }
             IFS= read -r -d '' size || { rm -f "$tmp"; return 1; }
             IFS= read -r -d '' mtime || { rm -f "$tmp"; return 1; }
+            causal=""
+            if [[ "$magic" == "JOURNAL_V3" ]]; then
+                IFS= read -r -d '' causal || { rm -f "$tmp"; return 1; }
+                [[ -z "$causal" || "$causal" =~ ^[A-Za-z0-9._:-]+:[1-9][0-9]*(,[A-Za-z0-9._:-]+:[1-9][0-9]*)*$ ]] || {
+                    rm -f "$tmp"; return 1;
+                }
+            fi
             [[ "$action" == "PUT" || "$action" == "DELETE" ]] || { rm -f "$tmp"; return 1; }
             [[ -n "$path" ]] || { rm -f "$tmp"; return 1; }
             [[ -z "$digest" || "$digest" =~ ^[0-9a-f]{64}$ ]] || { rm -f "$tmp"; return 1; }
             [[ "$size" =~ ^[0-9]+$ && "$mtime" =~ ^[0-9]+$ ]] || { rm -f "$tmp"; return 1; }
-            printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
-                "$action" "$(encode_journal_field "$path")" "$digest" "$size" "$mtime" \
-                "$(encode_journal_field "$device")" "$server_timestamp"
+            if [[ "$magic" == "JOURNAL_V3" ]]; then
+                printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+                    "$action" "$(encode_journal_field "$path")" "$digest" "$size" "$mtime" \
+                    "$(encode_journal_field "$device")" "$server_timestamp" "$causal"
+            else
+                printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+                    "$action" "$(encode_journal_field "$path")" "$digest" "$size" "$mtime" \
+                    "$(encode_journal_field "$device")" "$server_timestamp"
+            fi
         done
         printf 'COMMIT\t%s\n' "$txid"
     } > "$tmp" || { rm -f "$tmp"; return 1; }
@@ -603,7 +635,7 @@ portable_sha256() {
 # and mtime is an authoritative unchanged state already committed by NASBox;
 # reuse its digest instead of re-reading the entire file on every batch.
 _file_state_entry() {
-    local path="$1" target digest size mtime mtime_ns encoded manifest_line tombstone_ts
+    local path="$1" protocol="${2:-FILE_STATES_V1}" target digest size mtime mtime_ns encoded manifest_line tombstone_ts causal
     target="$SHARE_ROOT/$path"
     encoded=$(encode_journal_field "$path")
     if [[ -f "$target" && ! -L "$target" ]]; then
@@ -613,9 +645,13 @@ _file_state_entry() {
         mtime_ns=$((mtime * 1000000000))
         manifest_line="${manifest_entries[$encoded]:-}"
         if [[ -n "$manifest_line" ]]; then
-            IFS=$'\t' read -r _manifest_path manifest_digest manifest_size manifest_mtime _manifest_device _manifest_ts <<< "$manifest_line"
+            IFS=$'\t' read -r _manifest_path manifest_digest manifest_size manifest_mtime _manifest_device _manifest_ts causal <<< "$manifest_line"
             if [[ "$manifest_digest" =~ ^[0-9a-f]{64}$ && "$manifest_size" == "$size" && "$manifest_mtime" == "$mtime_ns" ]]; then
-                printf '%s\0FILE\0%s\0%s\0%s\0' "$path" "$manifest_digest" "$size" "$mtime_ns"
+                if [[ "$protocol" == "FILE_STATES_V2" ]]; then
+                    printf '%s\0FILE\0%s\0%s\0%s\0%s\0' "$path" "$manifest_digest" "$size" "$mtime_ns" "$causal"
+                else
+                    printf '%s\0FILE\0%s\0%s\0%s\0' "$path" "$manifest_digest" "$size" "$mtime_ns"
+                fi
                 return 0
             fi
         fi
@@ -623,18 +659,37 @@ _file_state_entry() {
         # modification. Hash it rather than trusting metadata alone.
         digest=$(portable_sha256 "$target" || true)
         [[ "$digest" =~ ^[0-9a-f]{64}$ ]] || return 1
-        printf '%s\0FILE\0%s\0%s\0%s\0' "$path" "$digest" "$size" "$mtime_ns"
+        if [[ "$protocol" == "FILE_STATES_V2" ]]; then
+            printf '%s\0FILE\0%s\0%s\0%s\0\0' "$path" "$digest" "$size" "$mtime_ns"
+        else
+            printf '%s\0FILE\0%s\0%s\0%s\0' "$path" "$digest" "$size" "$mtime_ns"
+        fi
     elif [[ -e "$target" || -L "$target" ]]; then
-        printf '%s\0%s\0%s\0%s\0%s\0' "$path" "OTHER" "" "0" "0"
+        if [[ "$protocol" == "FILE_STATES_V2" ]]; then
+            printf '%s\0%s\0%s\0%s\0%s\0\0' "$path" "OTHER" "" "0" "0"
+        else
+            printf '%s\0%s\0%s\0%s\0%s\0' "$path" "OTHER" "" "0" "0"
+        fi
     else
         manifest_line="${manifest_entries[$encoded]:-}"
         if [[ -n "$manifest_line" ]]; then
             tombstone_ts=$(printf '%s\n' "$manifest_line" | awk -F '\t' '{ print $6 }')
             [[ "$tombstone_ts" =~ ^[0-9]+$ ]] || tombstone_ts=$(date '+%s')
-            printf '%s\0%s\0%s\0%s\0%s\0' \
-                "$path" "TOMBSTONE" "" "0" "$((tombstone_ts * 1000000000))"
+            if [[ "$protocol" == "FILE_STATES_V2" ]]; then
+                causal=""
+                IFS=$'\t' read -r _manifest_path _manifest_digest _manifest_size _manifest_mtime _manifest_device _manifest_ts causal <<< "$manifest_line"
+                printf '%s\0%s\0%s\0%s\0%s\0%s\0' \
+                    "$path" "TOMBSTONE" "" "0" "$((tombstone_ts * 1000000000))" "$causal"
+            else
+                printf '%s\0%s\0%s\0%s\0%s\0' \
+                    "$path" "TOMBSTONE" "" "0" "$((tombstone_ts * 1000000000))"
+            fi
         else
-            printf '%s\0%s\0%s\0%s\0%s\0' "$path" "ABSENT" "" "0" "0"
+            if [[ "$protocol" == "FILE_STATES_V2" ]]; then
+                printf '%s\0%s\0%s\0%s\0%s\0\0' "$path" "ABSENT" "" "0" "0"
+            else
+                printf '%s\0%s\0%s\0%s\0%s\0' "$path" "ABSENT" "" "0" "0"
+            fi
         fi
     fi
 }
@@ -645,12 +700,13 @@ cmd_file_states() {
         echo "file-states: sha256sum non disponibile" >&2
         return 1
     }
-    local magic count path index encoded manifest_path manifest_line
+    local magic count path index encoded manifest_path manifest_line protocol
     local -a paths
     local -A requested_manifest_paths manifest_entries
     IFS= read -r -d '' magic || return 1
     IFS= read -r -d '' count || return 1
-    [[ "$magic" == "FILE_STATES_V1" ]] || return 1
+    [[ "$magic" == "FILE_STATES_V1" || "$magic" == "FILE_STATES_V2" ]] || return 1
+    protocol="$magic"
     [[ "$count" =~ ^[0-9]+$ && "$count" -le 100000 ]] || return 1
     for ((index = 0; index < count; index++)); do
         IFS= read -r -d '' path || return 1
@@ -664,7 +720,7 @@ cmd_file_states() {
     fi
 
     if (( count == 0 )); then
-        printf 'FILE_STATES_V1\0%s\0' "$count"
+        printf '%s\0%s\0' "$protocol" "$count"
         return 0
     fi
 
@@ -691,7 +747,7 @@ cmd_file_states() {
     tmpdir="$(mktemp -d)" || return 1
     running=0
     for ((index = 0; index < count; index++)); do
-        _file_state_entry "${paths[index]}" > "$tmpdir/$index" 2>/dev/null &
+        _file_state_entry "${paths[index]}" "$protocol" > "$tmpdir/$index" 2>/dev/null &
         (( ++running ))
         if (( running >= FILE_STATES_PARALLELISM )); then
             wait
@@ -707,7 +763,7 @@ cmd_file_states() {
         fi
     done
 
-    printf 'FILE_STATES_V1\0%s\0' "$count"
+    printf '%s\0%s\0' "$protocol" "$count"
     for ((index = 0; index < count; index++)); do
         cat "$tmpdir/$index"
     done
@@ -767,6 +823,50 @@ append_delete_journal_batch_unlocked() {
         (( count++ ))
     done < "$paths_file"
     (( count == 0 )) && { rm -f "$tmp" "$journal_backup"; return 0; }
+    printf 'COMMIT\t%s\n' "$txid" >> "$tmp" || { rm -f "$tmp" "$journal_backup"; return 1; }
+    if ! cat "$tmp" >> "$JOURNAL_FILE"; then
+        cp "$journal_backup" "$JOURNAL_FILE" 2>/dev/null || true
+        rm -f "$tmp" "$journal_backup"
+        return 1
+    fi
+    rm -f "$tmp"
+    if bump_manifest_revision_unlocked; then
+        rm -f "$journal_backup"
+        return 0
+    fi
+    cp "$journal_backup" "$JOURNAL_FILE" 2>/dev/null || true
+    printf '%s\n' "$old_revision" > "$revision_tmp" && mv -f "$revision_tmp" "$MANIFEST_REVISION_FILE"
+    rm -f "$journal_backup" "$revision_tmp"
+    return 1
+}
+
+append_rename_journal_batch_unlocked() {
+    local paths_file="$1" device="$2" txid="$3" src dst digest size mtime
+    local journal_backup old_revision revision_tmp tmp count=0
+    [[ -f "$paths_file" ]] || return 1
+    tmp="${JOURNAL_FILE}.rename-batch.$$.$RANDOM"
+    journal_backup="${JOURNAL_FILE}.rollback.$$.$RANDOM"
+    revision_tmp="${MANIFEST_REVISION_FILE}.rollback.$$.$RANDOM"
+    old_revision=$(cat "$MANIFEST_REVISION_FILE" 2>/dev/null || echo 0)
+    cp "$JOURNAL_FILE" "$journal_backup" || return 1
+    : > "$tmp" || { rm -f "$journal_backup"; return 1; }
+    printf 'BEGIN\t%s\t%s\t%s\n' "$txid" "$(date '+%s')" "$device" >> "$tmp" || {
+        rm -f "$tmp" "$journal_backup"; return 1;
+    }
+    while IFS= read -r -d '' src && IFS= read -r -d '' dst && \
+          IFS= read -r -d '' digest && IFS= read -r -d '' size && \
+          IFS= read -r -d '' mtime; do
+        printf 'DELETE\t%s\t\t0\t0\t%s\t%s\n' \
+            "$(encode_journal_field "$src")" "$(encode_journal_field "$device")" "$(date '+%s')" >> "$tmp" || {
+            rm -f "$tmp" "$journal_backup"; return 1;
+        }
+        printf 'PUT\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+            "$(encode_journal_field "$dst")" "$digest" "$size" "$mtime" \
+            "$(encode_journal_field "$device")" "$(date '+%s')" >> "$tmp" || {
+            rm -f "$tmp" "$journal_backup"; return 1;
+        }
+        (( count++ ))
+    done < "$paths_file"
     printf 'COMMIT\t%s\n' "$txid" >> "$tmp" || { rm -f "$tmp" "$journal_backup"; return 1; }
     if ! cat "$tmp" >> "$JOURNAL_FILE"; then
         cp "$journal_backup" "$JOURNAL_FILE" 2>/dev/null || true
@@ -847,16 +947,26 @@ publish_file_matches() {
 }
 
 append_put_journal_batch_unlocked() {
-    local paths_file="$1" device="$2" txid="$3" path digest size mtime server_timestamp tmp count=0
+    local paths_file="$1" device="$2" txid="$3" protocol="${4:-STAGING_PUBLISH_V1}"
+    local path digest size mtime causal server_timestamp tmp count=0
     [[ -f "$paths_file" ]] || return 1
     tmp="${JOURNAL_FILE}.put-batch.$$.$RANDOM"
     server_timestamp=$(date '+%s')
     : > "$tmp" || return 1
     printf 'BEGIN\t%s\t%s\t%s\n' "$txid" "$server_timestamp" "$device" >> "$tmp" || { rm -f "$tmp"; return 1; }
     while IFS= read -r -d '' path && IFS= read -r -d '' digest && IFS= read -r -d '' size && IFS= read -r -d '' mtime; do
-        printf 'PUT\t%s\t%s\t%s\t%s\t%s\t%s\n' \
-            "$(encode_journal_field "$path")" "$digest" "$size" "$mtime" \
-            "$(encode_journal_field "$device")" "$server_timestamp" >> "$tmp" || { rm -f "$tmp"; return 1; }
+        causal=""
+        if [[ "$protocol" == "STAGING_PUBLISH_V2" ]]; then
+            IFS= read -r -d '' causal || { rm -f "$tmp"; return 1; }
+            [[ -z "$causal" || "$causal" =~ ^[A-Za-z0-9._:-]+:[1-9][0-9]*(,[A-Za-z0-9._:-]+:[1-9][0-9]*)*$ ]] || { rm -f "$tmp"; return 1; }
+            printf 'PUT\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+                "$(encode_journal_field "$path")" "$digest" "$size" "$mtime" \
+                "$(encode_journal_field "$device")" "$server_timestamp" "$causal" >> "$tmp" || { rm -f "$tmp"; return 1; }
+        else
+            printf 'PUT\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+                "$(encode_journal_field "$path")" "$digest" "$size" "$mtime" \
+                "$(encode_journal_field "$device")" "$server_timestamp" >> "$tmp" || { rm -f "$tmp"; return 1; }
+        fi
         (( count++ ))
     done < "$paths_file"
     (( count > 0 )) || { rm -f "$tmp"; return 1; }
@@ -871,10 +981,14 @@ append_put_journal_batch_unlocked() {
 }
 
 recover_publish_transaction_unlocked() {
-    local txfile="$1" device="$2" staging_dir="$3" paths_file="$4" txid="$5"
-    local path digest size mtime staged target
+    local txfile="$1" device="$2" staging_dir="$3" paths_file="$4" txid="$5" protocol="${6:-STAGING_PUBLISH_V1}"
+    local path digest size mtime causal staged target
     valid_staging_directory "$staging_dir" || { log ERROR "recovery publish staging non valido: $txid"; return 1; }
     while IFS= read -r -d '' path && IFS= read -r -d '' digest && IFS= read -r -d '' size && IFS= read -r -d '' mtime; do
+        causal=""
+        if [[ "$protocol" == "STAGING_PUBLISH_V2" ]]; then
+            IFS= read -r -d '' causal || return 1
+        fi
         valid_sync_relative_path "$path" || { log ERROR "recovery publish percorso non valido: $txid"; return 1; }
         staged="$staging_dir/$path"
         target="$SHARE_ROOT/$path"
@@ -898,20 +1012,20 @@ recover_publish_transaction_unlocked() {
     # and makes the short publish phase indistinguishable from a stalled sync.
     sync
     advance_move_transaction "$txfile" MOVED || return 1
-    append_put_journal_batch_unlocked "$paths_file" "$device" "$txid"
+    append_put_journal_batch_unlocked "$paths_file" "$device" "$txid" "$protocol"
 }
 
 cmd_staging_publish() {
     command -v flock >/dev/null 2>&1 || { echo "staging-publish: flock non disponibile" >&2; return 1; }
     command -v sha256sum >/dev/null 2>&1 || { echo "staging-publish: sha256sum non disponibile" >&2; return 1; }
-    local magic staging_dir txid device count path digest size mtime normalized_mtime index paths_file txfile target
+    local magic staging_dir txid device count path digest size mtime causal normalized_mtime index paths_file txfile target
     local -A seen_paths
     IFS= read -r -d '' magic || return 1
     IFS= read -r -d '' staging_dir || return 1
     IFS= read -r -d '' txid || return 1
     IFS= read -r -d '' device || return 1
     IFS= read -r -d '' count || return 1
-    [[ "$magic" == "STAGING_PUBLISH_V1" ]] || return 1
+    [[ "$magic" == "STAGING_PUBLISH_V1" || "$magic" == "STAGING_PUBLISH_V2" ]] || return 1
     valid_staging_directory "$staging_dir" || return 1
     [[ "$txid" =~ ^[A-Za-z0-9._:-]{1,128}$ && "$device" =~ ^[A-Za-z0-9._:-]{1,128}$ ]] || return 1
     [[ "$count" =~ ^[1-9][0-9]*$ && "$count" -le 100000 ]] || return 1
@@ -922,6 +1036,11 @@ cmd_staging_publish() {
     : > "$paths_file" || return 1
     for ((index = 0; index < count; index++)); do
         IFS= read -r -d '' path && IFS= read -r -d '' digest && IFS= read -r -d '' size && IFS= read -r -d '' mtime || { rm -f "$paths_file"; return 1; }
+        causal=""
+        if [[ "$magic" == "STAGING_PUBLISH_V2" ]]; then
+            IFS= read -r -d '' causal || { rm -f "$paths_file"; return 1; }
+            [[ -z "$causal" || "$causal" =~ ^[A-Za-z0-9._:-]+:[1-9][0-9]*(,[A-Za-z0-9._:-]+:[1-9][0-9]*)*$ ]] || { rm -f "$paths_file"; return 1; }
+        fi
         valid_sync_relative_path "$path" && [[ -z "${seen_paths[$path]:-}" ]] || { rm -f "$paths_file"; return 1; }
         [[ "$digest" =~ ^[0-9a-f]{64}$ && "$size" =~ ^[0-9]+$ && "$mtime" =~ ^[0-9]+$ ]] || { rm -f "$paths_file"; return 1; }
         publish_file_matches "$staging_dir/$path" "$digest" "$size" "$mtime" || { rm -f "$paths_file"; return 1; }
@@ -929,6 +1048,9 @@ cmd_staging_publish() {
         [[ "$normalized_mtime" =~ ^[0-9]+$ ]] || { rm -f "$paths_file"; return 1; }
         seen_paths["$path"]=1
         printf '%s\0%s\0%s\0%s\0' "$path" "$digest" "$size" "$((normalized_mtime * 1000000000))" >> "$paths_file" || { rm -f "$paths_file"; return 1; }
+        if [[ "$magic" == "STAGING_PUBLISH_V2" ]]; then
+            printf '%s\0' "$causal" >> "$paths_file" || { rm -f "$paths_file"; return 1; }
+        fi
     done
     # The caller's persistent SSH lease owns this lock. Refuse standalone use,
     # but do not acquire it here: doing so would deadlock a valid lease.
@@ -947,12 +1069,12 @@ cmd_staging_publish() {
         target="$SHARE_ROOT/$path"
         [[ ! -e "$target" && ! -L "$target" ]] || { flock -u 9; exec 9>&-; rm -f "$paths_file"; return 1; }
     done
-    begin_move_transaction PUBLISH "$txid" "$device" "$(date '+%s')" "" "$staging_dir" "" "$paths_file" || { flock -u 9; exec 9>&-; rm -f "$paths_file"; return 1; }
+    begin_move_transaction PUBLISH "$txid" "$device" "$(date '+%s')" "" "$staging_dir" "" "$paths_file" "$magic" || { flock -u 9; exec 9>&-; rm -f "$paths_file"; return 1; }
     sync
     test_failpoint "publish_after_marker"
-    if recover_publish_transaction_unlocked "$txfile" "$device" "$staging_dir" "$paths_file" "$txid"; then
+    if recover_publish_transaction_unlocked "$txfile" "$device" "$staging_dir" "$paths_file" "$txid" "$magic"; then
         rm -f "$txfile" "$paths_file"
-        printf 'STAGING_PUBLISH_V1\0OK\0%s\0' "$count"
+        printf '%s\0OK\0%s\0' "$magic" "$count"
     else
         # Leave marker and staged files in place; a later locked command will
         # finish after a transient journal or filesystem failure.
@@ -1202,58 +1324,85 @@ cmd_browse_delete() {
 cmd_browse_rename() {
     command -v flock >/dev/null 2>&1 || { echo "browse-rename: flock non disponibile" >&2; return 1; }
     local magic run_ts device src dst src_target dst_target rel_file paths_file txid txfile
+    local expected_kind expected_digest expected_size expected_mtime actual_size actual_mtime actual_digest
     local -a journal_paths=()
     IFS= read -r -d '' magic || return 1
     IFS= read -r -d '' run_ts || return 1
     IFS= read -r -d '' device || return 1
     IFS= read -r -d '' src || return 1
     IFS= read -r -d '' dst || return 1
-    [[ "$magic" == "BROWSE_RENAME_V1" ]] || return 1
+    if [[ "$magic" == "BROWSE_RENAME_V2" ]]; then
+        IFS= read -r -d '' expected_kind || return 1
+        IFS= read -r -d '' expected_digest || return 1
+        IFS= read -r -d '' expected_size || return 1
+        IFS= read -r -d '' expected_mtime || return 1
+    fi
+    [[ "$magic" == "BROWSE_RENAME_V1" || "$magic" == "BROWSE_RENAME_V2" ]] || return 1
     [[ "$run_ts" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}--[0-9]{2}-[0-9]{2}-[0-9]{2}-[0-9]{6}Z$ ]] || return 1
     [[ "$device" =~ ^[A-Za-z0-9._:-]{1,128}$ ]] || return 1
+    if [[ "$magic" == "BROWSE_RENAME_V2" ]]; then
+        [[ "$expected_kind" == "FILE" || "$expected_kind" == "DIR" ]] || return 1
+        [[ "$expected_size" =~ ^[0-9]+$ && "$expected_mtime" =~ ^[0-9]+$ ]] || return 1
+        if [[ "$expected_kind" == "FILE" ]]; then
+            [[ "$expected_digest" =~ ^[0-9a-f]{64}$ ]] || return 1
+        else
+            [[ -z "$expected_digest" ]] || return 1
+        fi
+    fi
     require_sync_transfer_owner "$device" || {
-        printf 'BROWSE_RENAME_V1\0ERROR\0lease NAS non posseduto dal device\0'
+        printf '%s\0ERROR\0lease NAS non posseduto dal device\0' "$magic"
         return 75
     }
     if ! valid_sync_relative_path "$src" || ! valid_sync_relative_path "$dst"; then
-        printf 'BROWSE_RENAME_V1\0ERROR\0percorso non valido\0'; return 1
+        printf '%s\0ERROR\0percorso non valido\0' "$magic"; return 1
     fi
     src_target="$SHARE_ROOT/$src"
     dst_target="$SHARE_ROOT/$dst"
     if [[ ! -e "$src_target" && ! -L "$src_target" ]]; then
-        printf 'BROWSE_RENAME_V1\0ERROR\0percorso di origine non trovato\0'; return 1
+        printf '%s\0ERROR\0percorso di origine non trovato\0' "$magic"; return 1
     fi
     if [[ -e "$dst_target" || -L "$dst_target" ]]; then
-        printf 'BROWSE_RENAME_V1\0ERROR\0esiste gia un percorso con questo nome\0'; return 1
+        printf '%s\0ERROR\0esiste gia un percorso con questo nome\0' "$magic"; return 1
     fi
 
     exec 9>"$JOURNAL_LOCK_FILE"
-    flock -x 9 || { exec 9>&-; printf 'BROWSE_RENAME_V1\0ERROR\0lock non acquisito\0'; return 1; }
+    flock -x 9 || { exec 9>&-; printf '%s\0ERROR\0lock non acquisito\0' "$magic"; return 1; }
     ensure_journal_files
-    recover_pending_transactions_unlocked || { flock -u 9; exec 9>&-; printf 'BROWSE_RENAME_V1\0ERROR\0recupero transazioni fallito\0'; return 1; }
+    recover_pending_transactions_unlocked || { flock -u 9; exec 9>&-; printf '%s\0ERROR\0recupero transazioni fallito\0' "$magic"; return 1; }
 
     if [[ ! -e "$src_target" && ! -L "$src_target" ]]; then
         flock -u 9; exec 9>&-
-        printf 'BROWSE_RENAME_V1\0ERROR\0percorso di origine non trovato\0'
+        printf '%s\0ERROR\0percorso di origine non trovato\0' "$magic"
         return 1
     fi
     if [[ -e "$dst_target" || -L "$dst_target" ]]; then
         flock -u 9; exec 9>&-
-        printf 'BROWSE_RENAME_V1\0ERROR\0esiste gia un percorso con questo nome\0'
+        printf '%s\0ERROR\0esiste gia un percorso con questo nome\0' "$magic"
         return 1
     fi
 
-    # The old path(s) are gone from this location -- record it exactly like a
-    # delete so other clients' manifests stop expecting it there. The new
-    # location needs no journal entry of its own: it's simply a file/folder
-    # any client will see as new content on its next ordinary comparison,
-    # the same as content freshly pushed by any client.
-    if [[ -d "$src_target" && ! -L "$src_target" ]]; then
-        while IFS= read -r -d '' rel_file; do
-            journal_paths+=("$src/${rel_file#./}")
-        done < <(cd "$src_target" && find . -type f -print0 2>/dev/null)
-    else
-        journal_paths+=("$src")
+    if [[ "$magic" == "BROWSE_RENAME_V2" ]]; then
+        if [[ "$expected_kind" == "FILE" ]]; then
+            if [[ ! -f "$src_target" || -L "$src_target" ]]; then
+                flock -u 9; exec 9>&-
+                printf '%s\0ERROR\0la sorgente non e un file regolare\0' "$magic"
+                return 1
+            fi
+            actual_size=$(portable_file_size "$src_target" || true)
+            actual_mtime=$(portable_file_mtime "$src_target" || true)
+            actual_digest=$(portable_sha256 "$src_target" || true)
+            if [[ "$actual_size" != "$expected_size" || ! "$actual_mtime" =~ ^[0-9]+$ \
+                  || "$((actual_mtime * 1000000000))" != "$expected_mtime" \
+                  || "$actual_digest" != "$expected_digest" ]]; then
+                flock -u 9; exec 9>&-
+                printf '%s\0ERROR\0la sorgente e cambiata\0' "$magic"
+                return 1
+            fi
+        elif [[ ! -d "$src_target" || -L "$src_target" ]]; then
+            flock -u 9; exec 9>&-
+            printf '%s\0ERROR\0la sorgente non e una directory\0' "$magic"
+            return 1
+        fi
     fi
 
     txid="browse-rename-${run_ts}-$$-${RANDOM}"
@@ -1261,45 +1410,80 @@ cmd_browse_rename() {
     paths_file="$TRANSACTION_DIR/$txid.paths"
     if ! mkdir -p "$TRANSACTION_DIR" "${dst_target%/*}" || ! : > "$paths_file"; then
         flock -u 9; exec 9>&-
-        printf 'BROWSE_RENAME_V1\0ERROR\0creazione elenco percorsi fallita\0'
+        printf '%s\0ERROR\0creazione elenco percorsi fallita\0' "$magic"
         return 1
     fi
-    for rel_file in "${journal_paths[@]}"; do
-        if ! printf '%s\0' "$rel_file" >> "$paths_file"; then
-            rm -f "$paths_file"
-            flock -u 9; exec 9>&-
-            printf 'BROWSE_RENAME_V1\0ERROR\0scrittura elenco percorsi fallita\0'
-            return 1
+    if [[ "$magic" == "BROWSE_RENAME_V2" ]]; then
+        if [[ "$expected_kind" == "FILE" ]]; then
+            printf '%s\0%s\0%s\0%s\0%s\0' "$src" "$dst" "$expected_digest" \
+                "$expected_size" "$expected_mtime" >> "$paths_file"
+        else
+            while IFS= read -r -d '' rel_file; do
+                local source_file="$src/${rel_file#./}" destination_file="$dst/${rel_file#./}"
+                actual_size=$(portable_file_size "$src_target/${rel_file#./}" || true)
+                actual_mtime=$(portable_file_mtime "$src_target/${rel_file#./}" || true)
+                actual_digest=$(portable_sha256 "$src_target/${rel_file#./}" || true)
+                [[ "$actual_size" =~ ^[0-9]+$ && "$actual_mtime" =~ ^[0-9]+$ \
+                   && "$actual_digest" =~ ^[0-9a-f]{64}$ ]] || {
+                    rm -f "$paths_file"
+                    flock -u 9; exec 9>&-
+                    printf '%s\0ERROR\0contenuto directory non leggibile\0' "$magic"
+                    return 1
+                }
+                printf '%s\0%s\0%s\0%s\0%s\0' "$source_file" "$destination_file" \
+                    "$actual_digest" "$actual_size" "$((actual_mtime * 1000000000))" >> "$paths_file"
+            done < <(cd "$src_target" && find . -type f -print0 2>/dev/null)
         fi
-    done
-    if ! begin_move_transaction BROWSE_RENAME "$txid" "$device" "$run_ts" "$src" "$src_target" "$dst_target" "$paths_file"; then
+    else
+        if [[ -d "$src_target" && ! -L "$src_target" ]]; then
+            while IFS= read -r -d '' rel_file; do
+                journal_paths+=("$src/${rel_file#./}")
+            done < <(cd "$src_target" && find . -type f -print0 2>/dev/null)
+        else
+            journal_paths+=("$src")
+        fi
+        for rel_file in "${journal_paths[@]}"; do
+            if ! printf '%s\0' "$rel_file" >> "$paths_file"; then
+                rm -f "$paths_file"
+                flock -u 9; exec 9>&-
+                printf '%s\0ERROR\0scrittura elenco percorsi fallita\0' "$magic"
+                return 1
+            fi
+        done
+    fi
+    if ! begin_move_transaction BROWSE_RENAME "$txid" "$device" "$run_ts" "$src" "$src_target" "$dst_target" "$paths_file" "$magic"; then
         rm -f "$paths_file"
         flock -u 9; exec 9>&-
-        printf 'BROWSE_RENAME_V1\0ERROR\0registrazione transazione fallita\0'
+        printf '%s\0ERROR\0registrazione transazione fallita\0' "$magic"
         return 1
     fi
     if ! mv "$src_target" "$dst_target"; then
         rm -f "$txfile" "$paths_file"
         flock -u 9; exec 9>&-
-        printf 'BROWSE_RENAME_V1\0ERROR\0spostamento fallito\0'
+        printf '%s\0ERROR\0spostamento fallito\0' "$magic"
         return 1
     fi
     test_failpoint "browse_rename_after_move"
     if ! advance_move_transaction "$txfile" MOVED; then
         mv "$dst_target" "$src_target" 2>/dev/null && rm -f "$txfile" "$paths_file"
         flock -u 9; exec 9>&-
-        printf 'BROWSE_RENAME_V1\0ERROR\0registrazione transazione fallita\0'
+        printf '%s\0ERROR\0registrazione transazione fallita\0' "$magic"
         return 1
     fi
-    if append_delete_journal_batch_unlocked "$paths_file" "$device" "$txid"; then
+    if [[ "$magic" == "BROWSE_RENAME_V2" ]]; then
+        append_rename_journal_batch_unlocked "$paths_file" "$device" "$txid"
+    else
+        append_delete_journal_batch_unlocked "$paths_file" "$device" "$txid"
+    fi
+    if [[ "$?" -eq 0 ]]; then
         test_failpoint "browse_rename_after_journal"
         rm -f "$txfile" "$paths_file"
         flock -u 9; exec 9>&-
-        printf 'BROWSE_RENAME_V1\0OK\0'
+        printf '%s\0OK\0' "$magic"
     else
         mv "$dst_target" "$src_target" 2>/dev/null && rm -f "$txfile" "$paths_file"
         flock -u 9; exec 9>&-
-        printf 'BROWSE_RENAME_V1\0ERROR\0journal non aggiornato, operazione annullata\0'
+        printf '%s\0ERROR\0journal non aggiornato, operazione annullata\0' "$magic"
         return 1
     fi
 }
@@ -2049,6 +2233,7 @@ cmd_print_config() {
     echo "PRUNE_MAX_FILES_PER_PASS=$PRUNE_MAX_FILES_PER_PASS"
     echo "JOURNAL_MAX_BYTES=$JOURNAL_MAX_BYTES"
     echo "CHANGE_FEED_AVAILABLE=true"
+    echo "CAUSAL_VERSIONS_AVAILABLE=true"
     if [[ -f "$JOURNAL_FILE" ]]; then echo "JOURNAL_READY=true"; else echo "JOURNAL_READY=false"; fi
     # Own runtime state dir (PID file, lock, log) -- self-reported so clients whose
     # synced tree happens to contain this install can exclude it from sync instead

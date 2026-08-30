@@ -3,15 +3,22 @@ from __future__ import annotations
 import unittest
 
 from sync_client.reconcile import Action, RemoteKind, RemoteState, plan_path
-from sync_client.sync_state import Fingerprint
+from sync_client.sync_state import CausalVersion, Fingerprint
 
 
-def fp(digest: str, mtime: int = 10) -> Fingerprint:
-    return Fingerprint(digest, len(digest), mtime)
+def fp(digest: str, mtime: int = 10, causal: CausalVersion | None = None) -> Fingerprint:
+    return Fingerprint(digest, len(digest), mtime, causal)
 
 
-def remote(kind: RemoteKind, digest: str = "", mtime: int = 10) -> RemoteState:
-    return RemoteState(kind, digest, len(digest), mtime)
+def remote(
+    kind: RemoteKind, digest: str = "", mtime: int = 10,
+    causal: CausalVersion | None = None,
+) -> RemoteState:
+    return RemoteState(kind, digest, len(digest), mtime, causal)
+
+
+def clock(*entries: tuple[str, int]) -> CausalVersion:
+    return CausalVersion(entries)
 
 
 class ReconcileTests(unittest.TestCase):
@@ -81,6 +88,35 @@ class ReconcileTests(unittest.TestCase):
     def test_identical_states_are_adopted(self) -> None:
         decision = plan_path(fp("base"), fp("base"), remote(RemoteKind.FILE, "base"), delete_enabled=True)
         self.assertEqual(decision.action, Action.ADOPT)
+
+    def test_causal_local_version_wins_before_timestamp_fallback(self) -> None:
+        decision = plan_path(
+            fp("base", causal=clock(("device-a", 1))),
+            fp("local", mtime=10, causal=clock(("device-a", 1), ("device-b", 1))),
+            remote(RemoteKind.FILE, "remote", mtime=20, causal=clock(("device-a", 1))),
+            delete_enabled=True,
+        )
+        self.assertEqual(decision.action, Action.CONFLICT_LOCAL_WINS)
+        self.assertIn("causalmente", decision.detail)
+
+    def test_causal_remote_tombstone_wins_before_timestamp_fallback(self) -> None:
+        decision = plan_path(
+            fp("base", causal=clock(("device-a", 1))),
+            fp("local", mtime=20, causal=clock(("device-a", 2))),
+            remote(RemoteKind.TOMBSTONE, mtime=10, causal=clock(("device-a", 2), ("device-b", 1))),
+            delete_enabled=True,
+        )
+        self.assertEqual(decision.action, Action.CONFLICT_REMOTE_WINS)
+        self.assertIn("causalmente", decision.detail)
+
+    def test_concurrent_vectors_still_use_timestamp_fallback(self) -> None:
+        decision = plan_path(
+            fp("base", causal=clock(("device-a", 1))),
+            fp("local", mtime=20_000_000_000, causal=clock(("device-a", 2))),
+            remote(RemoteKind.FILE, "remote", mtime=10_000_000_000, causal=clock(("device-a", 1), ("device-b", 1))),
+            delete_enabled=True,
+        )
+        self.assertEqual(decision.action, Action.CONFLICT_LOCAL_WINS)
 
 
 if __name__ == "__main__":

@@ -21,6 +21,7 @@ SEARCH_DEBOUNCE_MS = 300  # reload() re-scans the whole events.jsonl -- don't do
 ACTION_FILTERS = [
     ("UPLOAD", "transfer"), ("DOWNLOAD", "transfer"),
     ("DELETE_LOCAL", "transfer"), ("DELETE_REMOTE", "transfer"),
+    ("RENAME_REMOTE", "transfer"),
     ("BROWSE_DOWNLOAD", "browse"), ("BROWSE_RENAME", "browse"),
     ("BROWSE_DELETE", "browse"), ("RESTORE_REMOTE_VERSION", "history"),
     ("PRUNE_LOCAL_TRASH", "history"), ("PRUNE_REMOTE_TRIGGER", "history"),
@@ -35,7 +36,7 @@ ACTION_FILTERS = [
 
 LOCAL_PATH_ACTIONS = {
     "UPLOAD", "DOWNLOAD", "DELETE_LOCAL", "DELETE_REMOTE", "PRUNE_LOCAL_TRASH",
-    "CONFLICT", "STALE_DELETE", "UNSUPPORTED",
+    "CONFLICT", "STALE_DELETE", "UNSUPPORTED", "RENAME_REMOTE",
 }
 
 

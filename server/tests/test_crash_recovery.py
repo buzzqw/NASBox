@@ -145,6 +145,30 @@ class ServerCrashRecoveryTests(unittest.TestCase):
             )
             self.assertNotIn(b".nasbox-staging\0", listing.stdout)
 
+    def test_staging_publish_v2_carries_causal_metadata_into_manifest(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            sandbox = Path(directory)
+            script, share, config, staging = self.staging_fixture(sandbox)
+            payload = self.staging_payload(staging, "publish-causal", [("causal.txt", b"causal")])
+            fields = payload.split(b"\0")
+            fields[0] = b"STAGING_PUBLISH_V2"
+            fields.insert(9, b"device-a:2")
+            lock = self.hold_global_lock(sandbox)
+            try:
+                result = subprocess.run(
+                    [str(script), "-c", str(config), "--staging-publish"],
+                    input=b"\0".join(fields), capture_output=True,
+                )
+            finally:
+                self.release_lock(lock)
+            manifest = subprocess.run(
+                [str(script), "-c", str(config), "--manifest-export"], capture_output=True,
+            )
+        self.assertEqual(result.returncode, 0, result.stderr.decode())
+        self.assertEqual(result.stdout, b"STAGING_PUBLISH_V2\0OK\0" b"1\0")
+        self.assertIn(b"causal.txt\t", manifest.stdout)
+        self.assertTrue(manifest.stdout.rstrip().endswith(b"\tdevice-a:2"))
+
     def test_staging_publish_refuses_unlocked_or_existing_targets_without_losing_staging(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             sandbox = Path(directory)
@@ -347,6 +371,42 @@ class ServerCrashRecoveryTests(unittest.TestCase):
             self.assertEqual(recovered.returncode, 0, recovered.stderr.decode())
             self.assertFalse((share / "old.txt").exists())
             self.assertEqual((share / "new.txt").read_text(), "must remain moved")
+            self.assertFalse(list((sandbox / "state" / "transactions").glob("*.txn")))
+
+    def test_local_directory_rename_crash_after_move_recovers_both_journal_sides(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            sandbox = Path(directory)
+            script = sandbox / "server.sh"
+            share = sandbox / "share"
+            share.mkdir()
+            shutil.copy2(SCRIPT, script)
+            script.chmod(0o755)
+            config = sandbox / "server.conf"
+            config.write_text(f"SHARE_ROOT={share}\nRETENTION_DAYS=30\n")
+            (share / "old-dir").mkdir()
+            (share / "old-dir" / "file.txt").write_text("directory rename")
+            payload = b"\0".join([
+                b"BROWSE_RENAME_V2", b"2026-08-22--12-00-00-000005Z", b"device-a",
+                b"old-dir", b"new-dir", b"DIR", b"", b"0", b"0",
+            ]) + b"\0"
+            environment = os.environ.copy()
+            environment["NASBOX_TEST_FAILPOINT"] = "browse_rename_after_move"
+            crashed = self.run_with_global_lock(
+                sandbox, [str(script), "-c", str(config), "--browse-rename"],
+                input=payload, capture_output=True, env=environment,
+            )
+            self.assertEqual(crashed.returncode, -9)
+            self.assertFalse((share / "old-dir").exists())
+            self.assertTrue((share / "new-dir" / "file.txt").is_file())
+
+            recovered = self.run_with_global_lock(
+                sandbox, [str(script), "-c", str(config), "--checked-delete"],
+                input=self.empty_checked_delete_payload(), capture_output=True,
+            )
+            self.assertEqual(recovered.returncode, 0, recovered.stderr.decode())
+            journal = (sandbox / "state" / "transfer-journal.tsv").read_text()
+            self.assertIn("DELETE\told-dir/file.txt\t", journal)
+            self.assertIn("PUT\tnew-dir/file.txt\t", journal)
             self.assertFalse(list((sandbox / "state" / "transactions").glob("*.txn")))
 
     def test_file_states_reuses_manifest_digest_when_metadata_matches(self) -> None:

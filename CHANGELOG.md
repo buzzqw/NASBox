@@ -4,6 +4,20 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 1.23.0 - 2026-08-30
+
+- Aggiunte versioni causali per percorso nel manifest e nel journal, con
+  fallback ai protocolli precedenti e al confronto temporale per server legacy.
+- Lo scheduler locale applica aging/fairness e pubblica una coda persistente con
+  operazione attiva, attese e identificativi diagnostici.
+- Aggiunte le modalita' bidirezionale, solo locale, solo NAS e archivio senza
+  propagazione delle cancellazioni remote.
+- Rename locali di file e directory non ambigui usano un'operazione atomica
+  journalizzata sul NAS; gli eventi directory non restano nella coda.
+- Migliorata la ripresa dei trasferimenti interrotti con staging deterministico,
+  backpressure dell'output e `--append-verify` limitato alle staging private.
+- Aggiunti test di causalita', modalita', rename, recovery e trasferimenti grandi.
+
 ## 1.22.1 - 2026-08-30
 
 - Reso immediato lo stato della sincronizzazione nel Monitor NAS con un

@@ -41,6 +41,7 @@ class TransferWorker(QThread):
         self.logger = logger
         self._transfer_active = transfer_active
         self._stop_flag = threading.Event()
+        self._cancel_requested = threading.Event()
         self._conn: rsync_ops.NasConnection | None = None
         self._current_proc = None  # the in-flight rsync Popen, if any -- lets stop()/cancel_current_transfer() interrupt it
         # Relative paths THIS transfer itself wrote to the local filesystem (a pull's
@@ -74,6 +75,7 @@ class TransferWorker(QThread):
 
     def stop(self) -> None:
         self._stop_flag.set()
+        self._cancel_requested.set()
         self._wake_now()
         proc = self._current_proc
         if proc is not None and proc.poll() is None:
@@ -90,6 +92,7 @@ class TransferWorker(QThread):
             self.wait(5_000)
 
     def cancel_current_transfer(self) -> None:
+        self._cancel_requested.set()
         proc = self._current_proc
         if proc is not None and proc.poll() is None:
             try:
@@ -135,18 +138,32 @@ class TransferWorker(QThread):
         could run to completion without on_progress ever firing at all -- no
         progress lines, no chance to react. A watchdog on its own timer reacts
         within CANCEL_CHECK_INTERVAL regardless of how chatty (or silent) rsync is."""
-        direction = "upload" if transfer_fn is rsync_ops.push else "download"
+        direction = (
+            "upload"
+            if transfer_fn in (rsync_ops.push, rsync_ops.push_to_staging)
+            else "download"
+        )
         last_speed_emit = [0.0]
         last_item_progress_emit = [0.0]
         last_item_progress_key: list[tuple[str, str] | None] = [None]
         started = [False]
         if reset_written_paths:
             self._reset_self_written_paths()
+        # A cancel belongs to one rsync invocation. Keep it observable while
+        # that process is being reaped, then allow the next retry to start fresh.
+        self._cancel_requested.clear()
         watchdog_stop = threading.Event()
+
+        def _cancel_check() -> bool:
+            return (
+                self._stop_flag.is_set()
+                or self._cancel_requested.is_set()
+                or (cancel_check is not None and cancel_check())
+            )
 
         def _watchdog() -> None:
             while not watchdog_stop.wait(CANCEL_CHECK_INTERVAL):
-                if cancel_check is not None and cancel_check():
+                if _cancel_check():
                     proc = self._current_proc
                     if proc is not None and proc.poll() is None:
                         try:
@@ -207,6 +224,7 @@ class TransferWorker(QThread):
                 on_item=_on_item, on_item_started=_on_item_started,
                 on_item_progress=_on_item_progress,
                 on_progress=_on_progress, on_start=_on_start,
+                cancel_check=_cancel_check,
                 **transfer_kwargs,
             )
             return result
@@ -227,6 +245,7 @@ class TransferWorker(QThread):
             "download": "DOWNLOAD",
             "delete_local": "DELETE_LOCAL",
             "delete_remote": "DELETE_REMOTE",
+            "rename_remote": "RENAME_REMOTE",
         }
         action = action_map.get(item.direction, item.direction.upper())
         detail = f"{item.size} byte" if item.size else ""

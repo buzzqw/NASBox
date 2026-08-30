@@ -208,8 +208,8 @@ STRINGS: dict[str, dict[str, str]] = {
     "status.queue_empty": {"it": "Coda corrente: nessuna operazione in attesa nell'ultima verifica.", "en": "Current queue: no operations waiting in the latest check."},
     "status.queue_offline": {"it": "Coda non disponibile: il NAS non è connesso.", "en": "Queue unavailable: the NAS is not connected."},
     "status.queue_summary": {
-        "it": "In attesa: {uploads} caricamenti, {downloads} scaricamenti, {deletes} eliminazioni.",
-        "en": "Waiting: {uploads} uploads, {downloads} downloads, {deletes} deletions.",
+        "it": "Operazioni: {uploads} caricamenti, {downloads} scaricamenti, {deletes} eliminazioni. Attiva: {active}; in coda scheduler: {scheduler_waiting}.",
+        "en": "Operations: {uploads} uploads, {downloads} downloads, {deletes} deletions. Active: {active}; scheduler waiting: {scheduler_waiting}.",
     },
     "status.diagnostics_unknown": {"it": "Diagnostica NAS non ancora caricata.", "en": "NAS diagnostics have not been loaded yet."},
     "status.diagnostics_refresh_btn": {"it": "Diagnostica NAS", "en": "NAS diagnostics"},
@@ -338,6 +338,15 @@ STRINGS: dict[str, dict[str, str]] = {
     "settings.detect_btn": {"it": "Rileva dal NAS", "en": "Detect from NAS"},
     "settings.detect_running": {"it": "Rilevamento in corso…", "en": "Detecting…"},
     "settings.remote_prefix_label": {"it": "Cartella NASBox sul NAS:", "en": "NASBox folder on the NAS:"},
+    "settings.sync_mode_label": {"it": "Modalita' di sincronizzazione:", "en": "Synchronization mode:"},
+    "settings.sync_mode_bidirectional": {"it": "Bidirezionale", "en": "Bidirectional"},
+    "settings.sync_mode_push_only": {"it": "Solo locale (push-only)", "en": "Local only (push-only)"},
+    "settings.sync_mode_pull_only": {"it": "Solo NAS (pull-only)", "en": "NAS only (pull-only)"},
+    "settings.sync_mode_archive": {"it": "Archivio (locale -> NAS, senza cancellazioni remote)", "en": "Archive (local -> NAS, no remote deletions)"},
+    "settings.sync_mode_note": {
+        "it": "Bidirezionale scambia entrambe le direzioni. Solo locale invia soltanto al NAS; solo NAS scarica soltanto dal NAS. Archivio invia aggiunte e modifiche, conserva sul NAS i file cancellati localmente e non esegue pull.",
+        "en": "Bidirectional transfers both ways. Local only uploads to the NAS; NAS only downloads from it. Archive uploads additions and changes, keeps files deleted locally on the NAS, and does not pull.",
+    },
     "settings.detect_note": {
         "it": "'Rileva dal NAS' si collega, verifica che il demone server sia attivo e legge da lì "
               "il percorso remoto e la retention -- niente da ricopiare a mano.",
@@ -354,8 +363,8 @@ STRINGS: dict[str, dict[str, str]] = {
     },
     "settings.save_all_btn": {"it": "Salva impostazioni", "en": "Save settings"},
     "settings.save_all_tooltip": {
-        "it": "Salva insieme connessione, banda, frequenza, feedback, tray, lingua, esclusioni e cancellazioni.",
-        "en": "Saves connection, bandwidth, cadence, feedback, tray, language, exclusions, and deletion settings together.",
+        "it": "Salva insieme connessione, modalita', banda, frequenza, feedback, tray, lingua, esclusioni e cancellazioni.",
+        "en": "Saves connection, sync mode, bandwidth, cadence, feedback, tray, language, exclusions, and deletion settings together.",
     },
     "settings.dirty_feedback": {"it": "Modifiche non ancora salvate.", "en": "Unsaved changes."},
     "settings.saved_feedback": {"it": "Tutte le impostazioni sono salvate.", "en": "All settings are saved."},
@@ -615,6 +624,7 @@ STRINGS: dict[str, dict[str, str]] = {
     "transfers.dir_download": {"it": "↓ Scarica", "en": "↓ Download"},
     "transfers.dir_delete_remote": {"it": "🗑 Elimina sul NAS", "en": "🗑 Delete on NAS"},
     "transfers.dir_delete_local": {"it": "🗑 Elimina in locale", "en": "🗑 Delete locally"},
+    "transfers.dir_rename_remote": {"it": "↔ Rinomina sul NAS", "en": "↔ Rename on NAS"},
 
     # --- updater.py / main.py ---
     "updater.available_title": {"it": "Aggiornamento disponibile", "en": "Update available"},
@@ -655,6 +665,7 @@ STRINGS: dict[str, dict[str, str]] = {
     "log.action.download": {"it": "Scaricato dal NAS", "en": "Downloaded from NAS"},
     "log.action.delete_local": {"it": "Eliminato in locale", "en": "Deleted locally"},
     "log.action.delete_remote": {"it": "Eliminato sul NAS", "en": "Deleted on NAS"},
+    "log.action.rename_remote": {"it": "Rinominato sul NAS", "en": "Renamed on NAS"},
     "log.action.browse_download": {"it": "Scaricato da Sfoglia NAS", "en": "Downloaded from Browse NAS"},
     "log.action.browse_rename": {"it": "Rinominato da Sfoglia NAS", "en": "Renamed in Browse NAS"},
     "log.action.browse_delete": {"it": "Eliminato da Sfoglia NAS", "en": "Deleted in Browse NAS"},

@@ -34,6 +34,7 @@ from typing import Callable, Optional
 from .config import Config
 from .reconcile import RemoteKind, RemoteState
 from .repository_safety import RepositorySafetyError, validate_local_root
+from .sync_state import CausalVersion
 
 TRASH_DIRNAME = ".sync-trash"
 REPOSITORY_MARKER_NAME = ".nasbox-root"
@@ -42,7 +43,13 @@ REPOSITORY_MARKER_NAME = ".nasbox-root"
 # cache churn instead of the user's actual files.
 SYNOLOGY_EADIR = "@eaDir"
 STAGING_DIRNAME = ".nasbox-staging"
-EXCLUDE_DIRNAMES = [TRASH_DIRNAME, SYNOLOGY_EADIR, ".sync-partial", STAGING_DIRNAME]
+PARTIAL_DIRNAME = ".sync-partial"
+EXCLUDE_DIRNAMES = [TRASH_DIRNAME, SYNOLOGY_EADIR, PARTIAL_DIRNAME, STAGING_DIRNAME]
+
+# Keep the rsync pipe useful as backpressure: diagnostics are for the error
+# message only, not an unbounded second copy of a large transfer's output.
+MAX_TRANSFER_ERROR_BYTES = 64 * 1024
+MAX_PENDING_TRANSFER_ITEMS = 4096
 
 # rsync's default --delete mode (--delete-during) applies deletions incrementally,
 # directory by directory, as the transfer proceeds -- using a source-side file list
@@ -137,9 +144,10 @@ def _old_args_flag(cfg: Config, conn: NasConnection) -> list[str]:
 
 @dataclass
 class TransferItem:
-    direction: str   # "upload" | "download" | "delete_remote" | "delete_local"
+    direction: str   # "upload" | "download" | "delete_remote" | "delete_local" | "rename_remote"
     path: str        # file path relative to the NASBox root
     size: int = 0
+    source_path: str = ""  # set for a remote rename; path is its destination
 
 
 @dataclass
@@ -147,6 +155,8 @@ class TransferResult:
     ok: bool
     items: list[TransferItem]
     raw_error: str = ""
+    cancelled: bool = False
+    partial_preserved: bool = False
 
 
 @dataclass
@@ -789,27 +799,38 @@ def remote_file_states(
     batch_size = 2048
     for batch_start in range(0, len(paths), batch_size):
         batch = paths[batch_start:batch_start + batch_size]
-        fields = [b"FILE_STATES_V1", str(len(batch)).encode()]
+        fields = [b"FILE_STATES_V2", str(len(batch)).encode()]
         fields.extend(os.fsencode(path) for path in batch)
         payload = b"\0".join(fields) + b"\0"
-        ok, output, _error = run_remote_script_input_bytes(
+        ok, output, error = run_remote_script_input_bytes(
             cfg, conn, script_path, ["--file-states-current"], payload, timeout=600,
         )
+        protocol = b"FILE_STATES_V2"
+        if not ok:
+            # The endpoint is read-only; retrying its legacy wire format is
+            # safe and keeps older servers usable without causal metadata.
+            fields[0] = b"FILE_STATES_V1"
+            payload = b"\0".join(fields) + b"\0"
+            ok, output, _error = run_remote_script_input_bytes(
+                cfg, conn, script_path, ["--file-states-current"], payload, timeout=600,
+            )
+            protocol = b"FILE_STATES_V1"
         if not ok:
             return None
         values = output.split(b"\0")
         if values and values[-1] == b"":
             values.pop()
-        if len(values) < 2 or values[0] != b"FILE_STATES_V1":
+        if len(values) < 2 or values[0] != protocol:
             return None
         try:
             count = int(values[1])
         except ValueError:
             return None
-        if count != len(batch) or len(values) != 2 + count * 5:
+        fields_per_path = 6 if protocol == b"FILE_STATES_V2" else 5
+        if count != len(batch) or len(values) != 2 + count * fields_per_path:
             return None
         for index in range(count):
-            offset = 2 + index * 5
+            offset = 2 + index * fields_per_path
             path = os.fsdecode(values[offset])
             try:
                 kind = RemoteKind(values[offset + 1].decode("ascii"))
@@ -820,7 +841,16 @@ def remote_file_states(
                 return None
             if kind == RemoteKind.FILE and not re.fullmatch(r"[0-9a-f]{64}", digest):
                 return None
-            result[path] = RemoteState(kind, digest, size, mtime_ns)
+            causal = None
+            if fields_per_path == 6:
+                try:
+                    causal_text = values[offset + 5].decode("ascii", errors="strict")
+                except UnicodeDecodeError:
+                    return None
+                causal = CausalVersion.parse(causal_text)
+                if causal_text and causal is None:
+                    return None
+            result[path] = RemoteState(kind, digest, size, mtime_ns, causal)
         if on_progress is not None:
             on_progress(min(batch_start + len(batch), len(paths)), len(paths))
     return result
@@ -913,13 +943,16 @@ def cleanup_remote_staging(cfg: Config, conn: NasConnection, staging_dir: str) -
 def publish_staging(
     cfg: Config, conn: NasConnection, staging_dir: str, transaction_id: str,
     device_id: str, fingerprints: dict[str, "Fingerprint"],
+    causal_versions: dict[str, CausalVersion | None] | None = None,
 ) -> tuple[bool, str]:
     """Atomically publish new staged files while the caller owns the NAS lease."""
     script_path = (cfg.get("remote_server_script") or "").strip()
     if not script_path or not fingerprints:
         return False, "publish staging senza script o file"
+    include_causal = bool(cfg.get("remote_causal_versions_available")) and causal_versions is not None
     fields = [
-        b"STAGING_PUBLISH_V1", os.fsencode(staging_dir), transaction_id.encode("ascii"),
+        b"STAGING_PUBLISH_V2" if include_causal else b"STAGING_PUBLISH_V1",
+        os.fsencode(staging_dir), transaction_id.encode("ascii"),
         device_id.encode("ascii"), str(len(fingerprints)).encode("ascii"),
     ]
     for path, fingerprint in sorted(fingerprints.items()):
@@ -927,15 +960,35 @@ def publish_staging(
             os.fsencode(path), fingerprint.digest.encode("ascii"), str(fingerprint.size).encode("ascii"),
             str(fingerprint.mtime_ns).encode("ascii"),
         ))
+        if include_causal:
+            causal = (causal_versions or {}).get(path)
+            fields.append(causal.encode() if causal is not None else b"")
     ok, output, error = run_remote_script_input_bytes(
         cfg, conn, script_path, ["--staging-publish"], b"\0".join(fields) + b"\0", timeout=300,
     )
+    if not ok and include_causal and (
+        "opzione sconosciuta" in error.lower() or "unknown option" in error.lower()
+        or "protocollo" in error.lower()
+    ):
+        # V2 is rejected before the old server mutates anything. Retry the
+        # same publish without metadata, preserving old-server compatibility.
+        legacy_fields = fields[:5]
+        for index in range(len(fingerprints)):
+            start = 5 + index * 5
+            legacy_fields.extend(fields[start:start + 4])
+        legacy_fields[0] = b"STAGING_PUBLISH_V1"
+        ok, output, error = run_remote_script_input_bytes(
+            cfg, conn, script_path, ["--staging-publish"], b"\0".join(legacy_fields) + b"\0", timeout=300,
+        )
+        expected_magic = b"STAGING_PUBLISH_V1"
+    else:
+        expected_magic = b"STAGING_PUBLISH_V2" if include_causal else b"STAGING_PUBLISH_V1"
     if not ok:
         return False, error or "pubblicazione staging fallita"
     values = output.split(b"\0")
     if values and values[-1] == b"":
         values.pop()
-    if len(values) != 3 or values[:2] != [b"STAGING_PUBLISH_V1", b"OK"]:
+    if len(values) != 3 or values[:2] != [expected_magic, b"OK"]:
         return False, "risposta publish staging non valida"
     try:
         return int(values[2]) == len(fingerprints), ""
@@ -1077,6 +1130,67 @@ def browse_rename(
     return False, detail or "spostamento remoto fallito"
 
 
+def rename_remote(
+    cfg: Config, conn: NasConnection, src_relative: str, dst_relative: str,
+    device_id: str, *, kind: str, digest: str = "", size: int = 0,
+    mtime_ns: int = 0, lease: RemoteLock | None = None,
+) -> tuple[bool, str]:
+    """Atomically publish a locally detected rename on the NAS.
+
+    Unlike the interactive V1 browse command, V2 carries the live source
+    precondition. The server moves the path and writes both journal records in
+    one recoverable transaction, so a failed journal cannot leave a silent
+    upload/delete split.
+    """
+    if (
+        not _BROWSE_PATH_VALID(src_relative) or not _BROWSE_PATH_VALID(dst_relative)
+        or src_relative == dst_relative
+        or kind not in ("FILE", "DIR")
+        or (kind == "FILE" and not re.fullmatch(r"[0-9a-f]{64}", digest))
+        or size < 0 or mtime_ns < 0
+    ):
+        return False, "precondizione rename non valida"
+    script_path = (cfg.get("remote_server_script") or "").strip()
+    if not script_path:
+        return False, "script server NAS non configurato"
+    try:
+        validate_transfer_safety(cfg, conn, destructive=False, direction="upload")
+    except RepositorySafetyError as exc:
+        return False, str(exc)
+    payload = b"\0".join((
+        b"BROWSE_RENAME_V2", new_run_ts().encode("ascii"), device_id.encode("ascii"),
+        os.fsencode(src_relative), os.fsencode(dst_relative), kind.encode("ascii"),
+        digest.encode("ascii"), str(size).encode("ascii"), str(mtime_ns).encode("ascii"),
+    )) + b"\0"
+    try:
+        if lease is None:
+            lease_context = remote_lock(cfg, conn, owner_id=device_id)
+        else:
+            lease_context = None
+        if lease_context is not None:
+            with lease_context:
+                ok, output, error = run_remote_script_input_bytes(
+                    cfg, conn, script_path, ["--browse-rename"], payload, timeout=300,
+                )
+        else:
+            ok, output, error = run_remote_script_input_bytes(
+                cfg, conn, script_path, ["--browse-rename"], payload, timeout=300,
+            )
+    except RemoteLockBusy:
+        return False, "NAS occupato da un'altra sincronizzazione; riprova tra poco"
+    except RemoteLockError as exc:
+        return False, str(exc)
+    if not ok:
+        return False, error or "spostamento remoto fallito"
+    values = output.split(b"\0")
+    if len(values) < 2 or values[0] != b"BROWSE_RENAME_V2":
+        return False, "risposta del NAS non valida"
+    if values[1] == b"OK":
+        return True, ""
+    detail = values[2].decode(errors="replace") if len(values) > 2 else ""
+    return False, detail or "spostamento remoto fallito"
+
+
 def browse_download(
     cfg: Config, conn: NasConnection, relative_path: str, destination: Path,
 ) -> tuple[bool, str]:
@@ -1177,13 +1291,21 @@ def remote_manifest_snapshot(
             event_seconds = int(fields[5])
         except (UnicodeDecodeError, ValueError):
             return None
+        try:
+            causal_text = fields[6].decode("ascii", errors="strict") if len(fields) >= 7 else ""
+        except UnicodeDecodeError:
+            return None
+        causal = CausalVersion.parse(causal_text)
+        if causal_text and causal is None:
+            return None
         if digest:
             if not re.fullmatch(r"[0-9a-f]{64}", digest):
                 return None
-            entries[path] = RemoteState(RemoteKind.FILE, digest, size, mtime_ns)
+            entries[path] = RemoteState(RemoteKind.FILE, digest, size, mtime_ns, causal)
         else:
             entries[path] = RemoteState(
                 RemoteKind.TOMBSTONE, "", 0, event_seconds * 1_000_000_000,
+                causal,
             )
     return revision, entries
 
@@ -1354,6 +1476,41 @@ def path_is_excluded(cfg: Config, relative_path: str) -> bool:
     return False
 
 
+def cleanup_local_partial(cfg: Config, paths: set[str] | list[str]) -> None:
+    """Remove only completed pull partials, leaving interrupted transfers resumable."""
+    partial_root = Path(cfg.local_root(), PARTIAL_DIRNAME)
+    root = partial_root.resolve()
+    for relative_path in paths:
+        if not relative_path or relative_path.startswith("/") or ".." in relative_path.split("/"):
+            continue
+        candidate = partial_root / relative_path
+        try:
+            if candidate.resolve().parent != root and not str(candidate.resolve()).startswith(str(root) + os.sep):
+                continue
+            if candidate.is_file() or candidate.is_symlink():
+                candidate.unlink()
+            parent = candidate.parent
+            while parent != root:
+                parent.rmdir()
+                parent = parent.parent
+        except OSError:
+            # Rsync normally removes these itself. A stale partial must not make
+            # an otherwise committed pull fail or turn cleanup into data loss.
+            continue
+
+
+def _partial_transfer_args(*, append_verify: bool = False) -> list[str]:
+    """Build the safe resume profile used by real transfers.
+
+    --append-verify implies --inplace and cannot be combined with
+    --delay-updates or --partial-dir. It is therefore reserved for private
+    staging, where the incomplete destination is never a canonical file.
+    """
+    if append_verify:
+        return ["--partial", "--append-verify"]
+    return ["--partial", f"--partial-dir={PARTIAL_DIRNAME}", "--delay-updates"]
+
+
 def _bwlimit_args(cfg: Config, direction: str) -> list[str]:
     key = "bandwidth_upload_kbps" if direction == "upload" else "bandwidth_download_kbps"
     kbps = int(cfg.get(key) or 0)
@@ -1484,8 +1641,8 @@ def scan(
     upload candidate takes precedence over the opposite pull's delete_local
     for a file that exists only on this client.
     """
-    uploads = _dry_run(cfg, conn, "upload", on_start=on_start)
-    downloads = _dry_run(cfg, conn, "download", on_start=on_start)
+    uploads = _dry_run(cfg, conn, "upload", on_start=on_start) if cfg.allows_push() else []
+    downloads = _dry_run(cfg, conn, "download", on_start=on_start) if cfg.allows_pull() else []
     merged = {item.path: item for item in downloads}
     for item in uploads:
         merged[item.path] = item
@@ -1644,7 +1801,9 @@ def integrity_check(cfg: Config, conn: NasConnection) -> list[TransferItem]:
     checksum comparison must report a difference even when timestamps have
     been preserved or clocks disagree.
     """
-    return _dry_run(cfg, conn, "upload", checksum=True) + _dry_run(cfg, conn, "download", checksum=True)
+    uploads = _dry_run(cfg, conn, "upload", checksum=True) if cfg.allows_push() else []
+    downloads = _dry_run(cfg, conn, "download", checksum=True) if cfg.allows_pull() else []
+    return uploads + downloads
 
 
 def _run_transfer(
@@ -1657,6 +1816,8 @@ def _run_transfer(
     paths: set[str] | None = None,
     remote_destination: str | None = None,
     keep_backups: bool = True,
+    append_verify: bool = False,
+    cancel_check: Optional[Callable[[], bool]] = None,
 ) -> TransferResult:
     """Runs the real (non-dry-run) push/pull, streaming rsync's output line by
     line as it happens instead of waiting for the whole thing to finish. This
@@ -1705,6 +1866,10 @@ def _run_transfer(
         # checksum pull, which deliberately does not use --update.
         selection_args += ["--update"]
 
+    # A private staging destination is never exposed as a canonical file, so it
+    # can safely use append+full verification. Canonical push/pull keeps
+    # delay-updates to preserve atomic publication of complete files.
+    use_append_verify = append_verify and remote_destination is not None and not keep_backups
     cmd = [
         "rsync", "-avz",
         # NASBox files belong to the SSH account, not to the remote UID/GID
@@ -1715,8 +1880,9 @@ def _run_transfer(
         *_old_args_flag(cfg, conn),
         *selection_args,
         *delete_flag,
-        "--partial", "--partial-dir=.sync-partial", "--delay-updates",
+        *_partial_transfer_args(append_verify=use_append_verify),
         *_bwlimit_args(cfg, direction),
+        "--outbuf=L",
         "--progress",
         "--info=progress2",
         *(["--backup", f"--backup-dir={backup_dir}", f"--suffix=-{run_ts}"] if keep_backups else []),
@@ -1744,65 +1910,106 @@ def _run_transfer(
 
     items: list[TransferItem] = []
     other_lines: list[str] = []
+    other_bytes = 0
+    diagnostics_truncated = False
     # Files rsync has announced (itemize line seen) but not yet actually finished
     # sending, in the order it announced them -- which is also the order it
     # completes them in, since one rsync process sends its files strictly
     # sequentially. Popped off as each "(xfr#N, ...)" completion marker arrives.
     pending_items: list[TransferItem] = []
+    cancelled = False
+    output_overflow = False
+
+    def stop_process() -> None:
+        try:
+            if proc.poll() is None:
+                proc.terminate()
+        except OSError:
+            pass
+
+    def remember_diagnostic(line: str) -> None:
+        nonlocal other_bytes, diagnostics_truncated
+        if other_bytes >= MAX_TRANSFER_ERROR_BYTES:
+            diagnostics_truncated = True
+            return
+        encoded = line.encode(errors="replace")
+        remaining = MAX_TRANSFER_ERROR_BYTES - other_bytes
+        if len(encoded) > remaining:
+            encoded = encoded[:remaining]
+            diagnostics_truncated = True
+        other_lines.append(encoded.decode(errors="replace"))
+        other_bytes += len(encoded)
 
     assert proc.stdout is not None
-    for line in proc.stdout:
-        line = line.rstrip("\n")
-        item = _parse_itemize_line(line, direction)
-        if item:
-            if item.direction in ("delete_remote", "delete_local"):
-                # deletions are atomic on the wire -- no partial-progress concept,
-                # so reporting them the moment they're itemized is already correct.
-                if on_item_started:
-                    on_item_started(item)
-                items.append(item)
-                if on_item:
-                    on_item(item)
-            else:
-                if on_item_started:
-                    on_item_started(item)
-                pending_items.append(item)
-            continue
-        progress = _parse_progress_line(line)
-        if progress:
-            if pending_items and on_item_progress:
-                on_item_progress(pending_items[0], progress[0])
-            if on_progress:
-                on_progress(*progress)
-            if pending_items and _XFR_DONE_RE.search(line):
-                done_item = pending_items.pop(0)
-                items.append(done_item)
-                if on_item:
-                    on_item(done_item)
-            continue
-        if "|" in line:
-            # The out-format also reports directories and metadata-only rows.
-            # They are intentionally not TransferItems, but they must not be
-            # accumulated as an error string: on a large tree that can consume
-            # megabytes and make the GUI appear frozen after a partial run.
-            try:
-                item_code, _item_length, _item_name = line.split("|", 2)
-            except ValueError:
-                item_code = ""
-            if item_code.strip().startswith((".", "<", ">", "*")):
-                continue
-        stripped = line.strip()
-        if stripped:
-            other_lines.append(stripped)
-
     try:
-        proc.wait(timeout=10)
-    except subprocess.TimeoutExpired:
-        proc.kill()
-        proc.wait()
-
-    if files_from_path:
-        Path(files_from_path).unlink(missing_ok=True)
+        for line in proc.stdout:
+            if cancel_check is not None and cancel_check():
+                cancelled = True
+                stop_process()
+                break
+            line = line.rstrip("\n")
+            item = _parse_itemize_line(line, direction)
+            if item:
+                if item.direction in ("delete_remote", "delete_local"):
+                    # deletions are atomic on the wire -- no partial-progress concept,
+                    # so reporting them the moment they're itemized is already correct.
+                    if on_item_started:
+                        on_item_started(item)
+                    items.append(item)
+                    if on_item:
+                        on_item(item)
+                else:
+                    if on_item_started:
+                        on_item_started(item)
+                    pending_items.append(item)
+                    if len(pending_items) > MAX_PENDING_TRANSFER_ITEMS:
+                        # A broken/unsupported rsync output mode must not let a
+                        # large tree grow an unbounded completion queue. Abort
+                        # safely; --partial-dir keeps completed prefix bytes.
+                        output_overflow = True
+                        stop_process()
+                        break
+                continue
+            progress = _parse_progress_line(line)
+            if progress:
+                if pending_items and on_item_progress:
+                    on_item_progress(pending_items[0], progress[0])
+                if on_progress:
+                    on_progress(*progress)
+                if pending_items and _XFR_DONE_RE.search(line):
+                    done_item = pending_items.pop(0)
+                    items.append(done_item)
+                    if on_item:
+                        on_item(done_item)
+                continue
+            if "|" in line:
+                # The out-format also reports directories and metadata-only rows.
+                # They are intentionally not TransferItems, but they must not be
+                # accumulated as an error string on a large tree.
+                try:
+                    item_code, _item_length, _item_name = line.split("|", 2)
+                except ValueError:
+                    item_code = ""
+                if item_code.strip().startswith((".", "<", ">", "*")):
+                    continue
+            stripped = line.strip()
+            if stripped:
+                remember_diagnostic(stripped)
+    finally:
+        try:
+            proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            try:
+                proc.kill()
+            except OSError:
+                pass
+            proc.wait()
+        if files_from_path:
+            Path(files_from_path).unlink(missing_ok=True)
+        try:
+            proc.stdout.close()
+        except OSError:
+            pass
 
     # A partial transfer is retried. Treating exit 23 as success could commit a
     # baseline for only part of a causal batch and then let a pull destroy the
@@ -1813,9 +2020,22 @@ def _run_transfer(
     # between its own generator/sender children) -- so this isn't used to detect
     # our own cancel_current_transfer()/stop(); see SyncEngine._report_failure,
     # which checks engine state instead of trying to infer intent from the exit code.
-    ok = proc.returncode == 0
+    if cancel_check is not None and cancel_check():
+        cancelled = True
+    ok = proc.returncode == 0 and not cancelled and not output_overflow
+    if output_overflow:
+        remember_diagnostic("output rsync non compatibile: coda completioni oltre il limite")
+    if diagnostics_truncated:
+        remember_diagnostic("diagnostica rsync troncata")
     raw_error = "" if ok else _clean_ssh_stderr("\n".join(other_lines))
-    return TransferResult(ok=ok, items=items, raw_error=raw_error)
+    if len(raw_error.encode()) > MAX_TRANSFER_ERROR_BYTES:
+        raw_error = raw_error.encode()[:MAX_TRANSFER_ERROR_BYTES].decode(errors="replace")
+    if direction == "download" and paths is not None and ok:
+        cleanup_local_partial(cfg, paths)
+    return TransferResult(
+        ok=ok, items=items, raw_error=raw_error,
+        cancelled=cancelled, partial_preserved=not ok,
+    )
 
 
 def push(
@@ -1826,12 +2046,13 @@ def push(
     on_progress: Optional[Callable[[int, float], None]] = None,
     on_start: Optional[Callable[[subprocess.Popen], None]] = None,
     paths: set[str] | None = None,
+    cancel_check: Optional[Callable[[], bool]] = None,
 ) -> TransferResult:
     return _run_transfer(
         cfg, conn, "upload", run_ts,
         on_item=on_item, on_item_started=on_item_started,
         on_item_progress=on_item_progress, on_progress=on_progress,
-        on_start=on_start, paths=paths,
+        on_start=on_start, paths=paths, cancel_check=cancel_check,
     )
 
 
@@ -1843,13 +2064,14 @@ def push_to_staging(
     on_progress: Optional[Callable[[int, float], None]] = None,
     on_start: Optional[Callable[[subprocess.Popen], None]] = None,
     paths: set[str] | None = None,
+    cancel_check: Optional[Callable[[], bool]] = None,
 ) -> TransferResult:
     user = cfg.get("nas_user")
     return _run_transfer(
         cfg, conn, "upload", run_ts,
         on_item=on_item, on_item_started=on_item_started,
         on_item_progress=on_item_progress, on_progress=on_progress,
-        on_start=on_start, paths=paths,
+        on_start=on_start, paths=paths, append_verify=True, cancel_check=cancel_check,
         remote_destination=f"{user}@{conn.host}:{staging_dir.rstrip('/')}/",
         keep_backups=False,
     )
@@ -1863,18 +2085,20 @@ def pull(
     on_progress: Optional[Callable[[int, float], None]] = None,
     on_start: Optional[Callable[[subprocess.Popen], None]] = None,
     paths: set[str] | None = None,
+    cancel_check: Optional[Callable[[], bool]] = None,
 ) -> TransferResult:
     return _run_transfer(
         cfg, conn, "download", run_ts,
         on_item=on_item, on_item_started=on_item_started,
         on_item_progress=on_item_progress, on_progress=on_progress,
-        on_start=on_start, paths=paths,
+        on_start=on_start, paths=paths, cancel_check=cancel_check,
     )
 
 
 def build_remote_journal_payload(
     cfg: Config, device_id: str, items: list[TransferItem],
     fingerprints: dict[str, object] | None = None,
+    causal_versions: dict[str, CausalVersion | None] | None = None,
 ) -> tuple[bytes | None, str]:
     """Build the binary-safe payload sent to ``--journal-append``."""
     script_path = (cfg.get("remote_server_script") or "").strip()
@@ -1885,14 +2109,15 @@ def build_remote_journal_payload(
 
     payload = bytearray()
 
-    def field(value: str) -> None:
+    def field(value: str | bytes) -> None:
         payload.extend(os.fsencode(value))
         payload.append(0)
 
     repository_id = str(cfg.get("repository_id") or "")
     if not repository_id:
         return None, "repository NAS non identificato"
-    field("JOURNAL_V2")
+    include_causal = bool(cfg.get("remote_causal_versions_available")) and causal_versions is not None
+    field("JOURNAL_V3" if include_causal else "JOURNAL_V2")
     field(repository_id)
     field(new_run_ts())
     field(device_id)
@@ -1929,6 +2154,9 @@ def build_remote_journal_payload(
         field(digest)
         field(str(size))
         field(str(mtime))
+        if include_causal:
+            causal = causal_versions.get(item.path)
+            field(causal.encode() if causal is not None else "")
 
     return bytes(payload), ""
 
@@ -1936,13 +2164,16 @@ def build_remote_journal_payload(
 def append_remote_journal(
     cfg: Config, conn: NasConnection, device_id: str, items: list[TransferItem],
     fingerprints: dict[str, object] | None = None,
+    causal_versions: dict[str, CausalVersion | None] | None = None,
 ) -> tuple[bool, str]:
     """Append completed transfer results to the NAS journal.
 
     The payload is NUL-delimited so filenames containing whitespace, tabs or
     newlines cannot change the record boundaries on the NAS.
     """
-    payload, error = build_remote_journal_payload(cfg, device_id, items, fingerprints)
+    payload, error = build_remote_journal_payload(
+        cfg, device_id, items, fingerprints, causal_versions,
+    )
     if payload is None:
         return False, error
     if not payload:
@@ -1952,7 +2183,19 @@ def append_remote_journal(
         cfg, conn, script_path, ["--journal-append"], payload, timeout=120,
     )
     detail = (stdout + stderr).strip()
-    if not ok and ("opzione sconosciuta" in detail.lower() or "unknown option" in detail.lower()):
+    if not ok and ("opzione sconosciuta" in detail.lower() or "unknown option" in detail.lower()
+                   or "protocollo non riconosciuto" in detail.lower()):
+        if payload.startswith(b"JOURNAL_V3\0"):
+            # V3 is an additive capability. An older server rejected the
+            # header before appending anything, so the V2 retry is safe.
+            legacy, legacy_error = build_remote_journal_payload(cfg, device_id, items, fingerprints)
+            if legacy:
+                legacy_ok, legacy_stdout, legacy_stderr = run_remote_script_input(
+                    cfg, conn, script_path, ["--journal-append"], legacy, timeout=120,
+                )
+                if legacy_ok:
+                    return True, (legacy_stdout + legacy_stderr).strip()
+                return False, (legacy_stdout + legacy_stderr).strip() or legacy_error
         return True, "journal non supportato dal server remoto"
     return ok, detail
 

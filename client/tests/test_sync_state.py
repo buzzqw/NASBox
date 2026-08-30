@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 
 from sync_client.config import Config
-from sync_client.sync_state import Fingerprint, SyncStateStore
+from sync_client.sync_state import CausalVersion, Fingerprint, SyncStateStore
 
 from tests.support import ClientEnvironment
 
@@ -58,6 +58,39 @@ class SyncStateTests(unittest.TestCase):
         assert tombstone is not None
         self.assertTrue(tombstone.is_tombstone)
         self.assertTrue(self.store.has_entries())
+
+    def test_local_observations_get_stable_incrementing_causal_versions(self) -> None:
+        file_path = self.root / "causal.txt"
+        file_path.write_bytes(b"one")
+        first = self.store.local_fingerprint(str(self.root), "causal.txt")
+        same = self.store.local_fingerprint(str(self.root), "causal.txt")
+        self.assertIsNotNone(first)
+        self.assertEqual(first, same)
+        assert first is not None and first.causal is not None
+
+        file_path.write_bytes(b"two")
+        second = self.store.local_fingerprint(str(self.root), "causal.txt")
+        assert second is not None and second.causal is not None
+        self.assertTrue(second.causal.dominates(first.causal))
+        self.assertEqual(second.causal.counter("missing"), 0)
+
+        file_path.unlink()
+        deleted = self.store.local_causal(str(self.root), "causal.txt")
+        self.assertIsNotNone(deleted)
+        assert deleted is not None
+        self.assertTrue(deleted.dominates(second.causal))
+
+    def test_causal_version_round_trip_on_baseline_and_legacy_rows(self) -> None:
+        version = CausalVersion((("device-a", 4), ("device-b", 2)))
+        self.store.record_fingerprints({"causal.txt": Fingerprint("a", 1, 10, version)})
+        recorded = self.store.get("causal.txt")
+        self.assertIsNotNone(recorded)
+        assert recorded is not None
+        self.assertEqual(recorded.causal, version)
+        self.store.record_fingerprints({"legacy.txt": Fingerprint("b", 1, 10)})
+        legacy = self.store.get("legacy.txt")
+        assert legacy is not None
+        self.assertIsNone(legacy.causal)
 
     def test_changed_paths_detects_new_modified_and_deleted_files(self) -> None:
         unchanged = self.root / "unchanged.txt"
@@ -114,6 +147,15 @@ class SyncStateTests(unittest.TestCase):
         self.assertEqual(summary["attempt_count"], 1)
         self.store.clear_pending(["a.txt"])
         self.assertEqual(self.store.pending_paths(), {"b.txt"})
+
+    def test_scheduler_queue_is_persistent_and_stale_rows_can_be_cleared(self) -> None:
+        device_id = self.store.device_id()
+        self.store.scheduler_queue_add("request-1", device_id, "pull", 4, 10.0)
+        self.assertEqual(self.store.scheduler_queue_rows()[0]["kind"], "pull")
+        reopened = SyncStateStore(self.config)
+        self.assertEqual(reopened.scheduler_queue_rows()[0]["request_id"], "request-1")
+        reopened.clear_scheduler_queue(device_id)
+        self.assertEqual(reopened.scheduler_queue_rows(), [])
 
     def test_conflict_group_replaces_members_and_resolves(self) -> None:
         group_id = self.store.upsert_conflict_group(

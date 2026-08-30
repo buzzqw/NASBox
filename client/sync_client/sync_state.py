@@ -12,7 +12,7 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable, Mapping, Optional
 
 from . import paths
 from .config import Config
@@ -25,10 +25,79 @@ HASH_MAX_WORKERS = min(8, max(1, (os.cpu_count() or 1) // 2))
 
 
 @dataclass(frozen=True)
+class CausalVersion:
+    """Canonical per-path vector clock.
+
+    The empty vector means that no causal metadata was available.  It is kept
+    distinct from ``None`` so parsing and merging remain deterministic, while
+    callers use ``None`` to mean an old/metadata-less remote state.
+    """
+
+    clock: tuple[tuple[str, int], ...] = ()
+
+    def __post_init__(self) -> None:
+        normalized = tuple(sorted((str(device), int(counter)) for device, counter in self.clock))
+        if any(not device or counter < 1 for device, counter in normalized):
+            raise ValueError("invalid causal version")
+        if len({device for device, _counter in normalized}) != len(normalized):
+            raise ValueError("duplicate causal device")
+        object.__setattr__(self, "clock", normalized)
+
+    @classmethod
+    def parse(cls, value: str | None) -> "CausalVersion | None":
+        if not value:
+            return None
+        parts: list[tuple[str, int]] = []
+        for component in value.split(","):
+            device, separator, counter = component.partition(":")
+            if not separator or not device or not counter.isdigit():
+                return None
+            try:
+                parts.append((device, int(counter)))
+            except ValueError:
+                return None
+        try:
+            return cls(tuple(parts))
+        except ValueError:
+            return None
+
+    def encode(self) -> str:
+        return ",".join(f"{device}:{counter}" for device, counter in self.clock)
+
+    def counter(self, device_id: str) -> int:
+        return dict(self.clock).get(device_id, 0)
+
+    def merge(self, other: "CausalVersion | None") -> "CausalVersion":
+        if other is None:
+            return self
+        values = dict(self.clock)
+        for device, counter in other.clock:
+            values[device] = max(values.get(device, 0), counter)
+        return CausalVersion(tuple(values.items()))
+
+    def increment(self, device_id: str) -> "CausalVersion":
+        values = dict(self.clock)
+        values[device_id] = values.get(device_id, 0) + 1
+        return CausalVersion(tuple(values.items()))
+
+    def dominates(self, other: "CausalVersion | None") -> bool:
+        """Return true only for strict causal dominance, not a tie-break order."""
+        if other is None or not self.clock:
+            return False
+        mine = dict(self.clock)
+        theirs = dict(other.clock)
+        return (
+            all(mine.get(device, 0) >= counter for device, counter in theirs.items())
+            and any(mine.get(device, 0) > theirs.get(device, 0) for device in set(mine) | set(theirs))
+        )
+
+
+@dataclass(frozen=True)
 class Fingerprint:
     digest: str
     size: int
     mtime_ns: int
+    causal: CausalVersion | None = None
 
     @property
     def is_tombstone(self) -> bool:
@@ -79,7 +148,18 @@ class SyncStateStore:
                     digest TEXT,
                     size INTEGER,
                     mtime_ns INTEGER,
+                    causal TEXT,
                     synced_at REAL NOT NULL,
+                    PRIMARY KEY (repository, path)
+                );
+                CREATE TABLE IF NOT EXISTS local_observation (
+                    repository TEXT NOT NULL,
+                    path TEXT NOT NULL,
+                    digest TEXT,
+                    size INTEGER,
+                    mtime_ns INTEGER,
+                    causal TEXT,
+                    observed_at REAL NOT NULL,
                     PRIMARY KEY (repository, path)
                 );
                 CREATE TABLE IF NOT EXISTS pending (
@@ -114,7 +194,16 @@ class SyncStateStore:
                     PRIMARY KEY (repository, group_id, relative_path),
                     FOREIGN KEY (repository, group_id)
                         REFERENCES conflict_group(repository, group_id)
-                        ON DELETE CASCADE
+                    ON DELETE CASCADE
+                );
+                CREATE TABLE IF NOT EXISTS scheduler_queue (
+                    repository TEXT NOT NULL,
+                    request_id TEXT NOT NULL,
+                    device_id TEXT NOT NULL,
+                    kind TEXT NOT NULL,
+                    sequence INTEGER NOT NULL,
+                    queued_at REAL NOT NULL,
+                    PRIMARY KEY (repository, request_id)
                 );
                 """
             )
@@ -128,6 +217,9 @@ class SyncStateStore:
             ):
                 if name not in columns:
                     conn.execute(f"ALTER TABLE pending ADD COLUMN {name} {definition}")
+            entry_columns = {row[1] for row in conn.execute("PRAGMA table_info(entry)")}
+            if "causal" not in entry_columns:
+                conn.execute("ALTER TABLE entry ADD COLUMN causal TEXT")
             repository_id = str(self.cfg.get("repository_id") or "")
             if repository_id:
                 legacy = self._legacy_repository()
@@ -139,8 +231,8 @@ class SyncStateStore:
                 if migrated is None:
                     conn.execute(
                         """
-                        INSERT INTO entry(repository, path, digest, size, mtime_ns, synced_at)
-                        SELECT ?, path, digest, size, mtime_ns, synced_at
+                        INSERT INTO entry(repository, path, digest, size, mtime_ns, causal, synced_at)
+                        SELECT ?, path, digest, size, mtime_ns, causal, synced_at
                         FROM entry WHERE repository = ?
                         ON CONFLICT(repository, path) DO NOTHING
                         """,
@@ -182,6 +274,56 @@ class SyncStateStore:
             value = uuid.uuid4().hex[:8]
             conn.execute("INSERT INTO meta(key, value) VALUES ('device_id', ?)", (value,))
             return value
+
+    def clear_scheduler_queue(self, device_id: str) -> None:
+        """Drop permits left by a previous GUI process after an unclean exit."""
+        with self._lock, self._connection() as conn:
+            conn.execute(
+                "DELETE FROM scheduler_queue WHERE repository = ? AND device_id = ?",
+                (self._repository(), device_id),
+            )
+
+    def scheduler_queue_add(
+        self, request_id: str, device_id: str, kind: str, sequence: int, queued_at: float,
+    ) -> None:
+        with self._lock, self._connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO scheduler_queue(
+                    repository, request_id, device_id, kind, sequence, queued_at
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(repository, request_id) DO UPDATE SET
+                    kind = excluded.kind, sequence = excluded.sequence,
+                    queued_at = excluded.queued_at
+                """,
+                (self._repository(), request_id, device_id, kind, sequence, queued_at),
+            )
+
+    def scheduler_queue_remove(self, request_id: str) -> None:
+        with self._lock, self._connection() as conn:
+            conn.execute(
+                "DELETE FROM scheduler_queue WHERE repository = ? AND request_id = ?",
+                (self._repository(), request_id),
+            )
+
+    def scheduler_queue_rows(self) -> list[dict[str, object]]:
+        with self._lock, self._connection() as conn:
+            return [
+                {
+                    "request_id": row[0],
+                    "device_id": row[1],
+                    "kind": row[2],
+                    "sequence": row[3],
+                    "queued_at": row[4],
+                }
+                for row in conn.execute(
+                    """
+                    SELECT request_id, device_id, kind, sequence, queued_at
+                    FROM scheduler_queue WHERE repository = ? ORDER BY sequence
+                    """,
+                    (self._repository(),),
+                )
+            ]
 
     @staticmethod
     def fingerprint(path: Path) -> Fingerprint | None:
@@ -243,12 +385,13 @@ class SyncStateStore:
     def get(self, relative_path: str) -> Fingerprint | None:
         with self._lock, self._connection() as conn:
             row = conn.execute(
-                "SELECT digest, size, mtime_ns FROM entry WHERE repository = ? AND path = ?",
+                "SELECT digest, size, mtime_ns, causal FROM entry WHERE repository = ? AND path = ?",
                 (self._repository(), relative_path),
             ).fetchone()
         if not row:
             return None
-        return Fingerprint(*row) if row[0] else Fingerprint("", -1, -1)
+        causal = CausalVersion.parse(row[3])
+        return Fingerprint(row[0], row[1], row[2], causal) if row[0] else Fingerprint("", -1, -1, causal)
 
     def get_many(self, relative_paths: set[str] | list[str]) -> dict[str, Fingerprint]:
         """Read a large manifest comparison set with one SQLite connection."""
@@ -257,9 +400,10 @@ class SyncStateStore:
             return {}
         with self._lock, self._connection() as conn:
             result = {
-                row[0]: Fingerprint(row[1], row[2], row[3]) if row[1] else Fingerprint("", -1, -1)
+                row[0]: Fingerprint(row[1], row[2], row[3], CausalVersion.parse(row[4]))
+                if row[1] else Fingerprint("", -1, -1, CausalVersion.parse(row[4]))
                 for row in conn.execute(
-                    "SELECT path, digest, size, mtime_ns FROM entry WHERE repository = ?",
+                    "SELECT path, digest, size, mtime_ns, causal FROM entry WHERE repository = ?",
                     (self._repository(),),
                 )
                 if row[0] in wanted
@@ -270,10 +414,10 @@ class SyncStateStore:
         """Read the complete baseline without touching the local files."""
         with self._lock, self._connection() as conn:
             return {
-                row[0]: Fingerprint(row[1], row[2], row[3]) if row[1]
-                else Fingerprint("", -1, -1)
+                row[0]: Fingerprint(row[1], row[2], row[3], CausalVersion.parse(row[4])) if row[1]
+                else Fingerprint("", -1, -1, CausalVersion.parse(row[4]))
                 for row in conn.execute(
-                    "SELECT path, digest, size, mtime_ns FROM entry WHERE repository = ?",
+                    "SELECT path, digest, size, mtime_ns, causal FROM entry WHERE repository = ?",
                     (self._repository(),),
                 )
             }
@@ -283,35 +427,141 @@ class SyncStateStore:
 
     def record_local_many(self, local_root: str, relative_paths: list[str] | set[str]) -> None:
         """Commit all completed transfer paths in one SQLite transaction."""
+        paths = set(relative_paths)
         fingerprints = {
-            relative_path: self.fingerprint(Path(local_root, relative_path))
-            for relative_path in set(relative_paths)
+            relative_path: self.local_fingerprint(local_root, relative_path)
+            for relative_path in paths
         }
-        self.record_fingerprints(fingerprints)
+        causals = {
+            relative_path: fingerprints[relative_path].causal
+            if fingerprints[relative_path] is not None else self.local_causal(local_root, relative_path)
+            for relative_path in paths
+        }
+        self.record_fingerprints(fingerprints, causals)
 
-    def record_fingerprints(self, fingerprints: dict[str, Fingerprint | None]) -> None:
+    def record_fingerprints(
+        self, fingerprints: dict[str, Fingerprint | None],
+        causal_versions: Mapping[str, CausalVersion | None] | None = None,
+    ) -> None:
         """Commit authoritative per-path fingerprints in one SQLite transaction."""
+        self._record_fingerprints(fingerprints, causal_versions)
+
+    def _record_fingerprints(
+        self, fingerprints: dict[str, Fingerprint | None],
+        causal_versions: Mapping[str, CausalVersion | None] | None = None,
+    ) -> None:
         rows = []
         repository = self._repository()
         synced_at = time.time()
         for relative_path, fp in fingerprints.items():
+            causal = (
+                fp.causal if fp is not None and fp.causal is not None
+                else (causal_versions or {}).get(relative_path)
+            )
             rows.append((
                 repository, relative_path, fp.digest if fp else None,
-                fp.size if fp else None, fp.mtime_ns if fp else None, synced_at,
+                fp.size if fp else None, fp.mtime_ns if fp else None,
+                causal.encode() if causal is not None else None, synced_at,
             ))
         if not rows:
             return
         with self._lock, self._connection() as conn:
             conn.executemany(
                 """
-                INSERT INTO entry(repository, path, digest, size, mtime_ns, synced_at)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO entry(repository, path, digest, size, mtime_ns, causal, synced_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(repository, path) DO UPDATE SET
                     digest=excluded.digest, size=excluded.size, mtime_ns=excluded.mtime_ns,
+                    causal=excluded.causal,
                     synced_at=excluded.synced_at
                 """,
                 rows,
             )
+            # A pull can replace the local bytes with a remote version. Align
+            # the observation so the next genuine local edit merges that
+            # remote clock instead of starting from stale local history.
+            for relative_path, fp in fingerprints.items():
+                causal = (
+                    fp.causal if fp is not None and fp.causal is not None
+                    else (causal_versions or {}).get(relative_path)
+                )
+                if causal is None:
+                    continue
+                if fp is None:
+                    conn.execute(
+                        """
+                        UPDATE local_observation SET causal = ?
+                        WHERE repository = ? AND path = ? AND digest IS NULL
+                        """,
+                        (causal.encode(), repository, relative_path),
+                    )
+                else:
+                    conn.execute(
+                        """
+                        UPDATE local_observation SET causal = ?
+                        WHERE repository = ? AND path = ? AND digest = ?
+                          AND size = ? AND mtime_ns = ?
+                        """,
+                        (causal.encode(), repository, relative_path, fp.digest, fp.size, fp.mtime_ns),
+                    )
+
+    def local_fingerprint(self, local_root: str, relative_path: str) -> Fingerprint | None:
+        """Return a local fingerprint carrying a stable causal version."""
+        fingerprint = self.fingerprint(Path(local_root, relative_path))
+        repository = self._repository()
+        device_id = self.device_id()
+        key = (repository, relative_path)
+        observed = (
+            None if fingerprint is None else (fingerprint.digest, fingerprint.size, fingerprint.mtime_ns)
+        )
+        with self._lock, self._connection() as conn:
+            row = conn.execute(
+                "SELECT digest, size, mtime_ns, causal FROM local_observation "
+                "WHERE repository = ? AND path = ?", key,
+            ).fetchone()
+            if row is not None and (
+                (row[0], row[1], row[2]) if row[0] is not None else None
+            ) == observed:
+                causal = CausalVersion.parse(row[3])
+            else:
+                baseline_row = conn.execute(
+                    "SELECT causal FROM entry WHERE repository = ? AND path = ?", key,
+                ).fetchone()
+                baseline = CausalVersion.parse(baseline_row[0]) if baseline_row else None
+                previous = CausalVersion.parse(row[3]) if row else None
+                causal = (baseline or CausalVersion()).merge(previous).increment(device_id)
+                conn.execute(
+                    """
+                    INSERT INTO local_observation(
+                        repository, path, digest, size, mtime_ns, causal, observed_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(repository, path) DO UPDATE SET
+                        digest=excluded.digest, size=excluded.size, mtime_ns=excluded.mtime_ns,
+                        causal=excluded.causal, observed_at=excluded.observed_at
+                    """,
+                    (
+                        repository, relative_path,
+                        fingerprint.digest if fingerprint is not None else None,
+                        fingerprint.size if fingerprint is not None else None,
+                        fingerprint.mtime_ns if fingerprint is not None else None,
+                        causal.encode(), time.time(),
+                    ),
+                )
+        if fingerprint is None:
+            return None
+        return Fingerprint(fingerprint.digest, fingerprint.size, fingerprint.mtime_ns, causal)
+
+    def local_causal(self, local_root: str, relative_path: str) -> CausalVersion | None:
+        """Observe a path and return its version, including a local deletion."""
+        fingerprint = self.local_fingerprint(local_root, relative_path)
+        if fingerprint is not None:
+            return fingerprint.causal
+        with self._lock, self._connection() as conn:
+            row = conn.execute(
+                "SELECT causal FROM local_observation WHERE repository = ? AND path = ?",
+                (self._repository(), relative_path),
+            ).fetchone()
+        return CausalVersion.parse(row[0]) if row else None
 
     def pending_paths(self) -> set[str]:
         """Return local changes that still need a successful push."""
@@ -507,9 +757,10 @@ class SyncStateStore:
                 current[str(path.relative_to(root))] = path_stat
         with self._lock, self._connection() as conn:
             known = {
-                row[0]: Fingerprint(row[1], row[2], row[3]) if row[1] else Fingerprint("", -1, -1)
+                row[0]: Fingerprint(row[1], row[2], row[3], CausalVersion.parse(row[4]))
+                if row[1] else Fingerprint("", -1, -1, CausalVersion.parse(row[4]))
                 for row in conn.execute(
-                    "SELECT path, digest, size, mtime_ns FROM entry WHERE repository = ?", (self._repository(),)
+                    "SELECT path, digest, size, mtime_ns, causal FROM entry WHERE repository = ?", (self._repository(),)
                 )
             }
         candidates = set(current) | set(known)

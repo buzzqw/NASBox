@@ -44,6 +44,8 @@ NASBox is a synchronization tool, not a backup by itself.
 ### Features
 
 - One NASBox folder per PC, synchronized root-to-root with the NAS.
+- Configurable synchronization modes: bidirectional, push-only, pull-only, and
+  archive (local to NAS without propagating remote deletions).
 - SSH/rsync transfers with LAN, direct WAN and SSH bastion support.
 - Transfer queue with preview, live speed, pause and manual synchronization.
 - Global NAS transfer scheduler shared by all clients, with priority tickets
@@ -238,6 +240,8 @@ backup autonomo.
 ### Funzionalita
 
 - Una cartella NASBox per ogni PC, sincronizzata root-to-root con il NAS.
+- Modalità configurabili: bidirezionale, solo locale (push-only), solo NAS
+  (pull-only) e archivio locale -> NAS senza propagare cancellazioni remote.
 - Trasferimenti SSH/rsync con supporto LAN, WAN diretta e bastione SSH.
 - Coda trasferimenti con anteprima, velocita live, pausa e sincronizzazione
   manuale.

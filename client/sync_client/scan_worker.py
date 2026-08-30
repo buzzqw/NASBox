@@ -118,10 +118,9 @@ class ScanWorker(QThread):
             return
         watcher = self.watchers.get() if self.watchers is not None else None
         if (
-            (self.push_requested is not None and self.push_requested.is_set())
-            or
-            (watcher is not None and watcher.is_dirty())
-            or (self.sync_state is not None and self.sync_state.has_pending())
+            (self.cfg.allows_push() and self.push_requested is not None and self.push_requested.is_set())
+            or (self.cfg.allows_push() and watcher is not None and watcher.is_dirty())
+            or (self.cfg.allows_push() and self.sync_state is not None and self.sync_state.has_pending())
         ):
             # A preview can hash thousands of local paths. Never let it acquire
             # the shared gate ahead of a real push: the latter makes the queue
@@ -268,18 +267,18 @@ class ScanWorker(QThread):
                 baseline.get(path),
                 local_fingerprint,
                 remote_states.get(path, rsync_ops.RemoteState(RemoteKind.ABSENT)),
-                delete_enabled=bool(self.cfg.get("delete_enabled")),
+                delete_enabled=self.cfg.allows_remote_deletions(),
             )
-            if decision.action in (Action.UPLOAD, Action.CONFLICT_LOCAL_WINS):
+            if self.cfg.allows_push() and decision.action in (Action.UPLOAD, Action.CONFLICT_LOCAL_WINS):
                 items.append(rsync_ops.TransferItem(
                     "upload", path, local_fingerprint.size if local_fingerprint else 0,
                 ))
-            elif decision.action == Action.DELETE_REMOTE:
+            elif self.cfg.allows_push() and self.cfg.allows_remote_deletions() and decision.action == Action.DELETE_REMOTE:
                 items.append(rsync_ops.TransferItem("delete_remote", path))
-            elif decision.action in (Action.REMOTE_WINS, Action.CONFLICT_REMOTE_WINS):
+            elif self.cfg.allows_pull() and decision.action in (Action.REMOTE_WINS, Action.CONFLICT_REMOTE_WINS):
                 remote = remote_states.get(path)
                 if remote is not None and remote.kind == RemoteKind.FILE:
                     items.append(rsync_ops.TransferItem("download", path, remote.size))
-                elif self.cfg.get("delete_enabled") and local_fingerprint is not None:
+                elif self.cfg.allows_remote_deletions() and local_fingerprint is not None:
                     items.append(rsync_ops.TransferItem("delete_local", path))
         return items

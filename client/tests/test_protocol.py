@@ -8,7 +8,7 @@ from unittest.mock import patch
 from sync_client import rsync_ops
 from sync_client.config import Config
 from sync_client.reconcile import RemoteKind
-from sync_client.sync_state import Fingerprint
+from sync_client.sync_state import CausalVersion, Fingerprint
 
 from tests.support import ClientEnvironment, ServerSandbox
 
@@ -97,6 +97,86 @@ class ProtocolParsingTests(unittest.TestCase):
         self.assertEqual(status_call.call_count, 2)
         export_call.assert_called_once()
 
+    def test_manifest_snapshot_accepts_optional_causal_field(self) -> None:
+        with ClientEnvironment():
+            cfg = Config()
+            cfg.set("remote_server_script", "/tmp/server.sh", persist=False)
+            digest = "c" * 64
+            manifest = (
+                b"NASBOX_MANIFEST_V1\n"
+                b"causal.txt\t" + digest.encode() + b"\t5\t123000000000\tdevice-a\t1700000000\tdevice-a:2\n"
+            )
+            with patch.object(
+                rsync_ops, "run_remote_script", return_value=(True, "MANIFEST_REVISION=8\n", "")
+            ), patch.object(rsync_ops, "run_remote_script_bytes", return_value=(True, manifest, "")):
+                snapshot = rsync_ops.remote_manifest_snapshot(cfg, rsync_ops.NasConnection("nas"), 7)
+        assert snapshot is not None
+        self.assertEqual(snapshot[1]["causal.txt"].causal, CausalVersion((("device-a", 2),)))
+
+    def test_causal_journal_payload_is_opt_in(self) -> None:
+        with ClientEnvironment():
+            cfg = Config()
+            cfg.set("remote_server_script", "/tmp/server.sh", persist=False)
+            cfg.set("repository_id", "repository-123", persist=False)
+            cfg.set("remote_causal_versions_available", True, persist=False)
+            item = rsync_ops.TransferItem("upload", "causal.txt")
+            payload, error = rsync_ops.build_remote_journal_payload(
+                cfg, "device-a", [item],
+                {item.path: Fingerprint("a" * 64, 3, 123)},
+                {item.path: CausalVersion((("device-a", 3),))},
+            )
+        self.assertEqual(error, "")
+        assert payload is not None
+        self.assertEqual(payload.split(b"\0")[0], b"JOURNAL_V3")
+        self.assertEqual(payload.split(b"\0")[-2], b"device-a:3")
+
+    def test_file_states_parser_accepts_causal_v2_and_legacy_fallback(self) -> None:
+        with ClientEnvironment():
+            cfg = Config()
+            cfg.set("remote_server_script", "/tmp/server.sh", persist=False)
+            digest = "d" * 64
+            v2 = b"FILE_STATES_V2\0" b"1\0file.txt\0FILE\0" + digest.encode() + b"\0" b"3\0" b"10\0device-a:5\0"
+            with patch.object(rsync_ops, "run_remote_script_input_bytes", return_value=(True, v2, "")):
+                states = rsync_ops.remote_file_states(
+                    cfg, rsync_ops.NasConnection("nas"), {"file.txt"}, compact=False,
+                )
+            legacy = b"FILE_STATES_V1\0" b"1\0file.txt\0FILE\0" + digest.encode() + b"\0" b"3\0" b"10\0"
+            with patch.object(
+                rsync_ops, "run_remote_script_input_bytes",
+                side_effect=[(False, b"", ""), (True, legacy, "")],
+            ):
+                fallback = rsync_ops.remote_file_states(
+                    cfg, rsync_ops.NasConnection("nas"), {"file.txt"}, compact=False,
+                )
+        assert states is not None and fallback is not None
+        self.assertEqual(states["file.txt"].causal, CausalVersion((("device-a", 5),)))
+        self.assertIsNone(fallback["file.txt"].causal)
+
+    def test_causal_journal_falls_back_to_v2_when_server_rejects_v3(self) -> None:
+        with ClientEnvironment():
+            cfg = Config()
+            cfg.set("remote_server_script", "/tmp/server.sh", persist=False)
+            cfg.set("repository_id", "repository-123", persist=False)
+            cfg.set("remote_causal_versions_available", True, persist=False)
+            item = rsync_ops.TransferItem("upload", "causal.txt")
+            with patch.object(
+                rsync_ops, "run_remote_script_input",
+                side_effect=[
+                    (False, "", "journal: protocollo non riconosciuto"),
+                    (True, "legacy ok", ""),
+                ],
+            ) as call:
+                ok, detail = rsync_ops.append_remote_journal(
+                    cfg, rsync_ops.NasConnection("nas"), "device-a", [item],
+                    {item.path: Fingerprint("a" * 64, 3, 123)},
+                    {item.path: CausalVersion((("device-a", 3),))},
+                )
+        self.assertTrue(ok)
+        self.assertEqual(detail, "legacy ok")
+        self.assertEqual(call.call_count, 2)
+        self.assertTrue(call.call_args_list[0].args[4].startswith(b"JOURNAL_V3\0"))
+        self.assertTrue(call.call_args_list[1].args[4].startswith(b"JOURNAL_V2\0"))
+
     def test_checked_delete_response_parser_rejects_incomplete_output(self) -> None:
         with ClientEnvironment():
             cfg = Config()
@@ -178,7 +258,79 @@ class ServerProtocolInvariantTests(unittest.TestCase):
                 "DELETE\tdelete-me.txt\t", journal,
                 result.stdout.decode(errors="replace") + result.stderr.decode(errors="replace"),
             )
-            self.assertIn(b"delete-me.txt\t\t0\t0\t", manifest.stdout)
+        self.assertIn(b"delete-me.txt\t\t0\t0\t", manifest.stdout)
+
+    def test_local_rename_journals_source_and_destination_atomically(self) -> None:
+        with ServerSandbox() as sandbox:
+            repository_id = sandbox.init_repository()
+            source = sandbox.share / "old.txt"
+            source.write_bytes(b"rename me")
+            digest = hashlib.sha256(source.read_bytes()).hexdigest()
+            size = source.stat().st_size
+            mtime_ns = int(source.stat().st_mtime) * 1_000_000_000
+            payload = b"\0".join([
+                b"BROWSE_RENAME_V2", b"2026-08-30--12-00-00-000010Z", b"device-a",
+                b"old.txt", b"new.txt", b"FILE", digest.encode(), str(size).encode(),
+                str(mtime_ns).encode(),
+            ]) + b"\0"
+            result = sandbox.run_with_lease("--browse-rename", input=payload)
+            journal = (sandbox.state / "transfer-journal.tsv").read_text()
+            manifest = sandbox.run("--manifest-export")
+            self.assertFalse(source.exists())
+            self.assertEqual((sandbox.share / "new.txt").read_bytes(), b"rename me")
+        self.assertEqual(result.returncode, 0, result.stderr.decode())
+        self.assertIn("DELETE\told.txt\t", journal)
+        self.assertIn("PUT\tnew.txt\t" + digest, journal)
+        self.assertIn(b"old.txt\t\t0\t0\t", manifest.stdout)
+        self.assertIn(b"new.txt\t" + digest.encode(), manifest.stdout)
+
+    def test_local_rename_rejects_changed_source_and_occupied_destination(self) -> None:
+        with ServerSandbox() as sandbox:
+            sandbox.init_repository()
+            source = sandbox.share / "old.txt"
+            source.write_bytes(b"current")
+            wrong_digest = hashlib.sha256(b"stale").hexdigest()
+            payload = b"\0".join([
+                b"BROWSE_RENAME_V2", b"2026-08-30--12-00-00-000011Z", b"device-a",
+                b"old.txt", b"new.txt", b"FILE", wrong_digest.encode(), b"7",
+                str(int(source.stat().st_mtime) * 1_000_000_000).encode(),
+            ]) + b"\0"
+            result = sandbox.run_with_lease("--browse-rename", input=payload)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(source.read_bytes(), b"current")
+            destination = sandbox.share / "new.txt"
+            destination.write_bytes(b"keep")
+            digest = hashlib.sha256(source.read_bytes()).hexdigest()
+            payload = b"\0".join([
+                b"BROWSE_RENAME_V2", b"2026-08-30--12-00-00-000013Z", b"device-a",
+                b"old.txt", b"new.txt", b"FILE", digest.encode(), b"7",
+                str(int(source.stat().st_mtime) * 1_000_000_000).encode(),
+            ]) + b"\0"
+            result = sandbox.run_with_lease("--browse-rename", input=payload)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(source.read_bytes(), b"current")
+            self.assertEqual(destination.read_bytes(), b"keep")
+
+    def test_local_directory_rename_journals_nested_files(self) -> None:
+        with ServerSandbox() as sandbox:
+            sandbox.init_repository()
+            source = sandbox.share / "old-dir"
+            source.mkdir()
+            (source / "nested").mkdir()
+            (source / "nested" / "file.txt").write_bytes(b"nested")
+            payload = b"\0".join([
+                b"BROWSE_RENAME_V2", b"2026-08-30--12-00-00-000012Z", b"device-a",
+                b"old-dir", b"new-dir", b"DIR", b"", b"0", b"0",
+            ]) + b"\0"
+            result = sandbox.run_with_lease("--browse-rename", input=payload)
+            journal = (sandbox.state / "transfer-journal.tsv").read_text()
+            manifest = sandbox.run("--manifest-export")
+            self.assertFalse(source.exists())
+            self.assertEqual((sandbox.share / "new-dir" / "nested" / "file.txt").read_bytes(), b"nested")
+        self.assertEqual(result.returncode, 0, result.stderr.decode())
+        self.assertIn("DELETE\told-dir/nested/file.txt\t", journal)
+        self.assertIn("PUT\tnew-dir/nested/file.txt\t", journal)
+        self.assertIn(b"new-dir/nested/file.txt\t", manifest.stdout)
 
     def test_invalid_journal_does_not_append_a_partial_transaction(self) -> None:
         with ServerSandbox() as sandbox:
@@ -208,6 +360,20 @@ class ServerProtocolInvariantTests(unittest.TestCase):
         self.assertEqual(second.returncode, 0, second.stderr.decode())
         self.assertEqual(journal.count("COMMIT\tsame-tx"), 1)
         self.assertEqual(revision, "1")
+
+    def test_causal_journal_round_trip_preserves_version_metadata(self) -> None:
+        with ServerSandbox() as sandbox:
+            repository_id = sandbox.init_repository()
+            digest = hashlib.sha256(b"payload").hexdigest()
+            payload = b"\0".join([
+                b"JOURNAL_V3", repository_id.encode(), b"causal-tx", b"device-a", b"1700000000", b"1",
+                b"PUT", b"causal.txt", digest.encode(), b"7", b"1700000000000000000", b"device-a:4",
+            ]) + b"\0"
+            result = sandbox.run_with_lease("--journal-append", input=payload)
+            manifest = sandbox.run("--manifest-export")
+        self.assertEqual(result.returncode, 0, result.stderr.decode())
+        self.assertIn(b"causal.txt\t" + digest.encode() + b"\t7\t1700000000000000000\tdevice-a\t", manifest.stdout)
+        self.assertTrue(manifest.stdout.rstrip().endswith(b"\tdevice-a:4"))
 
 
 if __name__ == "__main__":

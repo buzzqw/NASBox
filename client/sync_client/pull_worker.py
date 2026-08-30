@@ -35,7 +35,7 @@ from pathlib import Path
 from PyQt6.QtCore import pyqtSignal
 
 from . import rsync_ops
-from .config import Config
+from .config import Config, SYNC_MODE_PULL_ONLY
 from .i18n import t
 from .lock_coordinator import LockCoordinator
 from .logger import EventLogger
@@ -107,7 +107,11 @@ class PullWorker(TransferWorker):
         lock. A full pull or a pull containing tombstones would otherwise apply
         the stale NAS absence with rsync --delete.
         """
-        if not self.cfg.get("delete_enabled") or not (full_pull_required or tombstone_count):
+        if (
+            self.cfg.sync_mode() == SYNC_MODE_PULL_ONLY
+            or not self.cfg.allows_remote_deletions()
+            or not (full_pull_required or tombstone_count)
+        ):
             return
 
         try:
@@ -151,7 +155,12 @@ class PullWorker(TransferWorker):
             self._wake.clear()
 
     def _tick(self) -> None:
-        if self._conn is None or self.cfg.is_paused() or not self.cfg.is_configured():
+        if (
+            not self.cfg.allows_pull()
+            or self._conn is None
+            or self.cfg.is_paused()
+            or not self.cfg.is_configured()
+        ):
             return
 
         poll_interval = float(self.cfg.get("poll_interval") or 60)
@@ -159,7 +168,7 @@ class PullWorker(TransferWorker):
         if not self.lock_coordinator.can_attempt(now):
             return
         watcher = self.watchers.get()
-        if watcher and watcher.is_dirty():
+        if self.cfg.sync_mode() != SYNC_MODE_PULL_ONLY and watcher and watcher.is_dirty():
             # Not pushed yet -- pulling now risks deleting/overwriting it before
             # PushWorker gets to it. Leave the timer untouched so this is retried
             # on the very next tick instead of waiting out a full poll_interval.
@@ -213,7 +222,7 @@ class PullWorker(TransferWorker):
                     try:
                         rsync_ops.validate_transfer_safety(
                             self.cfg, self._conn,
-                            destructive=bool(self.cfg.get("delete_enabled")),
+                            destructive=self.cfg.allows_remote_deletions(),
                             direction="download",
                         )
                     except RepositorySafetyError as exc:
@@ -278,7 +287,7 @@ class PullWorker(TransferWorker):
                     )
 
                     def _cancel_check(w=watcher) -> bool:
-                        if w is None or not w.is_dirty():
+                        if self.cfg.sync_mode() == SYNC_MODE_PULL_ONLY or w is None or not w.is_dirty():
                             return False
                         own_paths = self._self_written_snapshot()
                         external = {
@@ -325,6 +334,7 @@ class PullWorker(TransferWorker):
                                 "impossibile verificare lo stato live dei percorsi NAS"
                             )
                         repaired_baselines: dict[str, Fingerprint | None] = {}
+                        repaired_causals = {}
                         for path in set(checksum_paths):
                             live = live_states.get(path)
                             if live is None or live.kind == RemoteKind.FILE:
@@ -334,7 +344,11 @@ class PullWorker(TransferWorker):
                                     f"il percorso NAS non è un file regolare: {path}"
                                 )
                             expected = manifest_entries.get(path)
-                            if expected is not None and expected.kind == RemoteKind.FILE:
+                            if (
+                                self.cfg.sync_mode() != SYNC_MODE_PULL_ONLY
+                                and expected is not None
+                                and expected.kind == RemoteKind.FILE
+                            ):
                                 repair = rsync_ops.checked_delete_remote(
                                     self.cfg, self._conn,
                                     [(path, expected.digest, expected.mtime_ns // 1_000_000_000)],
@@ -357,6 +371,7 @@ class PullWorker(TransferWorker):
                                 and local_fp.digest == baseline.digest
                             ):
                                 repaired_baselines[path] = None
+                                repaired_causals[path] = expected.causal if expected is not None else None
                             elif watcher is not None:
                                 # A local version changed while the stale NAS
                                 # entry was being reconciled; let PushWorker's
@@ -364,7 +379,7 @@ class PullWorker(TransferWorker):
                                 watcher.mark_dirty(path)
                             checksum_paths.discard(path)
                         if repaired_baselines:
-                            self.sync_state.record_fingerprints(repaired_baselines)
+                            self.sync_state.record_fingerprints(repaired_baselines, repaired_causals)
                     if targeted_pull:
                         safe_checksum_paths: set[str] = set()
                         assert manifest_entries is not None
@@ -373,6 +388,8 @@ class PullWorker(TransferWorker):
                             baseline = baselines.get(path)
                             remote_digest = manifest_entries[path].digest
                             if (
+                                self.cfg.sync_mode() != SYNC_MODE_PULL_ONLY
+                                and
                                 local_fp is not None and baseline is not None
                                 and not baseline.is_tombstone
                                 and local_fp.digest not in (baseline.digest, remote_digest)
@@ -408,6 +425,8 @@ class PullWorker(TransferWorker):
                                 baseline = baselines.get(path)
                                 remote_digest = manifest_entries[path].digest
                                 if (
+                                    self.cfg.sync_mode() != SYNC_MODE_PULL_ONLY
+                                    and
                                     local_fp is not None and baseline is not None
                                     and not baseline.is_tombstone
                                     and local_fp.digest not in (baseline.digest, remote_digest)
@@ -450,7 +469,9 @@ class PullWorker(TransferWorker):
                         for path in completed_paths:
                             state = remote[path]
                             if state.kind == RemoteKind.FILE:
-                                remote_fp = Fingerprint(state.digest, state.size, state.mtime_ns)
+                                remote_fp = Fingerprint(
+                                    state.digest, state.size, state.mtime_ns, state.causal,
+                                )
                                 local_fp = self.sync_state.fingerprint(Path(self.cfg.local_root(), path))
                                 authoritative[path] = (
                                     local_fp if local_fp is not None and local_fp.digest == remote_fp.digest
@@ -458,7 +479,10 @@ class PullWorker(TransferWorker):
                                 )
                             else:
                                 authoritative[path] = None
-                        self.sync_state.record_fingerprints(authoritative)
+                        self.sync_state.record_fingerprints(
+                            authoritative,
+                            {path: remote[path].causal for path in completed_paths},
+                        )
                         self._last_manifest_revision = manifest_revision
                         if full_pull_required:
                             self._last_full_pull = time.time()
@@ -512,7 +536,7 @@ class PullWorker(TransferWorker):
     def _report_failure(self, result: "rsync_ops.TransferResult") -> None:
         if result.ok:
             return
-        if self._stop_flag.is_set() or self.cfg.is_paused():
+        if result.cancelled or self._stop_flag.is_set() or self.cfg.is_paused():
             self._log("CANCELLED", "-", "trasferimento interrotto (pausa o chiusura in corso)")
             return
         self._log("ERROR", "-", result.raw_error or "trasferimento fallito")

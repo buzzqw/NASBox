@@ -11,7 +11,7 @@ from PyQt6.QtWidgets import (
 from pathlib import Path
 
 from .. import paths, rsync_ops, trash
-from ..config import Config
+from ..config import Config, SYNC_MODE_OPTIONS
 from ..engine import SyncEngine
 from ..i18n import t
 from ..version import APP_NAME, APP_VERSION
@@ -143,6 +143,18 @@ class SettingsTab(QWidget):
         detect_note = QLabel(t("settings.detect_note"))
         detect_note.setWordWrap(True)
         nas_form.addRow(detect_note)
+
+        self.sync_mode_combo = QComboBox()
+        current_sync_mode = cfg.sync_mode()
+        for index, (value, label_key) in enumerate(SYNC_MODE_OPTIONS):
+            self.sync_mode_combo.addItem(t(label_key), userData=value)
+            if value == current_sync_mode:
+                self.sync_mode_combo.setCurrentIndex(index)
+        self.sync_mode_combo.setToolTip(t("settings.sync_mode_note"))
+        nas_form.addRow(t("settings.sync_mode_label"), self.sync_mode_combo)
+        sync_mode_note = QLabel(t("settings.sync_mode_note"))
+        sync_mode_note.setWordWrap(True)
+        nas_form.addRow(sync_mode_note)
 
         self.delete_enabled = QCheckBox(t("settings.delete_enabled_checkbox"))
         self.delete_enabled.setChecked(bool(cfg.get("delete_enabled")))
@@ -354,6 +366,7 @@ class SettingsTab(QWidget):
             checkbox.toggled.connect(self._mark_dirty)
         self.language_combo.currentIndexChanged.connect(self._mark_dirty)
         self.tray_click_combo.currentIndexChanged.connect(self._mark_dirty)
+        self.sync_mode_combo.currentIndexChanged.connect(self._mark_dirty)
         self.exclude_list.itemSelectionChanged.connect(
             lambda: self.remove_exclude_btn.setEnabled(self.exclude_list.currentRow() >= 0)
         )
@@ -406,6 +419,7 @@ class SettingsTab(QWidget):
         self.cfg.set("jump_user", self.jump_user.text().strip(), persist=False)
         self.cfg.set("remote_server_script", self.remote_server_script.text().strip(), persist=False)
         self.cfg.set("remote_prefix", self.remote_prefix.text().strip(), persist=False)
+        self.cfg.set("sync_mode", self.sync_mode_combo.currentData(), persist=False)
         self.cfg.set("delete_enabled", self.delete_enabled.isChecked(), persist=False)
         self.cfg.set("max_delete_files", self.max_delete_spin.value(), persist=False)
         self._apply_bandwidth()

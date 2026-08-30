@@ -1,5 +1,5 @@
 """Client configuration: NAS connection, the single NASBox folder, bandwidth,
-retention, pause state.
+sync mode, retention, pause state.
 
 Persisted as JSON at $XDG_CONFIG_HOME/sync-daemon/client.json. Access is guarded by a
 lock since both the GUI thread and the background SyncEngine thread read/write it.
@@ -13,6 +13,25 @@ from typing import Any, Optional
 
 from . import paths
 
+SYNC_MODE_BIDIRECTIONAL = "bidirectional"
+SYNC_MODE_PUSH_ONLY = "push_only"
+SYNC_MODE_PULL_ONLY = "pull_only"
+SYNC_MODE_ARCHIVE = "archive"
+
+SYNC_MODE_OPTIONS = (
+    (SYNC_MODE_BIDIRECTIONAL, "settings.sync_mode_bidirectional"),
+    (SYNC_MODE_PUSH_ONLY, "settings.sync_mode_push_only"),
+    (SYNC_MODE_PULL_ONLY, "settings.sync_mode_pull_only"),
+    (SYNC_MODE_ARCHIVE, "settings.sync_mode_archive"),
+)
+SYNC_MODES = {value for value, _label in SYNC_MODE_OPTIONS}
+
+
+def normalize_sync_mode(value: Any) -> str:
+    """Keep old or manually edited configurations on the safe default."""
+    return value if isinstance(value, str) and value in SYNC_MODES else SYNC_MODE_BIDIRECTIONAL
+
+
 DEFAULTS: dict[str, Any] = {
     "nas_lan": "",
     "nas_wan": "",           # direct WAN hostname of the NAS, if it has one (leave empty if not)
@@ -23,6 +42,7 @@ DEFAULTS: dict[str, Any] = {
     "jump_user": "",         # SSH user on the bastion; falls back to nas_user if empty
     "remote_prefix": "/volume1/NASBox",  # the NAS-side folder this client mirrors -- the whole
                                           # thing, not a subfolder of it (see local_root below)
+    "sync_mode": SYNC_MODE_BIDIRECTIONAL,  # bidirectional, push_only, pull_only, or archive
     "remote_server_script": "",   # path to sync-daemon-server.sh on the NAS -- lets this client
                                    # read SHARE_ROOT/RETENTION_DAYS straight from the NAS ("Rileva dal NAS")
                                    # instead of the same values being retyped by hand and drifting out of sync
@@ -31,6 +51,7 @@ DEFAULTS: dict[str, Any] = {
     "poll_interval": 60,       # legacy/fallback seconds between pull-from-NAS checks
     "change_feed_wait_seconds": 55,  # maximum read-only wait for a new NAS manifest revision
     "remote_change_feed_available": False,  # learned from the NAS server's capability dump
+    "remote_causal_versions_available": False,  # optional JOURNAL_V3/manifest metadata
     "metrics_refresh_seconds": 15,  # seconds between read-only NAS load samples
     "debounce_seconds": 2,     # seconds of local quiet before pushing a change
     "file_stability_seconds": 0.75,  # one local stat interval before a queued file is eligible
@@ -141,6 +162,24 @@ class Config:
 
     def set_local_root(self, path: str) -> None:
         self.set("local_root", path)
+
+    def sync_mode(self) -> str:
+        with self._lock:
+            return normalize_sync_mode(self._data.get("sync_mode"))
+
+    def set_sync_mode(self, mode: str) -> None:
+        self.set("sync_mode", normalize_sync_mode(mode))
+
+    def allows_push(self) -> bool:
+        return self.sync_mode() in (
+            SYNC_MODE_BIDIRECTIONAL, SYNC_MODE_PUSH_ONLY, SYNC_MODE_ARCHIVE,
+        )
+
+    def allows_pull(self) -> bool:
+        return self.sync_mode() in (SYNC_MODE_BIDIRECTIONAL, SYNC_MODE_PULL_ONLY)
+
+    def allows_remote_deletions(self) -> bool:
+        return bool(self.get("delete_enabled")) and self.sync_mode() != SYNC_MODE_ARCHIVE
 
     def exclude_patterns(self) -> list[str]:
         with self._lock:

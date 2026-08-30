@@ -16,6 +16,8 @@ import time
 import uuid
 import stat
 import os
+import hashlib
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterator
 
@@ -29,7 +31,7 @@ from .logger import EventLogger
 from .repository_safety import RepositorySafetyError
 from .reconcile import Action, RemoteKind, plan_path
 from .scan_worker import ScanWorker
-from .sync_state import Fingerprint, SyncStateStore
+from .sync_state import CausalVersion, Fingerprint, SyncStateStore
 from .transfer_worker import TransferWorker
 from .watcher import WatcherHandle
 
@@ -58,6 +60,28 @@ STAGING_CHUNK_SIZE = 500
 # no visible benefit (same reasoning as TransferWorker's own speed-signal
 # throttling).
 HASH_PROGRESS_MIN_INTERVAL = 0.2
+
+
+@dataclass(frozen=True)
+class _RenamePlan:
+    source_path: str
+    destination_path: str
+    kind: str
+    entries: tuple[tuple[str, str, Fingerprint, Fingerprint], ...]
+    source_causals: tuple[tuple[str, CausalVersion | None], ...]
+    expected_mtime_ns: int = 0
+
+    @property
+    def paths(self) -> set[str]:
+        return {
+            path
+            for source, destination, _baseline, _local in self.entries
+            for path in (source, destination)
+        }
+
+    @property
+    def size(self) -> int:
+        return sum(local.size for _source, _destination, _baseline, local in self.entries)
 
 
 def _chunked(items: list[str], size: int) -> Iterator[list[str]]:
@@ -97,7 +121,10 @@ class PushWorker(TransferWorker):
         self._force_sync = force_sync or threading.Event()
         self._last_hash_progress_emit = 0.0
         self._conflict_journal_items: list[rsync_ops.TransferItem] = []
+        self._causal_journal_versions: dict[str, CausalVersion | None] = {}
         self._staging_upload_paths: set[str] = set()
+        self._directory_events: set[str] = set()
+        self._completed_rename_paths: set[str] = set()
 
     def _wake_now(self) -> None:
         self._wake.set()
@@ -132,11 +159,16 @@ class PushWorker(TransferWorker):
             self._wake.clear()
 
     def _tick(self) -> None:
-        if self._conn is None or self.cfg.is_paused() or not self.cfg.is_configured():
+        if (
+            not self.cfg.allows_push()
+            or self._conn is None
+            or self.cfg.is_paused()
+            or not self.cfg.is_configured()
+        ):
             return
         if not self.lock_coordinator.can_attempt():
             return
-        if self._stop_flag.is_set() or self.cfg.is_paused():
+        if result.cancelled or self._stop_flag.is_set() or self.cfg.is_paused():
             return
         debounce = float(self.cfg.get("debounce_seconds") or 2)
         watcher = self.watchers.get()
@@ -185,13 +217,15 @@ class PushWorker(TransferWorker):
         if "" in pending_paths or full_sweep:
             self.sync_state.clear_pending({""})
         stale_pending: set[str] = set()
-        for path in pending_paths - resolved_paths:
+        for path in (pending_paths | dirty_paths) - resolved_paths:
             if rsync_ops.path_is_excluded(self.cfg, path):
                 stale_pending.add(path)
                 continue
             try:
                 mode = Path(self.cfg.local_root(), path).lstat().st_mode
             except OSError:
+                if path in self._directory_events:
+                    stale_pending.add(path)
                 continue
             if not stat.S_ISREG(mode):
                 stale_pending.add(path)
@@ -248,7 +282,7 @@ class PushWorker(TransferWorker):
                     try:
                         rsync_ops.validate_transfer_safety(
                             self.cfg, self._conn,
-                            destructive=bool(self.cfg.get("delete_enabled")),
+                            destructive=self.cfg.allows_remote_deletions(),
                             direction="upload",
                         )
                     except RepositorySafetyError as exc:
@@ -403,20 +437,40 @@ class PushWorker(TransferWorker):
                 return False, 0, False
             chunk_run_ts = rsync_ops.new_run_ts()
             self._conflict_journal_items = []
+            self._causal_journal_versions = {}
             self.transfer_phase.emit("upload", "checking", remote_progress_done, remote_progress_total)
             lock.set_activity("checking", remote_progress_done, remote_progress_total)
-            upload_paths, delete_requests, adopted_paths, remote_wins_paths = self._build_plan(
+            upload_paths, delete_requests, adopted_paths, remote_wins_paths, rename_plans = self._build_plan(
                 chunk_set,
                 remote_progress_offset=remote_progress_done,
                 remote_progress_total=remote_progress_total,
                 compact_remote_manifest=chunk_index == 0,
             )
+            self._completed_rename_paths = set()
+            rename_items, failed_rename_paths = self._run_renames(rename_plans, watcher, lock)
+            if failed_rename_paths:
+                # The V2 command rejects a changed source or occupied target.
+                # Rebuild those paths as ordinary upload/delete work instead of
+                # retrying a rename decision against a concurrent edit.
+                fallback_paths = chunk_set - self._completed_rename_paths
+                self._conflict_journal_items = []
+                self._causal_journal_versions = {}
+                upload_paths, delete_requests, adopted_paths, remote_wins_paths, _ = self._build_plan(
+                    fallback_paths,
+                    remote_progress_offset=remote_progress_done,
+                    remote_progress_total=remote_progress_total,
+                    compact_remote_manifest=False,
+                    allow_renames=False,
+                )
             # The live NAS state has authoritatively won over this now-missing
             # local file. Persist that local deletion as a tombstone as well as
             # clearing the pending entry: changed_paths() then stops rediscovering
             # the same absence on every fallback scan, while PullWorker still sees
             # the remote file as a change to converge.
-            self.sync_state.record_fingerprints({path: None for path in remote_wins_paths})
+            self.sync_state.record_fingerprints(
+                {path: None for path in remote_wins_paths},
+                {path: self._causal_journal_versions.get(path) for path in remote_wins_paths},
+            )
             self.sync_state.clear_pending(remote_wins_paths)
             if deletes_committed + len(delete_requests) > max_deletes:
                 return False, 0, True
@@ -425,12 +479,16 @@ class PushWorker(TransferWorker):
                 rsync_ops.TransferItem("upload", path, self._local_file_size(path))
                 for path in sorted(upload_paths)
             ]
+            planned_items.extend(rename_items)
             planned_items.extend(
                 rsync_ops.TransferItem("delete_remote", path)
                 for path, _digest, _mtime in sorted(delete_requests)
             )
             if planned_items:
                 self.queue_items_known.emit(planned_items)
+            for item in rename_items:
+                self.transfer_item_started.emit(item.direction, item.path, item.size)
+                self._on_item_complete(item)
 
             if upload_paths:
                 self.transfer_phase.emit("upload", "transferring", remote_progress_done, remote_progress_total)
@@ -458,7 +516,7 @@ class PushWorker(TransferWorker):
                 )
             chunk_result = rsync_ops.TransferResult(
                 push_result.ok and delete_result.ok,
-                [*push_result.items, *delete_result.items],
+                [*rename_items, *push_result.items, *delete_result.items],
                 push_result.raw_error or delete_result.raw_error,
             )
             self._report_failure(chunk_result)
@@ -476,7 +534,7 @@ class PushWorker(TransferWorker):
             journal_items.extend(
                 rsync_ops.TransferItem("upload", path)
                 for path in sorted(adopted_paths)
-                if self.sync_state.fingerprint(Path(self.cfg.local_root(), path)) is not None
+                if self.sync_state.local_fingerprint(self.cfg.local_root(), path) is not None
             )
             journal_items.extend(self._conflict_journal_items)
             remote_only_paths = {item.path for item in self._conflict_journal_items}
@@ -490,17 +548,17 @@ class PushWorker(TransferWorker):
             lock.set_activity("committing", remote_progress_done, remote_progress_total)
             journal_ok, journal_detail = rsync_ops.append_remote_journal(
                 self.cfg, self._conn, self.sync_state.device_id(), journal_items,
-                authoritative,
+                authoritative, self._causal_journal_versions,
             )
             if journal_ok:
                 self.cfg.set("journal_error", "")
                 self.sync_state.record_fingerprints({
                     path: fp for path, fp in authoritative.items()
                     if path not in remote_only_paths
-                })
-                clearable = set(chunk_paths)
+                }, self._causal_journal_versions)
+                clearable = set(chunk_paths) - self._completed_rename_paths
                 for path, expected in authoritative.items():
-                    current = self.sync_state.fingerprint(Path(self.cfg.local_root(), path))
+                    current = self.sync_state.local_fingerprint(self.cfg.local_root(), path)
                     if current != expected:
                         # A new local edit landed during this chunk. Keep its
                         # durable queue entry even if the watcher misses it.
@@ -510,6 +568,7 @@ class PushWorker(TransferWorker):
 
             payload, payload_error = rsync_ops.build_remote_journal_payload(
                 self.cfg, self.sync_state.device_id(), journal_items, authoritative,
+                self._causal_journal_versions,
             )
             if payload:
                 rsync_ops.save_pending_journal(payload)
@@ -538,10 +597,11 @@ class PushWorker(TransferWorker):
         ) as lock:
             self.lock_coordinator.acquired()
             self._conflict_journal_items = []
+            self._causal_journal_versions = {}
             self._staging_upload_paths = set()
             self.transfer_phase.emit("upload", "checking", remote_progress_done, remote_progress_total)
             lock.set_activity("checking", remote_progress_done, remote_progress_total)
-            upload_paths, delete_requests, adopted_paths, remote_wins_paths = self._build_plan(
+            upload_paths, delete_requests, adopted_paths, remote_wins_paths, rename_plans = self._build_plan(
                 chunk_set,
                 remote_progress_offset=remote_progress_done,
                 remote_progress_total=remote_progress_total,
@@ -549,17 +609,21 @@ class PushWorker(TransferWorker):
             )
             if (
                 not upload_paths or upload_paths != self._staging_upload_paths
-                or delete_requests or adopted_paths or remote_wins_paths or self._conflict_journal_items
+                or delete_requests or adopted_paths or remote_wins_paths or rename_plans
             ):
                 return None
             fingerprints = {
-                path: self.sync_state.fingerprint(Path(self.cfg.local_root(), path))
+                path: self.sync_state.local_fingerprint(self.cfg.local_root(), path)
                 for path in upload_paths
             }
             if any(fingerprint is None for fingerprint in fingerprints.values()):
                 return None
 
-        transaction_id = f"publish-{rsync_ops.new_run_ts()}-{uuid.uuid4().hex[:12]}"
+        # The ID is content-derived so a retry after a client restart can reuse
+        # the same private staging tree and resume its partial files. A changed
+        # source fingerprint produces a different tree and can never publish old
+        # bytes as the new version.
+        transaction_id = self._staging_transaction_id(upload_paths, fingerprints)
         staging_dir = rsync_ops.create_remote_staging(self.cfg, self._conn, transaction_id)
         if staging_dir is None:
             return False, 0, False
@@ -578,7 +642,7 @@ class PushWorker(TransferWorker):
         # watcher-driven attempt.
         changed_during_stage = set()
         for path, expected in fingerprints.items():
-            current = self.sync_state.fingerprint(Path(self.cfg.local_root(), path))
+            current = self.sync_state.local_fingerprint(self.cfg.local_root(), path)
             if current != expected:
                 changed_during_stage.add(path)
         if changed_during_stage:
@@ -604,14 +668,36 @@ class PushWorker(TransferWorker):
             published, detail = rsync_ops.publish_staging(
                 self.cfg, self._conn, staging_dir, transaction_id,
                 self.sync_state.device_id(), staged_fingerprints,
+                {path: self._causal_journal_versions.get(path) for path in staged_fingerprints},
             )
             if not published:
                 self._log("STAGING_DEFERRED", "-", detail)
                 return False, 0, False
-            self.sync_state.record_fingerprints(staged_fingerprints)
+            self.sync_state.record_fingerprints(
+                staged_fingerprints,
+                {path: self._causal_journal_versions.get(path) for path in staged_fingerprints},
+            )
             self.sync_state.clear_pending(set(staged_fingerprints))
         rsync_ops.cleanup_remote_staging(self.cfg, self._conn, staging_dir)
         return True, 0, False
+
+    def _staging_transaction_id(
+        self, paths: set[str], fingerprints: dict[str, Fingerprint | None],
+    ) -> str:
+        digest = hashlib.sha256()
+        for path in sorted(paths):
+            fingerprint = fingerprints.get(path)
+            if fingerprint is None:
+                continue
+            digest.update(os.fsencode(path))
+            digest.update(b"\0")
+            digest.update(fingerprint.digest.encode("ascii"))
+            digest.update(b"\0")
+            digest.update(str(fingerprint.size).encode("ascii"))
+            digest.update(b"\0")
+            digest.update(str(fingerprint.mtime_ns).encode("ascii"))
+            digest.update(b"\0")
+        return f"publish-{digest.hexdigest()}"
 
     def _authoritative_fingerprints(
         self, uploaded_items: list[rsync_ops.TransferItem], adopted_paths: set[str],
@@ -627,16 +713,16 @@ class PushWorker(TransferWorker):
 
         authoritative: dict[str, Fingerprint | None] = {path: None for path in deleted_paths}
         for path in adopted_paths:
-            authoritative[path] = self.sync_state.fingerprint(Path(self.cfg.local_root(), path))
+            authoritative[path] = self.sync_state.local_fingerprint(self.cfg.local_root(), path)
         for path in uploaded_paths:
             state = remote[path]
             if state.kind != RemoteKind.FILE:
                 raise rsync_ops.RemoteLockError(f"il file appena caricato non risulta presente sul NAS: {path}")
-            remote_fp = Fingerprint(state.digest, state.size, state.mtime_ns)
+            remote_fp = Fingerprint(state.digest, state.size, state.mtime_ns, state.causal)
             if path in remote_only_paths:
                 authoritative[path] = remote_fp
                 continue
-            local_fp = self.sync_state.fingerprint(Path(self.cfg.local_root(), path))
+            local_fp = self.sync_state.local_fingerprint(self.cfg.local_root(), path)
             if local_fp is not None and local_fp.digest == remote_fp.digest:
                 authoritative[path] = local_fp
             else:
@@ -654,6 +740,7 @@ class PushWorker(TransferWorker):
 
     def _resolve_paths(self, dirty_paths: set[str], force_sync: bool) -> set[str]:
         paths = set(dirty_paths)
+        self._directory_events = set()
         if force_sync or "" in paths:
             paths.discard("")
             paths.update(self.sync_state.changed_paths(self.cfg.local_root(), on_progress=self._on_hash_progress))
@@ -665,13 +752,33 @@ class PushWorker(TransferWorker):
             try:
                 mode = local_path.lstat().st_mode
             except FileNotFoundError:
-                resolved.add(path)  # a real deletion candidate
+                # A missing path with baseline descendants is a moved/deleted
+                # directory event. Queue its files, not the directory itself.
+                baseline = self.sync_state.all_entries()
+                if any(candidate.startswith(path.rstrip("/") + "/") for candidate in baseline):
+                    self._directory_events.add(path)
+                    resolved.update(
+                        candidate for candidate in baseline
+                        if candidate.startswith(path.rstrip("/") + "/")
+                    )
+                else:
+                    resolved.add(path)  # a real file deletion candidate
                 continue
             except OSError as exc:
                 raise rsync_ops.RemoteLockError(f"impossibile leggere {path}: {exc}") from exc
             if stat.S_ISREG(mode):
                 resolved.add(path)
-            elif not stat.S_ISDIR(mode):
+            elif stat.S_ISDIR(mode):
+                self._directory_events.add(path)
+                try:
+                    for child in local_path.rglob("*"):
+                        if child.is_file() and not child.is_symlink():
+                            child_path = str(child.relative_to(Path(self.cfg.local_root())))
+                            if not rsync_ops.path_is_excluded(self.cfg, child_path):
+                                resolved.add(child_path)
+                except OSError as exc:
+                    raise rsync_ops.RemoteLockError(f"impossibile leggere {path}: {exc}") from exc
+            else:
                 self._log("UNSUPPORTED", path, "symlink o file speciale ignorato")
         return resolved
 
@@ -684,44 +791,64 @@ class PushWorker(TransferWorker):
         return info.st_size if stat.S_ISREG(info.st_mode) else 0
 
     def _is_staging_candidate(self, relative_path: str) -> bool:
-        local = self.sync_state.fingerprint(Path(self.cfg.local_root(), relative_path))
+        local = self.sync_state.local_fingerprint(self.cfg.local_root(), relative_path)
         baseline = self.sync_state.get(relative_path)
-        return local is not None and (baseline is None or baseline.is_tombstone)
+        if local is None or (baseline is not None and not baseline.is_tombstone):
+            return False
+        # Keep a possible rename source in the same reconciliation chunk. A
+        # staging-only destination would otherwise be separated from the
+        # missing baseline path and could only be uploaded, never moved.
+        return not any(
+            candidate != relative_path and not fingerprint.is_tombstone
+            and fingerprint.digest == local.digest and fingerprint.size == local.size
+            for candidate, fingerprint in self.sync_state.all_entries().items()
+        )
 
     def _build_plan(
         self, relative_paths: set[str],
         remote_progress_offset: int = 0, remote_progress_total: int = 0,
         compact_remote_manifest: bool = True,
-    ) -> tuple[set[str], list[tuple[str, str, int]], set[str], set[str]]:
+        allow_renames: bool = True,
+    ) -> tuple[set[str], list[tuple[str, str, int]], set[str], set[str], list[_RenamePlan]]:
         if not relative_paths:
-            return set(), [], set(), set()
+            return set(), [], set(), set(), []
         remote_progress = None
         if remote_progress_total:
             self._on_hash_progress(remote_progress_offset, remote_progress_total)
             remote_progress = lambda done, total: self._on_hash_progress(
                 remote_progress_offset + done, remote_progress_total,
             )
+        remote_query_paths = set(relative_paths)
+        if allow_renames:
+            remote_query_paths.update(self._directory_events)
         remote_states = rsync_ops.remote_file_states(
-            self.cfg, self._conn, relative_paths,
+            self.cfg, self._conn, remote_query_paths,
             compact=compact_remote_manifest, on_progress=remote_progress,
         )
-        if remote_states is None or set(remote_states) != relative_paths:
+        if remote_states is None or set(remote_states) != remote_query_paths:
             raise rsync_ops.RemoteLockError("impossibile verificare in batch lo stato dei file sul NAS")
+
+        rename_plans = self._find_rename_plans(relative_paths, remote_states) if allow_renames else []
+        rename_paths = {path for plan in rename_plans for path in plan.paths}
 
         uploads: set[str] = set()
         deletes: list[tuple[str, str, int]] = []
         adopted: set[str] = set()
         remote_wins: set[str] = set()
-        for relative_path in sorted(relative_paths):
-            local_fp = self.sync_state.fingerprint(Path(self.cfg.local_root(), relative_path))
+        for relative_path in sorted(relative_paths - rename_paths):
+            local_fp = self.sync_state.local_fingerprint(self.cfg.local_root(), relative_path)
             baseline = self.sync_state.get(relative_path)
             remote = remote_states[relative_path]
             decision = plan_path(
                 baseline, local_fp, remote,
-                delete_enabled=bool(self.cfg.get("delete_enabled")),
+                delete_enabled=self.cfg.allows_remote_deletions(),
+                local_causal=local_fp.causal if local_fp is not None else self.sync_state.local_causal(
+                    self.cfg.local_root(), relative_path,
+                ),
             )
             if decision.action == Action.UPLOAD:
                 uploads.add(relative_path)
+                self._causal_journal_versions[relative_path] = local_fp.causal if local_fp else None
                 if remote.kind == RemoteKind.ABSENT and (baseline is None or baseline.is_tombstone):
                     self._staging_upload_paths.add(relative_path)
             elif decision.action == Action.DELETE_REMOTE:
@@ -729,6 +856,9 @@ class PushWorker(TransferWorker):
                 # not its older common baseline. This permits mtime-only NAS
                 # changes while rejecting a concurrent content replacement.
                 deletes.append((relative_path, remote.digest, remote.mtime_ns // 1_000_000_000))
+                self._causal_journal_versions[relative_path] = self.sync_state.local_causal(
+                    self.cfg.local_root(), relative_path,
+                )
             elif decision.action == Action.ADOPT:
                 adopted.add(relative_path)
             elif decision.action == Action.CONFLICT_LOCAL_WINS:
@@ -736,6 +866,8 @@ class PushWorker(TransferWorker):
                 if not rsync_ops.copy_remote_file(self.cfg, self._conn, relative_path, conflict_path):
                     raise rsync_ops.RemoteLockError("impossibile conservare la versione NAS in conflitto")
                 self._conflict_journal_items.append(rsync_ops.TransferItem("upload", conflict_path))
+                self._causal_journal_versions[conflict_path] = remote.causal
+                self._causal_journal_versions[relative_path] = local_fp.causal if local_fp else None
                 self._log("CONFLICT", relative_path, f"versione NAS salvata come {conflict_path}")
                 uploads.add(relative_path)
             elif decision.action == Action.CONFLICT_REMOTE_WINS:
@@ -747,14 +879,196 @@ class PushWorker(TransferWorker):
                     if not ok:
                         raise rsync_ops.RemoteLockError(detail or "impossibile conservare la versione locale in conflitto")
                     self._conflict_journal_items.append(rsync_ops.TransferItem("upload", conflict_path))
+                    self._causal_journal_versions[conflict_path] = local_fp.causal
                     self._log("CONFLICT", relative_path, f"versione locale salvata sul NAS come {conflict_path}")
             elif decision.action == Action.REMOTE_WINS:
                 if local_fp is None and baseline is not None and not baseline.is_tombstone:
                     self._log("STALE_DELETE", relative_path, decision.detail)
                     remote_wins.add(relative_path)
+                    self._causal_journal_versions[relative_path] = remote.causal
             elif decision.action == Action.BLOCK:
                 raise rsync_ops.RemoteLockError(f"{relative_path}: {decision.detail}")
-        return uploads, deletes, adopted, remote_wins
+        return uploads, deletes, adopted, remote_wins, rename_plans
+
+    def _find_rename_plans(
+        self, relative_paths: set[str], remote_states: dict[str, rsync_ops.RemoteState],
+    ) -> list[_RenamePlan]:
+        """Find only unambiguous local moves whose remote source is unchanged."""
+        baseline = self.sync_state.all_entries()
+        root = Path(self.cfg.local_root())
+        directory_plans: list[_RenamePlan] = []
+        directory_sources = {
+            path for path in self._directory_events
+            if not (root / path).exists()
+            and any(candidate.startswith(path.rstrip("/") + "/") for candidate in baseline)
+        }
+        directory_destinations = {
+            path for path in self._directory_events if (root / path).is_dir()
+        }
+
+        def files_under(path: str) -> set[str]:
+            directory = root / path
+            try:
+                return {
+                    str(child.relative_to(root))
+                    for child in directory.rglob("*")
+                    if child.is_file()
+                    and not rsync_ops.path_is_excluded(self.cfg, str(child.relative_to(root)))
+                }
+            except OSError:
+                return set()
+
+        directory_matches: list[tuple[str, str, _RenamePlan]] = []
+        for source in sorted(directory_sources):
+            source_files = {
+                path for path in baseline
+                if path.startswith(source.rstrip("/") + "/")
+                and not rsync_ops.path_is_excluded(self.cfg, path)
+                and not baseline[path].is_tombstone
+            }
+            if not source_files:
+                continue  # empty directories are not in the file manifest
+            source_root_state = remote_states.get(source)
+            for destination in sorted(directory_destinations):
+                if destination == source or destination.startswith(source.rstrip("/") + "/"):
+                    continue
+                if any(
+                    path.startswith(destination.rstrip("/") + "/")
+                    and not rsync_ops.path_is_excluded(self.cfg, path)
+                    for path in baseline
+                ):
+                    continue
+                mapped = {
+                    f"{destination}/{path[len(source) + 1:]}" for path in source_files
+                }
+                if files_under(destination) != mapped or source_root_state is None:
+                    continue
+                if source_root_state.kind != RemoteKind.OTHER or remote_states.get(destination, rsync_ops.RemoteState(RemoteKind.ABSENT)).kind not in (
+                    RemoteKind.ABSENT, RemoteKind.TOMBSTONE,
+                ):
+                    continue
+                entries: list[tuple[str, str, Fingerprint, Fingerprint]] = []
+                causals: list[tuple[str, CausalVersion | None]] = []
+                valid = True
+                for source_file in sorted(source_files):
+                    destination_file = f"{destination}/{source_file[len(source) + 1:]}"
+                    old = baseline[source_file]
+                    new = self.sync_state.local_fingerprint(str(root), destination_file)
+                    remote = remote_states.get(source_file)
+                    if new is None or remote is None or remote.kind != RemoteKind.FILE \
+                            or remote.digest != old.digest or remote.size != old.size \
+                            or new.digest != old.digest or new.size != old.size:
+                        valid = False
+                        break
+                    entries.append((source_file, destination_file, old, new))
+                    causals.append((source_file, self.sync_state.local_causal(str(root), source_file)))
+                if valid:
+                    directory_matches.append((source, destination, _RenamePlan(
+                        source, destination, "DIR", tuple(entries), tuple(causals),
+                    )))
+
+        # More than one matching pair means identical content or competing
+        # directory events. Refuse the optimization and let normal reconciliation
+        # preserve both sides.
+        if len(directory_matches) == 1:
+            directory_plans.append(directory_matches[0][2])
+        directory_paths = {path for plan in directory_plans for path in plan.paths}
+
+        old_files: dict[tuple[str, int, int], list[tuple[str, Fingerprint]]] = {}
+        new_files: dict[tuple[str, int, int], list[tuple[str, Fingerprint]]] = {}
+        for path in relative_paths - directory_paths:
+            old = baseline.get(path)
+            local = self.sync_state.local_fingerprint(str(root), path)
+            if old is not None and not old.is_tombstone and local is None:
+                old_files.setdefault((old.digest, old.size, old.mtime_ns), []).append((path, old))
+            elif old is None and local is not None:
+                new_files.setdefault((local.digest, local.size, local.mtime_ns), []).append((path, local))
+
+        file_plans: list[_RenamePlan] = []
+        for key in sorted(set(old_files) & set(new_files)):
+            old_matches = old_files[key]
+            new_matches = new_files[key]
+            if len(old_matches) != 1 or len(new_matches) != 1:
+                continue
+            source, old = old_matches[0]
+            destination, new = new_matches[0]
+            source_remote = remote_states.get(source)
+            destination_remote = remote_states.get(destination)
+            if (
+                source_remote is None or source_remote.kind != RemoteKind.FILE
+                or source_remote.digest != old.digest or source_remote.size != old.size
+                or destination_remote is None
+                or destination_remote.kind not in (RemoteKind.ABSENT, RemoteKind.TOMBSTONE)
+            ):
+                continue
+            file_plans.append(_RenamePlan(
+                source, destination, "FILE", ((source, destination, old, new),),
+                ((source, self.sync_state.local_causal(str(root), source)),),
+                source_remote.mtime_ns,
+            ))
+        return [*directory_plans, *file_plans]
+
+    def _run_renames(
+        self, plans: list[_RenamePlan], watcher, lease: rsync_ops.RemoteLock | None = None,
+    ) -> tuple[list[rsync_ops.TransferItem], set[str]]:
+        items: list[rsync_ops.TransferItem] = []
+        failed: set[str] = set()
+        root = self.cfg.local_root()
+        for plan in plans:
+            current_entries = [
+                (
+                    self.sync_state.local_fingerprint(root, destination),
+                    self.sync_state.fingerprint(Path(root, source)),
+                    expected,
+                )
+                for source, destination, _old, expected in plan.entries
+            ]
+            if any(
+                source is not None or destination != expected
+                for destination, source, expected in current_entries
+            ):
+                failed.update(plan.paths)
+                if watcher is not None:
+                    for path in plan.paths:
+                        watcher.mark_dirty(path)
+                continue
+            first_old = plan.entries[0][2]
+            ok, detail = rsync_ops.rename_remote(
+                self.cfg, self._conn, plan.source_path, plan.destination_path,
+                self.sync_state.device_id(), kind=plan.kind,
+                digest=first_old.digest if plan.kind == "FILE" else "",
+                size=first_old.size if plan.kind == "FILE" else 0,
+                mtime_ns=plan.expected_mtime_ns,
+                lease=lease,
+            )
+            if not ok:
+                failed.update(plan.paths)
+                self._log("RENAME_DEFERRED", plan.source_path, detail)
+                if watcher is not None:
+                    for path in plan.paths:
+                        watcher.mark_dirty(path)
+                continue
+            baseline_updates: dict[str, Fingerprint | None] = {}
+            causals: dict[str, CausalVersion | None] = dict(plan.source_causals)
+            for source, destination, _old, expected in plan.entries:
+                baseline_updates[source] = None
+                baseline_updates[destination] = expected
+            self.sync_state.record_fingerprints(baseline_updates, causals)
+            for source, destination, _old, expected in plan.entries:
+                source_current = self.sync_state.fingerprint(Path(root, source))
+                destination_current = self.sync_state.local_fingerprint(root, destination)
+                if source_current is None and destination_current == expected:
+                    self.sync_state.clear_pending({source, destination})
+                else:
+                    if watcher is not None:
+                        watcher.mark_dirty(source if source_current is not None else destination)
+            item = rsync_ops.TransferItem(
+                "rename_remote", plan.destination_path, plan.size,
+                source_path=plan.source_path,
+            )
+            items.append(item)
+            self._completed_rename_paths.update(plan.paths)
+        return items, failed
 
     def _set_current_process(self, proc) -> None:
         # The SSH session holding the NAS lock must be interruptible on exit,

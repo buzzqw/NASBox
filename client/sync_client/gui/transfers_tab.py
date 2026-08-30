@@ -22,6 +22,7 @@ def _direction_labels() -> dict[str, str]:
         "download": t("transfers.dir_download"),
         "delete_remote": t("transfers.dir_delete_remote"),
         "delete_local": t("transfers.dir_delete_local"),
+        "rename_remote": t("transfers.dir_rename_remote"),
     }
 
 
@@ -331,7 +332,7 @@ class TransfersTab(QWidget):
         self._pending_item_progress.pop(key, None)
         self._pending_removals.add(key)
         self._completed_items.add(key)
-        transfer_direction = "upload" if direction in ("upload", "delete_remote") else "download"
+        transfer_direction = "upload" if direction in ("upload", "delete_remote", "rename_remote") else "download"
         self._completed_in_transfer[transfer_direction] += 1
         self._begin_queue_progress()
         self._queue_progress_done += 1
@@ -431,7 +432,7 @@ class TransfersTab(QWidget):
     def _update_summary(self) -> None:
         n_up = n_down = n_del = 0
         for item in self._all_items:
-            if item.direction == "upload":
+            if item.direction in ("upload", "rename_remote"):
                 n_up += 1
             elif item.direction == "download":
                 n_down += 1

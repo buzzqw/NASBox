@@ -290,7 +290,28 @@ ciclo (cambi bandwidth/host senza riavviare l'app).
 | Host / Porta / Utente bastione | Vedi [§7](#7-il-caso-del-bastione-nas-non-raggiungibile-da-fuori) |
 | Script server sul NAS | Percorso di `sync-daemon-server.sh` sul NAS. **Puoi lasciarlo vuoto**: "Rileva dal NAS" lo trova da solo cercando il processo in esecuzione (`ps aux`), a patto che il demone sia avviato. Se il demone è fermo, va indicato a mano |
 | Cartella NASBox sul NAS | Cartella sul NAS con cui la cartella NASBox locale viene sincronizzata, root contro root. **Non serve scriverla a mano**: premi "Rileva dal NAS" |
+| Modalità di sincronizzazione | Bidirezionale, solo locale (push-only), solo NAS (pull-only) oppure archivio |
 | Propaga le cancellazioni | Se spenta, i file cancellati localmente restano sul NAS (e viceversa) |
+
+### Modalità di sincronizzazione
+
+La modalità si sceglie in **Impostazioni** e viene salvata in `client.json`. Le
+configurazioni esistenti senza questo campo restano **bidirezionali**.
+
+- **Bidirezionale:** invia le modifiche locali e scarica quelle presenti sul NAS.
+- **Solo locale (push-only):** invia aggiunte, modifiche e, se abilitata,
+  cancellazioni locali; non scarica mai dal NAS.
+- **Solo NAS (pull-only):** scarica dal NAS e non invia mai modifiche locali.
+  Il NAS è la direzione autorevole per questo client.
+- **Archivio:** invia aggiunte e modifiche locali, non esegue pull e non
+  propaga mai cancellazioni locali sul NAS. Le sostituzioni usano comunque lo storico
+  NAS; i file rimossi localmente restano quindi disponibili sul NAS e soggetti
+  alla retention configurata.
+
+La modalità archivio non crea copie datate aggiuntive né un namespace separato:
+è un archivio incrementale nella stessa cartella NASBox, con storico delle
+sostituzioni. Non viene introdotto alcun refresh automatico della vista
+**Conflitti**; la gestione esistente resta invariata.
 
 **Pulsante "Rileva dal NAS"** (accanto al campo Cartella NASBox sul NAS): si
 collega al NAS con i parametri sopra. Se "Script server sul NAS" è vuoto,
@@ -417,6 +438,23 @@ ambienti virtuali Python, anche se si trovano dentro una sottocartella di
 NASBox. Se erano già stati sincronizzati, l'esclusione non li rimuove dal NAS
 o dagli altri PC: per eliminarne una copia esistente serve farlo manualmente.
 
+### Rinomine e directory
+
+Quando un file locale sparisce da un percorso già sincronizzato e compare in un
+percorso nuovo con lo stesso fingerprint, il client prova a pubblicare una
+rinomina atomica sul NAS. La prova è conservativa: se il fingerprint remoto è
+cambiato, la destinazione è già occupata, la coppia è ambigua o arriva una
+modifica concorrente, il client usa il normale percorso upload/delete e
+conserva le versioni in conflitto. Le rinomine di directory non vuote seguono
+la stessa transazione quando gli eventi del watcher permettono di identificarle.
+
+Il protocollo del manifest rappresenta file regolari e tombstone, non directory
+vuote. Una directory vuota può quindi essere creata localmente senza diventare
+una voce sincronizzata sul NAS; gli eventi directory vengono consumati e non
+restano nella coda pending. Le directory che contengono file vengono comunque
+gestite tramite i file contenuti e, quando possibile, tramite rinomina atomica
+della directory.
+
 ### Cartelle esterne (mirror)
 
 Puoi tenere dentro NASBox la copia sincronizzata di una o più cartelle che si
@@ -513,26 +551,26 @@ scaricamento e limitare solo il caricamento (o viceversa).
 
 ## 10. Frequenza di sincronizzazione
 
-- **Caricamento (push)**: quasi immediato — un controllo rileva i cambiamenti
+- **Caricamento (push)**, se previsto dalla modalità: quasi immediato — un controllo rileva i cambiamenti
   nella cartella NASBox (tramite `inotify` se disponibile sul sistema,
   altrimenti un controllo periodico leggero ogni 2 secondi, vedi
   [§2](#2-requisiti)) e invia il file al NAS dopo un breve "assestamento"
   (debounce, default 2 secondi, configurabile in `client.json` come
   `debounce_seconds`).
-- **Scaricamento (pull)**: periodico, intervallo configurabile dal tab
+- **Scaricamento (pull)**, se previsto dalla modalità: periodico, intervallo configurabile dal tab
   Impostazioni ("Controlla il NAS per novità ogni…"), default 60 secondi. È
   così che un client scopre cosa hanno caricato gli altri.
 
-Caricamento e scaricamento girano su percorsi indipendenti: uno scaricamento
+Quando entrambe le direzioni sono abilitate, caricamento e scaricamento girano su percorsi indipendenti: uno scaricamento
 lungo (es. il NAS ha molti file da controllare) non ritarda un caricamento
 appena pronto, e viceversa. Restano invece sincronizzati tra loro: non
 caricano e scaricano nello stesso istante, per evitare conflitti fra una
 modifica appena fatta e uno scaricamento in corso.
 
 **Pulsante "Sincronizza tutto ora"** (tab Stato, sopra il riquadro "Cartella
-NASBox"): forza subito il controllo in entrambe le direzioni, senza aspettare
-l'intervallo di scaricamento. Marca anche la cartella locale per un nuovo
-controllo di caricamento, quindi una modifica mostrata in coda viene inviata
+NASBox"): forza subito il controllo di tutte le direzioni abilitate, senza
+aspettare l'intervallo di scaricamento. Marca la cartella locale solo quando la
+modalità prevede il push, quindi una modifica mostrata in coda viene inviata
 anche se il watcher l'aveva rilevata prima dell'avvio dell'app. L'app mostra
 subito che la richiesta e stata presa in carico. Se la sincronizzazione è in
 pausa, avvisa che va prima ripresa.

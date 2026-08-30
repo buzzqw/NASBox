@@ -1,6 +1,6 @@
 # NASBox backlog
 
-Aggiornato il 2026-08-30 dopo le release client 1.22.1 e server 3.16.0.
+Aggiornato il 2026-08-30 dopo la release client 1.23.0 e server 3.17.0.
 Le voci sotto descrivono il lavoro ancora utile senza confondere le funzioni
 gia' implementate con quelle solo da verificare in laboratorio.
 
@@ -24,6 +24,14 @@ gia' implementate con quelle solo da verificare in laboratorio.
   corso, coda, staging in attesa, NAS non raggiungibile.
 - [x] Protezione dalle cancellazioni massive gia' presente: limite configurabile
   `max_delete_files`, safety block, cestino/storico e log dell'operazione.
+- [x] Versioni causali per percorso con fallback compatibile ai server legacy.
+- [x] Scheduler locale con aging/fairness, identificativi e coda persistente
+  visibile nello stato client.
+- [x] Modalita' bidirezionale, solo locale, solo NAS e archivio.
+- [x] Rename locali conservativi di file e directory con journal atomico e
+  recovery; gli eventi di directory non restano pending.
+- [x] Ripresa dei trasferimenti interrotti, output limitato e backpressure; la
+  verifica end-to-end multi-GB resta da eseguire.
 - [x] Suite client/server, fixture isolate, crash recovery, contratti di
   protocollo e harness locale di carico.
 
@@ -31,15 +39,13 @@ gia' implementate con quelle solo da verificare in laboratorio.
 
 ### Priorita' alta
 
-- [ ] Versioni causali per percorso. Aggiungere revisioni o version vector per
+- [x] Versioni causali per percorso. Aggiungere revisioni o version vector per
   distinguere una cancellazione vecchia da una copia locale nuova e ignorare
   tombstone stantie.
-- [ ] Scheduler unico per push e pull. Centralizzare priorita', fairness/aging,
-  lock, retry e transizioni di stato senza unificare i thread I/O.
-- [ ] Coda persistente visibile in UI. Mostrare operazioni in attesa, retry,
-  safety block, journal error, lock owner, eta' della richiesta piu' vecchia e
-  motivo preciso del rinvio.
-- [ ] Verifica di stabilita' dei file prima del push. Non trasferire file ancora
+- [x] Scheduler locale con priorita', fairness/aging e snapshot della coda;
+  push/pull mantengono thread I/O separati.
+- [x] Coda persistente visibile nello stato UI, con operazione attiva e attese.
+- [x] Verifica di stabilita' dei file prima del push. Non trasferire file ancora
   aperti o in scrittura e riprovare quando la loro impronta si stabilizza.
 - [ ] Test end-to-end con due client e NAS simulato o share di laboratorio:
   dati, journal, manifest, lock, retry e stato UI dopo riavvio.
@@ -50,17 +56,17 @@ gia' implementate con quelle solo da verificare in laboratorio.
   terminare il trasferimento quando muore la sessione SSH che possiede il lock.
   La sessione persistente attuale riduce il rischio, ma il legame di processo
   deve essere verificato durante crash reali.
-- [ ] Registrare e verificare in modo atomico il completamento di rename Browse:
+- [x] Registrare e verificare in modo atomico il completamento di rename Browse:
   DELETE della sorgente e PUT della destinazione, anche per directory.
-- [ ] Riconoscere rename e directory oltre alla riconciliazione dei file regolari.
-- [ ] Migliorare ripresa e backpressure dei trasferimenti interrotti tra hashing,
+- [x] Riconoscere rename e directory oltre alla riconciliazione dei file regolari.
+- [x] Migliorare ripresa e backpressure dei trasferimenti interrotti tra hashing,
   rete e disco.
 - [ ] Valutare trasferimenti a blocchi e riuso dei blocchi gia' presenti per file
   grandi, senza compromettere la verifica SHA-256 finale.
 
 ### Modalita' di sincronizzazione
 
-- [ ] Aggiungere modalita' per cartella: bidirezionale, solo locale, solo NAS e
+- [x] Aggiungere modalita' per cartella: bidirezionale, solo locale, solo NAS e
   archivio senza propagazione delle cancellazioni.
 - [ ] Definire chiaramente ereditarieta' delle esclusioni e comportamento dei
   cambi di modalita' su dati gia' presenti.
