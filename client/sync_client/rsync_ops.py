@@ -962,7 +962,7 @@ def publish_staging(
         ))
         if include_causal:
             causal = (causal_versions or {}).get(path)
-            fields.append(causal.encode() if causal is not None else b"")
+            fields.append(causal.encode().encode("ascii") if causal is not None else b"")
     ok, output, error = run_remote_script_input_bytes(
         cfg, conn, script_path, ["--staging-publish"], b"\0".join(fields) + b"\0", timeout=300,
     )

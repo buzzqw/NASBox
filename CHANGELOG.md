@@ -4,6 +4,11 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 1.23.3 - 2026-08-31
+
+- Corretto il payload binario del publish staging quando sono abilitate le
+  versioni causali, evitando il fallimento del ciclo push.
+
 ## 1.23.2 - 2026-08-30
 
 - Aggiunti avvisi urgenti nella tray quando il NAS diventa irraggiungibile o
