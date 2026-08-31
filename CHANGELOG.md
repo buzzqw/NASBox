@@ -4,6 +4,12 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 1.23.4 - 2026-08-31
+
+- Il publish staging riconosce i batch gia' arrivati sul NAS con contenuto
+  identico, li considera completati e rimuove il residuo privato senza
+  segnalare una pubblicazione ancora in attesa.
+
 ## 1.23.3 - 2026-08-31
 
 - Corretto il payload binario del publish staging quando sono abilitate le

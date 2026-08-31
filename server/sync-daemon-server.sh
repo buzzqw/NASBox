@@ -33,7 +33,7 @@
 #
 set -uo pipefail
 
-VERSION="3.17.0"
+VERSION="3.18.0"
 SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -1019,7 +1019,8 @@ cmd_staging_publish() {
     command -v flock >/dev/null 2>&1 || { echo "staging-publish: flock non disponibile" >&2; return 1; }
     command -v sha256sum >/dev/null 2>&1 || { echo "staging-publish: sha256sum non disponibile" >&2; return 1; }
     local magic staging_dir txid device count path digest size mtime causal normalized_mtime index paths_file txfile target
-    local -A seen_paths
+    local existing_targets=0 mismatched_targets=0
+    local -A seen_paths expected_digests expected_sizes expected_mtimes
     IFS= read -r -d '' magic || return 1
     IFS= read -r -d '' staging_dir || return 1
     IFS= read -r -d '' txid || return 1
@@ -1047,6 +1048,9 @@ cmd_staging_publish() {
         normalized_mtime=$(portable_file_mtime "$staging_dir/$path" || true)
         [[ "$normalized_mtime" =~ ^[0-9]+$ ]] || { rm -f "$paths_file"; return 1; }
         seen_paths["$path"]=1
+        expected_digests["$path"]="$digest"
+        expected_sizes["$path"]="$size"
+        expected_mtimes["$path"]="$mtime"
         printf '%s\0%s\0%s\0%s\0' "$path" "$digest" "$size" "$((normalized_mtime * 1000000000))" >> "$paths_file" || { rm -f "$paths_file"; return 1; }
         if [[ "$magic" == "STAGING_PUBLISH_V2" ]]; then
             printf '%s\0' "$causal" >> "$paths_file" || { rm -f "$paths_file"; return 1; }
@@ -1064,11 +1068,38 @@ cmd_staging_publish() {
     ensure_journal_files
     recover_pending_transactions_unlocked || { flock -u 9; exec 9>&-; rm -f "$paths_file"; return 1; }
     # Check the full batch before exposing any file, so an ordinary collision
-    # leaves every staged file untouched.
+    # leaves every staged file untouched. If every target already contains the
+    # expected bytes, another client won the race and this publish is complete
+    # from the filesystem's point of view; discard only this now-redundant
+    # private staging tree instead of reporting a permanently pending batch.
     for path in "${!seen_paths[@]}"; do
         target="$SHARE_ROOT/$path"
-        [[ ! -e "$target" && ! -L "$target" ]] || { flock -u 9; exec 9>&-; rm -f "$paths_file"; return 1; }
+        if [[ -e "$target" || -L "$target" ]]; then
+            (( existing_targets++ ))
+            publish_file_matches "$target" "${expected_digests[$path]}" \
+                "${expected_sizes[$path]}" "${expected_mtimes[$path]}" || (( mismatched_targets++ ))
+        fi
     done
+    if (( mismatched_targets > 0 || (existing_targets > 0 && existing_targets < count) )); then
+        echo "staging-publish: destinazione gia' esistente e non equivalente" >&2
+        flock -u 9
+        exec 9>&-
+        rm -f "$paths_file"
+        return 1
+    fi
+    if (( existing_targets == count )); then
+        if staging_is_referenced "$staging_dir" || ! rm -rf -- "$staging_dir"; then
+            flock -u 9
+            exec 9>&-
+            rm -f "$paths_file"
+            return 1
+        fi
+        rm -f "$paths_file"
+        flock -u 9
+        exec 9>&-
+        printf '%s\0OK\0%s\0' "$magic" "$count"
+        return 0
+    fi
     begin_move_transaction PUBLISH "$txid" "$device" "$(date '+%s')" "" "$staging_dir" "" "$paths_file" "$magic" || { flock -u 9; exec 9>&-; rm -f "$paths_file"; return 1; }
     sync
     test_failpoint "publish_after_marker"

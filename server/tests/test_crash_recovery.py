@@ -191,6 +191,28 @@ class ServerCrashRecoveryTests(unittest.TestCase):
             self.assertEqual((share / "exists.txt").read_bytes(), b"live")
             self.assertEqual((staging / "exists.txt").read_bytes(), b"staged")
 
+    def test_staging_publish_reclaims_identical_existing_target(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            sandbox = Path(directory)
+            script, share, config, staging = self.staging_fixture(sandbox)
+            payload = self.staging_payload(staging, "publish-already-done", [("exists.txt", b"same")])
+            (share / "exists.txt").write_bytes(b"same")
+            lock = self.hold_global_lock(sandbox)
+            try:
+                result = subprocess.run(
+                    [str(script), "-c", str(config), "--staging-publish"],
+                    input=payload, capture_output=True,
+                )
+            finally:
+                self.release_lock(lock)
+
+            self.assertEqual(result.returncode, 0, result.stderr.decode())
+            self.assertEqual(result.stdout, b"STAGING_PUBLISH_V1\0OK\0" b"1\0")
+            self.assertEqual((share / "exists.txt").read_bytes(), b"same")
+            self.assertFalse(staging.exists())
+            journal = (sandbox / "state" / "transfer-journal.tsv").read_text()
+            self.assertNotIn("PUT\texists.txt", journal)
+
     def test_staging_publish_crash_recovery_completes_marker_move_and_journal(self) -> None:
         for failpoint in ("publish_after_marker", "publish_after_move"):
             with self.subTest(failpoint=failpoint), tempfile.TemporaryDirectory() as directory:
