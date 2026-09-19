@@ -562,6 +562,27 @@ locale non viene trattata come un file qualsiasi: il client registra
 silenziosamente. La versione NAS viene preservata come copia di conflitto
 quando entrambe le parti hanno modificato lo stesso file.
 
+### Risoluzione di un conflitto tra due modifiche
+
+Quando entrambe le parti hanno modificato lo stesso file, NASBox conserva sempre
+la versione che perde sotto un nome del tipo:
+
+```text
+nome (conflitto da <device> <codice>).estensione
+```
+
+Poi rende coerente il percorso originale con la versione vincente e aggiorna la
+baseline locale. In questo modo lo stesso conflitto non viene riproposto a ogni
+ciclo. Se la versione NAS vince, la copia locale viene prima salvata sul NAS e
+il file originale locale viene sostituito con la versione NAS; se vince la
+versione locale, il file NAS originale viene conservato come copia di conflitto.
+
+Se il tab **Log** mostra più conflitti consecutivi sullo stesso percorso,
+mettere in pausa la sincronizzazione e non cancellare manualmente né il file
+originale né le copie di conflitto prima di aver confrontato i contenuti. Dopo
+la scelta della versione da conservare, le copie non necessarie possono essere
+rimosse dal tab **Storico** o dal NAS seguendo la normale procedura di pulizia.
+
 ## 9. Limite di banda
 
 Tab Impostazioni → riquadro "Limite di banda": due valori **separati**, ↑

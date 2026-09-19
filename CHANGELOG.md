@@ -4,6 +4,15 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 1.23.5 - 2026-09-19
+
+- Risolto il loop dei conflitti in cui la versione NAS vincente veniva
+  conservata correttamente, ma non veniva adottata sul file originale locale:
+  ora il client scarica/adotta la versione NAS, aggiorna baseline e causalità e
+  conserva la versione locale sotto un nome di conflitto.
+- I nomi delle copie di conflitto sono deterministici per contenuto: un retry
+  dello stesso conflitto non crea copie duplicate senza limite.
+
 ## 1.23.4 - 2026-09-01
 
 - Il publish staging riconosce i batch gia' arrivati sul NAS con contenuto

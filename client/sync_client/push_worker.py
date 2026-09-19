@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import threading
 import time
-import uuid
 import stat
 import os
 import hashlib
@@ -434,11 +433,12 @@ class PushWorker(TransferWorker):
             if self._stop_flag.is_set():
                 return False, 0, False
             chunk_run_ts = rsync_ops.new_run_ts()
+            self._reset_self_written_paths()
             self._conflict_journal_items = []
             self._causal_journal_versions = {}
             self.transfer_phase.emit("upload", "checking", remote_progress_done, remote_progress_total)
             lock.set_activity("checking", remote_progress_done, remote_progress_total)
-            upload_paths, delete_requests, adopted_paths, remote_wins_paths, rename_plans = self._build_plan(
+            upload_paths, delete_requests, adopted_paths, remote_wins_paths, remote_adoptions, rename_plans = self._build_plan(
                 chunk_set,
                 remote_progress_offset=remote_progress_done,
                 remote_progress_total=remote_progress_total,
@@ -453,7 +453,7 @@ class PushWorker(TransferWorker):
                 fallback_paths = chunk_set - self._completed_rename_paths
                 self._conflict_journal_items = []
                 self._causal_journal_versions = {}
-                upload_paths, delete_requests, adopted_paths, remote_wins_paths, _ = self._build_plan(
+                upload_paths, delete_requests, adopted_paths, remote_wins_paths, remote_adoptions, _ = self._build_plan(
                     fallback_paths,
                     remote_progress_offset=remote_progress_done,
                     remote_progress_total=remote_progress_total,
@@ -497,6 +497,15 @@ class PushWorker(TransferWorker):
                 )
             else:
                 push_result = rsync_ops.TransferResult(True, [])
+            if push_result.ok and remote_adoptions:
+                adoption_result = self._adopt_remote_paths(
+                    remote_adoptions, chunk_run_ts, watcher,
+                )
+            else:
+                adoption_result = rsync_ops.TransferResult(True, [])
+            if not adoption_result.ok:
+                self._report_failure(adoption_result)
+                return False, 0, False
             if push_result.ok:
                 delete_result = rsync_ops.checked_delete_remote(
                     self.cfg, self._conn, delete_requests, chunk_run_ts,
@@ -541,6 +550,7 @@ class PushWorker(TransferWorker):
             authoritative = self._authoritative_fingerprints(
                 journal_items, adopted_paths, delete_result.completed_paths, watcher,
                 remote_only_paths=remote_only_paths,
+                remote_adopted_paths=set(remote_adoptions),
             )
             self.transfer_phase.emit("upload", "committing", remote_progress_done, remote_progress_total)
             lock.set_activity("committing", remote_progress_done, remote_progress_total)
@@ -599,7 +609,7 @@ class PushWorker(TransferWorker):
             self._staging_upload_paths = set()
             self.transfer_phase.emit("upload", "checking", remote_progress_done, remote_progress_total)
             lock.set_activity("checking", remote_progress_done, remote_progress_total)
-            upload_paths, delete_requests, adopted_paths, remote_wins_paths, rename_plans = self._build_plan(
+            upload_paths, delete_requests, adopted_paths, remote_wins_paths, remote_adoptions, rename_plans = self._build_plan(
                 chunk_set,
                 remote_progress_offset=remote_progress_done,
                 remote_progress_total=remote_progress_total,
@@ -607,7 +617,7 @@ class PushWorker(TransferWorker):
             )
             if (
                 not upload_paths or upload_paths != self._staging_upload_paths
-                or delete_requests or adopted_paths or remote_wins_paths or rename_plans
+                or delete_requests or adopted_paths or remote_wins_paths or remote_adoptions or rename_plans
             ):
                 return None
             fingerprints = {
@@ -700,16 +710,29 @@ class PushWorker(TransferWorker):
     def _authoritative_fingerprints(
         self, uploaded_items: list[rsync_ops.TransferItem], adopted_paths: set[str],
         deleted_paths: set[str], watcher, *, remote_only_paths: set[str] | None = None,
+        remote_adopted_paths: set[str] | None = None,
     ) -> dict[str, Fingerprint | None]:
         remote_only_paths = remote_only_paths or set()
+        remote_adopted_paths = remote_adopted_paths or set()
         uploaded_paths = {item.path for item in uploaded_items}
-        remote = rsync_ops.remote_file_states(
-            self.cfg, self._conn, uploaded_paths, compact=False,
-        )
-        if remote is None or set(remote) != uploaded_paths:
+        queried_paths = uploaded_paths | remote_adopted_paths
+        remote = rsync_ops.remote_file_states(self.cfg, self._conn, queried_paths, compact=False)
+        if remote is None or set(remote) != queried_paths:
             raise rsync_ops.RemoteLockError("impossibile confermare i file appena caricati sul NAS")
 
         authoritative: dict[str, Fingerprint | None] = {path: None for path in deleted_paths}
+        for path in remote_adopted_paths:
+            state = remote[path]
+            if state.kind == RemoteKind.FILE:
+                authoritative[path] = Fingerprint(
+                    state.digest, state.size, state.mtime_ns, state.causal,
+                )
+            elif state.kind == RemoteKind.TOMBSTONE:
+                authoritative[path] = None
+            else:
+                raise rsync_ops.RemoteLockError(
+                    f"impossibile adottare lo stato NAS di {path}"
+                )
         for path in adopted_paths:
             authoritative[path] = self.sync_state.local_fingerprint(self.cfg.local_root(), path)
         for path in uploaded_paths:
@@ -728,6 +751,80 @@ class PushWorker(TransferWorker):
                 if watcher is not None:
                     watcher.mark_dirty(path)
         return authoritative
+
+    def _adopt_remote_paths(
+        self, expected_paths: dict[str, Fingerprint], run_ts: str, watcher,
+    ) -> rsync_ops.TransferResult:
+        """Make a remote-winning conflict converge on this client.
+
+        The losing local bytes have already been preserved under a conflict name
+        by ``_build_plan``.  The canonical path must then be replaced locally;
+        otherwise the watcher keeps presenting the same local edit on every push
+        tick and creates an unbounded sequence of identical conflict copies.
+        """
+        if not expected_paths:
+            return rsync_ops.TransferResult(True, [])
+
+        remote = rsync_ops.remote_file_states(
+            self.cfg, self._conn, set(expected_paths), compact=False,
+        )
+        if remote is None or set(remote) != set(expected_paths):
+            return rsync_ops.TransferResult(
+                False, [], raw_error="impossibile leggere lo stato remoto del conflitto",
+            )
+
+        def local_still_expected(path: str) -> bool:
+            if path in self._self_written_snapshot():
+                return True
+            current = self.sync_state.local_fingerprint(self.cfg.local_root(), path)
+            expected = expected_paths[path]
+            return current is not None and (
+                current.digest == expected.digest
+                and current.size == expected.size
+                and current.mtime_ns == expected.mtime_ns
+            )
+
+        for path in expected_paths:
+            if not local_still_expected(path):
+                if watcher is not None:
+                    watcher.mark_dirty(path)
+                return rsync_ops.TransferResult(
+                    False, [], raw_error=f"modifica locale durante la risoluzione del conflitto: {path}",
+                )
+
+        tombstones = {
+            path for path, state in remote.items() if state.kind == RemoteKind.TOMBSTONE
+        }
+        invalid = {
+            path for path, state in remote.items()
+            if state.kind not in (RemoteKind.FILE, RemoteKind.TOMBSTONE)
+        }
+        if invalid:
+            return rsync_ops.TransferResult(
+                False, [], raw_error=f"percorso NAS non regolare nel conflitto: {sorted(invalid)[0]}",
+            )
+
+        if tombstones:
+            from . import trash
+
+            for path in sorted(tombstones):
+                local_path = Path(self.cfg.local_root(), path)
+                if local_path.exists() and not trash.move_to_local_trash(local_path, self.cfg.local_root()):
+                    return rsync_ops.TransferResult(
+                        False, [], raw_error=f"impossibile rimuovere localmente il conflitto: {path}",
+                    )
+                self._mark_self_written(path)
+                self._log("DELETE_LOCAL", path, "versione NAS vincente: cancellazione adottata")
+
+        file_paths = set(expected_paths) - tombstones
+        if not file_paths:
+            return rsync_ops.TransferResult(True, [])
+
+        return self._run_transfer_tracked(
+            rsync_ops.pull, run_ts, paths=file_paths,
+            emit_lifecycle=False,
+            cancel_check=lambda: any(not local_still_expected(path) for path in file_paths),
+        )
 
     def _on_hash_progress(self, done: int, total: int) -> None:
         now = time.time()
@@ -807,9 +904,12 @@ class PushWorker(TransferWorker):
         remote_progress_offset: int = 0, remote_progress_total: int = 0,
         compact_remote_manifest: bool = True,
         allow_renames: bool = True,
-    ) -> tuple[set[str], list[tuple[str, str, int]], set[str], set[str], list[_RenamePlan]]:
+    ) -> tuple[
+        set[str], list[tuple[str, str, int]], set[str], set[str],
+        dict[str, Fingerprint], list[_RenamePlan],
+    ]:
         if not relative_paths:
-            return set(), [], set(), set(), []
+            return set(), [], set(), set(), {}, []
         remote_progress = None
         if remote_progress_total:
             self._on_hash_progress(remote_progress_offset, remote_progress_total)
@@ -833,6 +933,7 @@ class PushWorker(TransferWorker):
         deletes: list[tuple[str, str, int]] = []
         adopted: set[str] = set()
         remote_wins: set[str] = set()
+        remote_adoptions: dict[str, Fingerprint] = {}
         for relative_path in sorted(relative_paths - rename_paths):
             local_fp = self.sync_state.local_fingerprint(self.cfg.local_root(), relative_path)
             baseline = self.sync_state.get(relative_path)
@@ -860,7 +961,7 @@ class PushWorker(TransferWorker):
             elif decision.action == Action.ADOPT:
                 adopted.add(relative_path)
             elif decision.action == Action.CONFLICT_LOCAL_WINS:
-                conflict_path = self._conflict_path(relative_path)
+                conflict_path = self._conflict_path(relative_path, remote.digest)
                 if not rsync_ops.copy_remote_file(self.cfg, self._conn, relative_path, conflict_path):
                     raise rsync_ops.RemoteLockError("impossibile conservare la versione NAS in conflitto")
                 self._conflict_journal_items.append(rsync_ops.TransferItem("upload", conflict_path))
@@ -870,7 +971,7 @@ class PushWorker(TransferWorker):
                 uploads.add(relative_path)
             elif decision.action == Action.CONFLICT_REMOTE_WINS:
                 if local_fp is not None:
-                    conflict_path = self._conflict_path(relative_path)
+                    conflict_path = self._conflict_path(relative_path, local_fp.digest)
                     ok, detail = rsync_ops.upload_conflict_copy(
                         self.cfg, self._conn, relative_path, conflict_path,
                     )
@@ -878,7 +979,9 @@ class PushWorker(TransferWorker):
                         raise rsync_ops.RemoteLockError(detail or "impossibile conservare la versione locale in conflitto")
                     self._conflict_journal_items.append(rsync_ops.TransferItem("upload", conflict_path))
                     self._causal_journal_versions[conflict_path] = local_fp.causal
+                    self._causal_journal_versions[relative_path] = remote.causal
                     self._log("CONFLICT", relative_path, f"versione locale salvata sul NAS come {conflict_path}")
+                    remote_adoptions[relative_path] = local_fp
             elif decision.action == Action.REMOTE_WINS:
                 if local_fp is None and baseline is not None and not baseline.is_tombstone:
                     self._log("STALE_DELETE", relative_path, decision.detail)
@@ -886,7 +989,7 @@ class PushWorker(TransferWorker):
                     self._causal_journal_versions[relative_path] = remote.causal
             elif decision.action == Action.BLOCK:
                 raise rsync_ops.RemoteLockError(f"{relative_path}: {decision.detail}")
-        return uploads, deletes, adopted, remote_wins, rename_plans
+        return uploads, deletes, adopted, remote_wins, remote_adoptions, rename_plans
 
     def _find_rename_plans(
         self, relative_paths: set[str], remote_states: dict[str, rsync_ops.RemoteState],
@@ -1074,9 +1177,12 @@ class PushWorker(TransferWorker):
         # hold application shutdown until RemoteLock's timeout expires.
         self._current_proc = proc
 
-    def _conflict_path(self, relative_path: str) -> str:
+    def _conflict_path(self, relative_path: str, digest: str = "") -> str:
         path = Path(relative_path)
-        token = uuid.uuid4().hex[:8]
+        # A retry of the same unresolved version must address the same copy.
+        # Random names turned a transient failure (and, before the convergence
+        # fix, a planner loop) into unbounded remote history growth.
+        token = hashlib.sha256(f"{relative_path}\0{digest}".encode()).hexdigest()[:8]
         tag = f" (conflitto da {self.sync_state.device_id()} {token})"
         suffix = path.suffix
         max_name_bytes = 240  # below the common NAME_MAX=255 on NAS filesystems
