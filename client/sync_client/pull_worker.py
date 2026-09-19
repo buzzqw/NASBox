@@ -147,10 +147,13 @@ class PullWorker(TransferWorker):
 
     def run(self) -> None:
         while not self._stop_flag.is_set():
+            self._begin_operation_connection()
             try:
                 self._tick()
             except Exception as exc:  # keep the loop alive no matter what
                 self._log("ERROR", "-", detail=f"pull tick failed: {exc}")
+            finally:
+                self._end_operation_connection()
             self._wake.wait(TICK_SECONDS)
             self._wake.clear()
 

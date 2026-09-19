@@ -4,6 +4,14 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 1.23.6 - 2026-09-19
+
+- Evitato che un cambio asincrono della connessione NAS durante un ciclo di
+  push, pull o scansione lasci il ciclo con una connessione `None` o incoerente:
+  il cambio viene applicato al ciclo successivo.
+- Documentata la procedura sicura per la pulizia delle copie di conflitto,
+  evitando la creazione di conflitti annidati mentre un client è attivo.
+
 ## 1.23.5 - 2026-09-19
 
 - Risolto il loop dei conflitti in cui la versione NAS vincente veniva

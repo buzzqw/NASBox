@@ -43,6 +43,11 @@ class TransferWorker(QThread):
         self._stop_flag = threading.Event()
         self._cancel_requested = threading.Event()
         self._conn: rsync_ops.NasConnection | None = None
+        self._connection_lock = threading.RLock()
+        self._operation_conn: rsync_ops.NasConnection | None = None
+        self._operation_conn_active = False
+        self._deferred_connection: rsync_ops.NasConnection | None = None
+        self._connection_update_pending = False
         self._current_proc = None  # the in-flight rsync Popen, if any -- lets stop()/cancel_current_transfer() interrupt it
         # Relative paths THIS transfer itself wrote to the local filesystem (a pull's
         # own "download"/"delete_local" items -- a push's items never touch local
@@ -71,7 +76,46 @@ class TransferWorker(QThread):
     # --- external controls (mirrors the old SyncEngine API so callers don't change) ---
 
     def set_connection(self, conn) -> None:
-        self._conn = conn
+        with self._connection_lock:
+            if self._operation_conn_active:
+                # Do not mutate the connection used by an in-flight tick.  The
+                # engine may report a disconnect/reconnect asynchronously while
+                # the worker is between two SSH calls.
+                self._deferred_connection = conn
+                self._connection_update_pending = True
+            else:
+                self._conn = conn
+
+    def _configured_connection(self) -> rsync_ops.NasConnection | None:
+        """Return the latest connection selected by the engine."""
+        with self._connection_lock:
+            return self._conn
+
+    def _connection_for_operation(self) -> rsync_ops.NasConnection | None:
+        """Return one stable connection for the current worker tick.
+
+        Engine connection changes are asynchronous.  A worker must not start a
+        tick with one connection and then pass ``None`` (or a different route)
+        to a later SSH operation in that same tick.
+        """
+        with self._connection_lock:
+            if self._operation_conn_active:
+                return self._operation_conn
+            return self._conn
+
+    def _begin_operation_connection(self) -> None:
+        with self._connection_lock:
+            self._operation_conn = self._conn
+            self._operation_conn_active = True
+
+    def _end_operation_connection(self) -> None:
+        with self._connection_lock:
+            if self._connection_update_pending:
+                self._conn = self._deferred_connection
+                self._deferred_connection = None
+                self._connection_update_pending = False
+            self._operation_conn = None
+            self._operation_conn_active = False
 
     def stop(self) -> None:
         self._stop_flag.set()

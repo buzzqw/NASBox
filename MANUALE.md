@@ -579,9 +579,24 @@ versione locale, il file NAS originale viene conservato come copia di conflitto.
 
 Se il tab **Log** mostra più conflitti consecutivi sullo stesso percorso,
 mettere in pausa la sincronizzazione e non cancellare manualmente né il file
-originale né le copie di conflitto prima di aver confrontato i contenuti. Dopo
-la scelta della versione da conservare, le copie non necessarie possono essere
-rimosse dal tab **Storico** o dal NAS seguendo la normale procedura di pulizia.
+originale né le copie di conflitto prima di aver confrontato i contenuti.
+
+Per eliminare in sicurezza copie di conflitto già presenti:
+
+1. fermare o mettere in pausa **tutti** i client che usano il repository;
+2. attendere che il tab **Trasferimenti** non mostri operazioni attive;
+3. confrontare le copie con il file canonico e conservare prima ogni versione
+   utile;
+4. rimuovere le copie dal tab **Storico** oppure seguire la procedura di
+   pulizia amministrativa del NAS;
+5. verificare che non restino copie locali o remote e solo dopo riavviare i
+   client.
+
+Non cancellare copie remote mentre un client le sta ancora scaricando o ha già
+le relative modifiche nella coda locale: la cancellazione può essere osservata
+come una nuova modifica e produrre conflitti annidati. Le copie non necessarie
+vanno quindi rimosse con i client fermi, non con `rm` durante una sincronizzazione
+attiva.
 
 ## 9. Limite di banda
 

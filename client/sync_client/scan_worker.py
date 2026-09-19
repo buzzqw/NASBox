@@ -55,6 +55,7 @@ class ScanWorker(QThread):
         self._stop_flag = threading.Event()
         self._wake = threading.Event()
         self._conn: rsync_ops.NasConnection | None = None
+        self._connection_lock = threading.RLock()
         self._current_proc = None  # the fallback dry-run Popen, if any
         self._transfer_active = transfer_active
         self.sync_state = sync_state
@@ -91,13 +92,16 @@ class ScanWorker(QThread):
         self._wake.set()
 
     def set_connection(self, conn) -> None:
-        """Slot for SyncEngine.connection_changed -- a plain attribute swap is
-        thread-safe enough here (CPython GIL), no lock needed for a single
-        reference read/write like this."""
-        if conn != self._conn:
-            self._manifest_revision = -1
-            self._manifest_entries = None
-        self._conn = conn
+        """Slot for SyncEngine.connection_changed."""
+        with self._connection_lock:
+            if conn != self._conn:
+                self._manifest_revision = -1
+                self._manifest_entries = None
+            self._conn = conn
+
+    def _connection_snapshot(self) -> rsync_ops.NasConnection | None:
+        with self._connection_lock:
+            return self._conn
 
     def run(self) -> None:
         while not self._stop_flag.is_set():
@@ -116,7 +120,8 @@ class ScanWorker(QThread):
             self._wake.clear()
 
     def _scan_once(self) -> None:
-        if self._conn is None or not self.cfg.is_configured():
+        conn = self._connection_snapshot()
+        if conn is None or not self.cfg.is_configured():
             return  # nothing to preview until a connection is resolved and the folder is set up
         if not self.lock_coordinator.can_attempt():
             return
@@ -145,9 +150,9 @@ class ScanWorker(QThread):
             self._current_proc = proc
 
         try:
-            items = self._manifest_preview()
+            items = self._manifest_preview(conn)
             if items is None:
-                items = rsync_ops.scan(self.cfg, self._conn, on_start=_on_start)
+                items = rsync_ops.scan(self.cfg, conn, on_start=_on_start)
             completed = True
         finally:
             self._current_proc = None
@@ -158,7 +163,9 @@ class ScanWorker(QThread):
         self.queue_updated.emit(items)
         self.scan_finished.emit()
 
-    def _manifest_preview(self) -> list[rsync_ops.TransferItem] | None:
+    def _manifest_preview(
+        self, conn: rsync_ops.NasConnection,
+    ) -> list[rsync_ops.TransferItem] | None:
         """Build the queue from journal state without a recursive NAS scan.
 
         ``None`` deliberately means "the manifest path is unavailable": the
@@ -178,19 +185,19 @@ class ScanWorker(QThread):
             lock_file = self.cfg.get("server_lock_file_remote")
             if isinstance(lock_file, str) and lock_file.strip().endswith("sync-transfer.lock"):
                 with rsync_ops.remote_lock(
-                    self.cfg, self._conn, timeout=PREVIEW_LOCK_TIMEOUT_SECONDS,
+                    self.cfg, conn, timeout=PREVIEW_LOCK_TIMEOUT_SECONDS,
                     owner_id=self.sync_state.device_id() if self.sync_state is not None else "preview",
                     priority=3,
                 ):
                     snapshot = rsync_ops.remote_manifest_snapshot(
-                        self.cfg, self._conn, self._manifest_revision,
+                        self.cfg, conn, self._manifest_revision,
                     )
                     self.lock_coordinator.acquired()
             else:
                 # Old/partially configured clients can still show a best-effort
                 # preview; real transfers are blocked by validate_transfer_safety.
                 snapshot = rsync_ops.remote_manifest_snapshot(
-                    self.cfg, self._conn, self._manifest_revision,
+                    self.cfg, conn, self._manifest_revision,
                 )
         except rsync_ops.RemoteLockBusy as exc:
             self.cfg.set("server_lock_owner_id", exc.owner_id)
@@ -243,16 +250,16 @@ class ScanWorker(QThread):
                 lock_file = self.cfg.get("server_lock_file_remote")
                 if isinstance(lock_file, str) and lock_file.strip().endswith("sync-transfer.lock"):
                     with rsync_ops.remote_lock(
-                        self.cfg, self._conn, timeout=PREVIEW_LOCK_TIMEOUT_SECONDS,
+                        self.cfg, conn, timeout=PREVIEW_LOCK_TIMEOUT_SECONDS,
                         owner_id=self.sync_state.device_id() if self.sync_state is not None else "preview",
                         priority=3,
                     ):
                         remote = rsync_ops.remote_file_states(
-                            self.cfg, self._conn, unknown_remote, compact=False,
+                            self.cfg, conn, unknown_remote, compact=False,
                         )
                 else:
                     remote = rsync_ops.remote_file_states(
-                        self.cfg, self._conn, unknown_remote, compact=False,
+                        self.cfg, conn, unknown_remote, compact=False,
                     )
             except rsync_ops.RemoteLockBusy as exc:
                 self.cfg.set("server_lock_owner_id", exc.owner_id)
