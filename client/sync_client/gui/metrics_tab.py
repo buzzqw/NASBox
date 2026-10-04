@@ -210,7 +210,7 @@ class MetricsTab(QWidget):
             self._set_sync_state("error", t("metrics.sync_offline_title"), t("metrics.sync_offline_detail"))
             self.refresh_btn.setEnabled(True)
             return
-        if not self._active:
+        if not self._active or self._is_minimized_or_hidden():
             self.status_label.setText(t("metrics.status_unknown"))
             self._set_sync_state("unknown", t("metrics.sync_unknown_title"), t("metrics.sync_unknown_detail"))
             return
@@ -218,14 +218,36 @@ class MetricsTab(QWidget):
         self._set_sync_state("loading", t("metrics.sync_loading_title"), t("metrics.sync_loading_detail"))
         self._timer.start(0)
 
+    def _is_minimized_or_hidden(self) -> bool:
+        win = self.window()
+        if win is not None and win is not self:
+            return win.isMinimized() or not win.isVisible()
+        return self.isMinimized() or not self.isVisible()
+
     def set_active(self, active: bool) -> None:
-        """Only probe the NAS while the diagnostic tab is visible."""
+        """Only probe the NAS while the diagnostic tab is visible and window is not minimized."""
         self._active = active
-        if not active:
+        if not active or self._is_minimized_or_hidden():
             self._timer.stop()
+            process = self._metrics_proc
+            if process is not None and process.poll() is None:
+                try:
+                    process.terminate()
+                except OSError:
+                    pass
             return
         if self._connected and not self._busy:
             self._timer.start(0)
+
+    def hideEvent(self, event) -> None:
+        super().hideEvent(event)
+        self._timer.stop()
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        if self._active and not self._is_minimized_or_hidden():
+            if self._connected and not self._busy:
+                self._timer.start(0)
 
     def stop(self) -> None:
         """Stop timers and interrupt an in-flight diagnostic SSH process."""
@@ -254,7 +276,7 @@ class MetricsTab(QWidget):
         return max(5, min(seconds, 3600)) * 1000
 
     def _refresh_metrics(self) -> None:
-        if self._busy or self._stopping or not self._active:
+        if self._busy or self._stopping or not self._active or self._is_minimized_or_hidden():
             return
         connection = self.engine.connection
         if connection is None:
@@ -277,7 +299,7 @@ class MetricsTab(QWidget):
 
     def _set_metrics_process(self, process) -> None:
         self._metrics_proc = process
-        if self._stopping and process.poll() is None:
+        if (self._stopping or not self._active or self._is_minimized_or_hidden()) and process.poll() is None:
             try:
                 process.terminate()
             except OSError:
@@ -287,7 +309,7 @@ class MetricsTab(QWidget):
         self._busy = False
         self._metrics_proc = None
         self.refresh_btn.setEnabled(True)
-        if self._stopping:
+        if self._stopping or not self._active or self._is_minimized_or_hidden():
             return
         if self._requested_connection != self.engine.connection:
             if self._connected:
@@ -323,7 +345,7 @@ class MetricsTab(QWidget):
         self._schedule_next()
 
     def _schedule_next(self) -> None:
-        if self._connected and self._supported:
+        if self._connected and self._supported and self._active and not self._is_minimized_or_hidden():
             self._timer.start(self._refresh_interval_ms())
 
     def _set_sync_state(self, state: str, title: str, detail: str) -> None:

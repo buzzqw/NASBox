@@ -4,7 +4,7 @@ import threading
 import time
 from pathlib import Path
 
-from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtCore import QEvent, Qt, QTimer
 from PyQt6.QtWidgets import (
     QApplication, QFrame, QHBoxLayout, QLabel, QMainWindow, QProgressDialog,
     QMessageBox, QSystemTrayIcon, QTabWidget, QVBoxLayout, QWidget,
@@ -146,7 +146,7 @@ class MainWindow(QMainWindow):
         tabs.addTab(self.log_tab, t("main_window.tab_log"))
         tabs.addTab(self.mirrors_tab, t("main_window.tab_mirrors"))
         tabs.addTab(self.settings_tab, t("main_window.tab_settings"))
-        tabs.currentChanged.connect(lambda index: self.metrics_tab.set_active(index == 1))
+        tabs.currentChanged.connect(lambda _index: self._update_metrics_tab_active())
         tabs.setTabToolTip(0, t("main_window.tab_status_tooltip"))
         tabs.setTabToolTip(1, t("main_window.tab_metrics_tooltip"))
         tabs.setTabToolTip(2, t("main_window.tab_transfers_tooltip"))
@@ -165,7 +165,7 @@ class MainWindow(QMainWindow):
         self.engine.connection_changed.connect(self.push_worker.set_connection)
         self.engine.connection_changed.connect(self.pull_worker.set_connection)
         self.engine.connection_changed.connect(self.metrics_tab.on_connection_changed)
-        self.metrics_tab.set_active(tabs.currentIndex() == 1)
+        self._update_metrics_tab_active()
         self.scan_worker.queue_updated.connect(self.transfers_tab.on_queue_updated)
         self.scan_worker.scan_started.connect(self.transfers_tab.on_queue_scan_started)
         self.scan_worker.scan_finished.connect(self.transfers_tab.on_queue_scan_finished)
@@ -302,11 +302,32 @@ class MainWindow(QMainWindow):
             15_000,
         )
 
+    def _update_metrics_tab_active(self) -> None:
+        if not hasattr(self, "metrics_tab") or not hasattr(self, "tabs"):
+            return
+        tab_selected = self.tabs.currentIndex() == 1
+        window_active = self.isVisible() and not self.isMinimized()
+        self.metrics_tab.set_active(tab_selected and window_active)
+
+    def changeEvent(self, event: QEvent) -> None:
+        super().changeEvent(event)
+        if event.type() == QEvent.Type.WindowStateChange:
+            self._update_metrics_tab_active()
+
+    def hideEvent(self, event) -> None:
+        super().hideEvent(event)
+        self._update_metrics_tab_active()
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        self._update_metrics_tab_active()
+
     def closeEvent(self, event) -> None:
         # Minimize to tray instead of quitting, like most sync clients.
         if self.tray.isVisible():
             event.ignore()
             self.hide()
+            self._update_metrics_tab_active()
             self.tray.showMessage(APP_NAME, t("main_window.tray_running_notice"))
         else:
             event.ignore()
