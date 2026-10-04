@@ -37,7 +37,7 @@ class TransfersTab(QWidget):
         self.upload_speed_label = QLabel(t("transfers.upload_speed_idle"))
         self.download_speed_label = QLabel(t("transfers.download_speed_idle"))
         for label in (self.upload_speed_label, self.download_speed_label):
-            label.setFixedWidth(150)
+            label.setMinimumWidth(160)
             label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         speed_layout.addWidget(self.upload_speed_label)
         speed_layout.addWidget(self.download_speed_label)
@@ -394,7 +394,29 @@ class TransfersTab(QWidget):
                 self._next_queue_sequence = 1
             self._completed_items.clear()
             self._apply_filter()
+        if direction == "upload":
+            self.upload_speed_label.setText(t("transfers.upload_speed_idle"))
+        elif direction == "download":
+            self.download_speed_label.setText(t("transfers.download_speed_idle"))
         self._refresh_activity()
+
+    def _remaining_bytes_for_direction(self, direction: str) -> int:
+        total = 0
+        for item in self._all_items:
+            key = (item.direction, item.path)
+            if key in self._completed_items:
+                continue
+            item_dir = "upload" if item.direction in ("upload", "rename_remote") else "download"
+            if item_dir != direction:
+                continue
+            size = item.size or 0
+            progress = self._pending_item_progress.get(key, self._item_progress.get(key, 0))
+            if progress > 0:
+                remaining = int(size * (100 - progress) / 100)
+            else:
+                remaining = size
+            total += max(0, remaining)
+        return total
 
     def _flush(self) -> None:
         if self._pending_item_progress:
@@ -411,7 +433,17 @@ class TransfersTab(QWidget):
                 if bytes_per_sec <= 0:
                     label.setText(f"{prefix}: -")
                 else:
-                    label.setText(f"{prefix}: {_human_size(bytes_per_sec)}/s ({percent}%)")
+                    eta_text = ""
+                    remaining_bytes = self._remaining_bytes_for_direction(direction)
+                    if remaining_bytes > 0 and bytes_per_sec > 1024:
+                        eta_seconds = int(remaining_bytes / bytes_per_sec)
+                        if eta_seconds < 60:
+                            eta_text = f" • ~{eta_seconds}s"
+                        elif eta_seconds < 3600:
+                            eta_text = f" • ~{eta_seconds // 60}m {eta_seconds % 60}s"
+                        else:
+                            eta_text = f" • ~{eta_seconds // 3600}h {(eta_seconds % 3600) // 60}m"
+                    label.setText(f"{prefix}: {_human_size(bytes_per_sec)}/s ({percent}%){eta_text}")
             self._pending_speed.clear()
 
         if self._pending_removals:

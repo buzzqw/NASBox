@@ -132,11 +132,15 @@ class EventLogger:
 
     # --- reading ---
 
-    def tail(self, limit: int = 500, action_filter: Optional[str] = None) -> list[Event]:
+    def tail(self, limit: int = 500, action_filter: Optional[str | set[str] | list[str] | tuple[str, ...]] = None) -> list[Event]:
         with self._lock:
             snapshot = list(self._recent)
         if action_filter:
-            snapshot = [ev for ev in snapshot if ev.action == action_filter]
+            if isinstance(action_filter, str):
+                snapshot = [ev for ev in snapshot if ev.action == action_filter]
+            else:
+                filter_set = set(action_filter)
+                snapshot = [ev for ev in snapshot if ev.action in filter_set]
         return snapshot[-limit:]
 
 

@@ -117,6 +117,10 @@ class HistoryTab(QWidget):
         self.tree.itemDoubleClicked.connect(lambda item, _col: self._restore_item(item))
         root.addWidget(self.tree)
 
+        self.totals_label = QLabel()
+        self.totals_label.setStyleSheet("color: #666; font-size: 11px;")
+        root.addWidget(self.totals_label)
+
         buttons_row = QHBoxLayout()
         self.restore_btn = QPushButton(t("history.restore_btn"))
         self.restore_btn.setToolTip(t("history.restore_tooltip"))
@@ -184,7 +188,11 @@ class HistoryTab(QWidget):
 
     def _apply_filter(self) -> None:
         needle = self.search_edit.text().strip().lower()
-        versions = self._versions
+        all_versions = self._versions
+        total_count = len(all_versions)
+        total_size = sum(v.size for v in all_versions)
+
+        versions = all_versions
         if needle:
             versions = [v for v in versions if needle in v.relative_path.lower()]
 
@@ -214,6 +222,29 @@ class HistoryTab(QWidget):
                 leaf.setData(0, VERSION_ROLE, version)
                 group_item.addChild(leaf)
         self.tree.expandAll()
+
+        filtered_count = len(versions)
+        filtered_size = sum(v.size for v in versions)
+        folders_count = len(groups)
+        if needle:
+            self.totals_label.setText(
+                t(
+                    "history.totals_filtered",
+                    versions=filtered_count,
+                    size=human_size(filtered_size),
+                    total_versions=total_count,
+                    total_size=human_size(total_size),
+                )
+            )
+        else:
+            self.totals_label.setText(
+                t(
+                    "history.totals_summary",
+                    versions=total_count,
+                    size=human_size(total_size),
+                    folders=folders_count,
+                )
+            )
 
     def showEvent(self, event) -> None:
         super().showEvent(event)

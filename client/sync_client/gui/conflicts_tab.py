@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
-from PyQt6.QtCore import Qt, QUrl
+from PyQt6.QtCore import Qt, QTimer, QUrl
 from PyQt6.QtGui import QColor, QDesktopServices
 from PyQt6.QtWidgets import (
     QComboBox, QGroupBox, QHBoxLayout, QHeaderView, QLabel, QMessageBox, QPushButton,
@@ -26,6 +27,12 @@ class ConflictsTab(QWidget):
         self.engine = engine
         self._groups: list[conflicts.ConflictGroup] = []
         self._busy = False
+
+        self._auto_refresh_timer = QTimer(self)
+        self._auto_refresh_timer.setInterval(30000)
+        self._auto_refresh_timer.timeout.connect(self._on_auto_refresh)
+        if hasattr(self.engine, "log_event"):
+            self.engine.log_event.connect(self._on_log_event)
 
         root = QVBoxLayout(self)
         notice = QLabel(t("conflicts.notice"))
@@ -75,6 +82,15 @@ class ConflictsTab(QWidget):
         self._update_buttons()
         self.refresh()
 
+    def _on_auto_refresh(self) -> None:
+        if self.isVisible() and not self._busy:
+            self.refresh()
+
+    def _on_log_event(self, action: str, _path: str, _detail: str) -> None:
+        if action in ("CONFLICT", "RESOLVE_CONFLICT"):
+            if not self._busy:
+                self.refresh()
+
     def refresh(self) -> None:
         local_root = self.cfg.local_root()
         if not local_root:
@@ -95,7 +111,12 @@ class ConflictsTab(QWidget):
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
+        self._auto_refresh_timer.start()
         self.refresh()
+
+    def hideEvent(self, event) -> None:
+        super().hideEvent(event)
+        self._auto_refresh_timer.stop()
 
     def _on_scan_done(self, result, exc: Exception | None) -> None:
         self._busy = False
@@ -105,10 +126,11 @@ class ConflictsTab(QWidget):
             return
         self._groups = result
         self._populate()
-        self.count_label.setText(
+        base = (
             t("conflicts.count", groups=len(result), files=sum(len(group.candidates) for group in result))
             if result else t("conflicts.none")
         )
+        self.count_label.setText(f"{base} ({time.strftime('%H:%M:%S')})")
 
     def _populate(self) -> None:
         self.tree.clear()

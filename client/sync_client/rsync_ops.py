@@ -45,6 +45,16 @@ SYNOLOGY_EADIR = "@eaDir"
 STAGING_DIRNAME = ".nasbox-staging"
 PARTIAL_DIRNAME = ".sync-partial"
 EXCLUDE_DIRNAMES = [TRASH_DIRNAME, SYNOLOGY_EADIR, PARTIAL_DIRNAME, STAGING_DIRNAME]
+RSYNC_SKIP_COMPRESS_SUFFIXES = (
+    "gz/zip/z/rpm/deb/iso/bz2/tbz/7z/xz/zst/tgz/rar/"
+    "mp4/mkv/avi/webm/mov/wmv/flv/m4v/"
+    "mp3/ogg/flac/opus/wav/aac/m4a/"
+    "pdf/png/jpg/jpeg/webp/gif/tif/tiff/apk"
+)
+DEFAULT_SYSTEM_EXCLUDES = [
+    ".DS_Store", "Thumbs.db", "desktop.ini",
+    ".~lock.*", "~$*", "*.tmp.*", "*.part", "*.crdownload",
+]
 
 # Keep the rsync pipe useful as backpressure: diagnostics are for the error
 # message only, not an unbounded second copy of a large transfer's output.
@@ -1442,6 +1452,8 @@ def _exclude_args(cfg: Config) -> list[str]:
     args: list[str] = []
     for name in [*EXCLUDE_DIRNAMES, REPOSITORY_MARKER_NAME, f"{REPOSITORY_MARKER_NAME}.tmp*"]:
         args += ["--exclude", name]
+    for pattern in DEFAULT_SYSTEM_EXCLUDES:
+        args += ["--exclude", pattern]
     args += _server_package_exclude_arg(cfg)
     args += _server_state_exclude_arg(cfg)
     for pattern in cfg.exclude_patterns():
@@ -1455,6 +1467,11 @@ def path_is_excluded(cfg: Config, relative_path: str) -> bool:
     """Apply the same practical exclude rules to pre-transfer conflict checks."""
     parts = [part for part in relative_path.replace("\\", "/").split("/") if part]
     if any(part in EXCLUDE_DIRNAMES or part == REPOSITORY_MARKER_NAME for part in parts):
+        return True
+    if any(
+        fnmatch.fnmatch(relative_path, pat) or any(fnmatch.fnmatch(part, pat) for part in parts)
+        for pat in DEFAULT_SYSTEM_EXCLUDES
+    ):
         return True
     package = server_package_excluded_path(cfg)
     if package and (relative_path == package or relative_path.startswith(package.rstrip("/") + "/")):
@@ -1872,6 +1889,7 @@ def _run_transfer(
     use_append_verify = append_verify and remote_destination is not None and not keep_backups
     cmd = [
         "rsync", "-avz",
+        f"--skip-compress={RSYNC_SKIP_COMPRESS_SUFFIXES}",
         # NASBox files belong to the SSH account, not to the remote UID/GID
         # from another machine. Avoid chgrp/chown/mode failures on Synology
         # and QNAP while preserving contents, timestamps and directory layout.

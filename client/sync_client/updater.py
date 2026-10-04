@@ -203,6 +203,8 @@ def install_update(source_root: Path, destination_root: Path) -> None:
     backup = destination_root.parent / f".{destination_root.name}.backup-{os.getpid()}"
     try:
         shutil.copytree(source_root, staging, symlinks=False)
+        if (destination_root / "tests").is_dir() and not (staging / "tests").exists():
+            shutil.copytree(destination_root / "tests", staging / "tests")
         if backup.exists():
             shutil.rmtree(backup)
         destination_root.rename(backup)

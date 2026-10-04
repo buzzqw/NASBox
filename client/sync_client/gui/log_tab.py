@@ -53,6 +53,15 @@ class LogTab(QWidget):
         filter_row.addWidget(QLabel(t("log.filter_label")))
         self.filter_combo = QComboBox()
         self.filter_combo.addItem(self._all_filter_label, userData=None)
+        CATEGORY_GROUPS = [
+            ("log.group.transfers", {"UPLOAD", "DOWNLOAD", "DELETE_LOCAL", "DELETE_REMOTE", "RENAME_REMOTE"}),
+            ("log.group.errors", {"ERROR", "SAFETY_BLOCK", "JOURNAL_ERROR", "SERVER_DOWN", "SERVER_OUTDATED", "CANCELLED"}),
+            ("log.group.safety", {"CONFLICT", "STALE_DELETE", "SAFETY_BLOCK", "JOURNAL_BLOCK", "JOURNAL_ERROR"}),
+            ("log.group.history", {"RESTORE_REMOTE_VERSION", "PRUNE_LOCAL_TRASH", "PRUNE_REMOTE_TRIGGER", "BROWSE_DELETE", "BROWSE_RENAME", "BROWSE_DOWNLOAD"}),
+        ]
+        for key, actions in CATEGORY_GROUPS:
+            self.filter_combo.addItem(t(key), userData=actions)
+        self.filter_combo.insertSeparator(self.filter_combo.count())
         for action, category in ACTION_FILTERS:
             self.filter_combo.addItem(
                 t("log.filter_item", category=t(f"log.category.{category}"), action=self._action_label(action)),
@@ -170,8 +179,11 @@ class LogTab(QWidget):
 
     def on_log_event(self, action: str, path_: str, detail: str) -> None:
         current = self.filter_combo.currentData()
-        if current is not None and current != action:
-            return
+        if current is not None:
+            if isinstance(current, str) and current != action:
+                return
+            if isinstance(current, (set, tuple, list)) and action not in current:
+                return
         if not self._matches_search(path_, detail):
             return
         t_str = time.strftime("%Y-%m-%d %H:%M:%S")

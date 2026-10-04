@@ -23,6 +23,19 @@ from .config import Config
 # occupy every CPU core and make the desktop unresponsive.
 HASH_MAX_WORKERS = min(8, max(1, (os.cpu_count() or 1) // 2))
 
+# In-memory cache mapping (dev, ino, size, mtime_ns) to sha256 digest to avoid
+# repeated hashing of unchanged files during push, pull and stability checks.
+_STAT_DIGEST_CACHE_MAX_ENTRIES = 50000
+_stat_digest_cache: dict[tuple[int, int, int, int], str] = {}
+_stat_digest_cache_lock = threading.Lock()
+
+
+def clear_fingerprint_cache() -> None:
+    """Clear the in-memory stat-digest cache."""
+    with _stat_digest_cache_lock:
+        _stat_digest_cache.clear()
+
+
 
 @dataclass(frozen=True)
 class CausalVersion:
@@ -332,6 +345,18 @@ class SyncStateStore:
                 before = path.lstat()
                 if not stat.S_ISREG(before.st_mode):
                     return None
+                stat_key = (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns)
+                with _stat_digest_cache_lock:
+                    cached_digest = _stat_digest_cache.get(stat_key)
+                if cached_digest is not None:
+                    after = path.lstat()
+                    if (
+                        stat.S_ISREG(after.st_mode)
+                        and before.st_dev == after.st_dev and before.st_ino == after.st_ino
+                        and before.st_size == after.st_size and before.st_mtime_ns == after.st_mtime_ns
+                    ):
+                        return Fingerprint(cached_digest, after.st_size, after.st_mtime_ns)
+
                 with path.open("rb") as f:
                     digest = hashlib.file_digest(f, "sha256").hexdigest()
                 after = path.lstat()
@@ -340,6 +365,10 @@ class SyncStateStore:
                     and before.st_dev == after.st_dev and before.st_ino == after.st_ino
                     and before.st_size == after.st_size and before.st_mtime_ns == after.st_mtime_ns
                 ):
+                    with _stat_digest_cache_lock:
+                        if len(_stat_digest_cache) >= _STAT_DIGEST_CACHE_MAX_ENTRIES:
+                            _stat_digest_cache.clear()
+                        _stat_digest_cache[stat_key] = digest
                     return Fingerprint(digest, after.st_size, after.st_mtime_ns)
             except OSError:
                 return None

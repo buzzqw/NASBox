@@ -61,6 +61,16 @@ gia' implementate con quelle solo da verificare in laboratorio.
 - [x] Riconoscere rename e directory oltre alla riconciliazione dei file regolari.
 - [x] Migliorare ripresa e backpressure dei trasferimenti interrotti tra hashing,
   rete e disco.
+- [x] Ottimizzazione compressione rsync: saltare compressione (`--skip-compress`) per file multimediali e archivi compressi.
+- [x] Cache in-memory impronte SHA-256 (`stat_digest_cache`) per evitare riletture I/O e CPU sui file invariati.
+- [x] Esclusioni predefinite di file di sistema e file temporanei/lock (`.DS_Store`, `Thumbs.db`, `desktop.ini`, `.~lock.*`, `~$*`, `*.tmp.*`, `*.part`, `*.crdownload`).
+- [x] Calcolo dinamico ETA dei trasferimenti e reset stato velocità a riposo nel Tab Trasferimenti.
+- [x] Auto-refresh periodico e reattivo agli eventi nel Tab Conflitti.
+- [x] Conteggio e peso totale con filtro nel Tab Storico (`totals_label`).
+- [x] Tempo trascorso nelle notifiche di completamento sincronizzazione nella system tray.
+- [x] Filtro macro-categorie nel Tab Log (Tutti i trasferimenti, Errori & Avvisi, Conflitti & Sicurezza, Storico).
+- [x] Allerta visiva proattiva per spazio disco NAS in esaurimento nel Tab Metriche.
+- [x] Protezione della suite di test durante gli aggiornamenti client in ambiente di sviluppo.
 - [ ] Valutare trasferimenti a blocchi e riuso dei blocchi gia' presenti per file
   grandi, senza compromettere la verifica SHA-256 finale.
 
@@ -102,8 +112,7 @@ gia' implementate con quelle solo da verificare in laboratorio.
 
 ## Rinviato
 
-- [ ] Refresh automatico periodico del Tab Conflicts. Oggi il tab aggiorna alla
-  visualizzazione, con il pulsante Aggiorna e dopo le operazioni di risoluzione.
+- [x] Refresh automatico periodico del Tab Conflicts (timer a tab visibile e reazione a eventi CONFLICT).
 - [ ] Valutazione separata di Syncthing come alternativa completa, senza
   modificare NASBox in produzione.
 

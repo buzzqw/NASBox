@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import time
 
 from PyQt6.QtCore import QTimer, QUrl, pyqtSlot
 from PyQt6.QtGui import QCursor, QDesktopServices
@@ -43,6 +44,7 @@ class TrayIcon(QSystemTrayIcon):
         self._active_transfers: set[str] = set()
         self._animation_frame = 0
         self._transfer_counts = {"upload": 0, "download": 0}
+        self._transfer_start_times: dict[str, float] = {}
 
         self._animation_timer = QTimer(self)
         self._animation_timer.setInterval(420)
@@ -86,6 +88,7 @@ class TrayIcon(QSystemTrayIcon):
         self._active_transfers.add(direction)
         self._animation_frame = 0
         self._transfer_counts[direction] = 0
+        self._transfer_start_times[direction] = time.monotonic()
         if self.cfg.get("animate_sync_icon", False) and not self._animation_timer.isActive():
             self._animation_timer.start()
         self._apply_icon()
@@ -104,6 +107,8 @@ class TrayIcon(QSystemTrayIcon):
     @pyqtSlot(str, bool)
     def on_transfer_finished(self, direction: str, success: bool) -> None:
         count = self._transfer_counts.get(direction, 0)
+        start_time = self._transfer_start_times.pop(direction, None)
+        elapsed = time.monotonic() - start_time if start_time is not None else 0.0
         self._active_transfers.discard(direction)
         if not self._active_transfers:
             self._animation_timer.stop()
@@ -111,9 +116,24 @@ class TrayIcon(QSystemTrayIcon):
         self._apply_icon()
 
         if success and count and self.cfg.get("notify_sync_completion", False):
+            if elapsed >= 1.0:
+                if elapsed >= 60:
+                    mins = int(elapsed // 60)
+                    secs = int(elapsed % 60)
+                    duration_str = f"{mins}m {secs}s"
+                else:
+                    duration_str = f"{int(elapsed)}s"
+                body = t(
+                    "tray.sync_completed_body_time",
+                    direction=t(f"tray.{direction}"),
+                    count=count,
+                    duration=duration_str,
+                )
+            else:
+                body = t("tray.sync_completed_body", direction=t(f"tray.{direction}"), count=count)
             self.showMessage(
                 t("tray.sync_completed_title"),
-                t("tray.sync_completed_body", direction=t(f"tray.{direction}"), count=count),
+                body,
                 QSystemTrayIcon.MessageIcon.Information,
                 5_000,
             )

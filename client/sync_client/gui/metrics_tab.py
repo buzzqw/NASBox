@@ -414,10 +414,19 @@ class MetricsTab(QWidget):
         else:
             self.swap_label.setText(t("metrics.swap_disabled"))
 
-        self.disk_label.setText(t(
+        disk_text = t(
             "metrics.disk_value", available=human_size(metrics.disk_available_bytes),
             total=human_size(metrics.disk_total_bytes), percent=f"{metrics.disk_usage_percent:.0f}",
-        ))
+        )
+        if metrics.disk_usage_percent >= 90:
+            self.disk_label.setStyleSheet("color: #d32f2f; font-weight: bold;")
+            self.disk_label.setText(f"⚠️ {disk_text}")
+        elif metrics.disk_usage_percent >= 80:
+            self.disk_label.setStyleSheet("color: #f57c00; font-weight: bold;")
+            self.disk_label.setText(disk_text)
+        else:
+            self.disk_label.setStyleSheet("")
+            self.disk_label.setText(disk_text)
         self.io_read_label.setText(self._rate_value(metrics.disk_read_rate, metrics.disk_read_bytes))
         self.io_write_label.setText(self._rate_value(metrics.disk_write_rate, metrics.disk_write_bytes))
         self.net_rx_label.setText(self._rate_value(metrics.net_rx_rate, metrics.net_rx_bytes))

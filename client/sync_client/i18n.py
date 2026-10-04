@@ -654,6 +654,10 @@ STRINGS: dict[str, dict[str, str]] = {
     "log.col_path": {"it": "Percorso", "en": "Path"},
     "log.col_detail": {"it": "Dettaglio", "en": "Detail"},
     "log.filter_item": {"it": "{category}: {action}", "en": "{category}: {action}"},
+    "log.group.transfers": {"it": "★ Tutti i trasferimenti", "en": "★ All transfers"},
+    "log.group.errors": {"it": "★ Tutti gli errori e avvisi", "en": "★ All errors & warnings"},
+    "log.group.safety": {"it": "★ Tutti i conflitti e sicurezza", "en": "★ All conflicts & safety"},
+    "log.group.history": {"it": "★ Tutte le operazioni storico", "en": "★ All history operations"},
     "log.category.transfer": {"it": "Sincronizzazione", "en": "Sync"},
     "log.category.browse": {"it": "Sfoglia NAS", "en": "Browse NAS"},
     "log.category.history": {"it": "Storico", "en": "History"},
@@ -756,6 +760,14 @@ STRINGS: dict[str, dict[str, str]] = {
     },
     "history.root_group_label": {"it": "(cartella radice)", "en": "(root folder)"},
     "history.group_label": {"it": "{name}  ({count} file)", "en": "{name}  ({count} files)"},
+    "history.totals_summary": {
+        "it": "Totale nello storico: {versions} versioni ({size}) in {folders} cartelle",
+        "en": "Total in history: {versions} versions ({size}) in {folders} folders",
+    },
+    "history.totals_filtered": {
+        "it": "Filtrati: {versions} versioni ({size}) su {total_versions} totali ({total_size})",
+        "en": "Filtered: {versions} versions ({size}) out of {total_versions} total ({total_size})",
+    },
     "history.remote_retention_unknown": {"it": "non ancora rilevata", "en": "not detected yet"},
     "history.remote_retention_never": {"it": "mai eliminare automaticamente", "en": "never auto-delete"},
     "history.remote_retention_value": {"it": "{days} giorni", "en": "{days} days"},
@@ -894,6 +906,10 @@ STRINGS: dict[str, dict[str, str]] = {
     "tray.sync_completed_body": {
         "it": "{direction}: {count} operazioni completate.",
         "en": "{direction}: {count} operations completed.",
+    },
+    "tray.sync_completed_body_time": {
+        "it": "{direction}: {count} operazioni completate in {duration}.",
+        "en": "{direction}: {count} operations completed in {duration}.",
     },
 
     # --- mirrors.py / mirrors_tab.py (external folder mirrors) ---
