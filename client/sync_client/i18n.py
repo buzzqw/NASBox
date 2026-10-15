@@ -38,6 +38,38 @@ STRINGS: dict[str, dict[str, str]] = {
         "en": "Only usable when 'Custom' is selected above.",
     },
 
+    "dialogs.schedule.title": {"it": "Finestra di pausa programmata", "en": "Scheduled pause window"},
+    "dialogs.schedule.intro": {
+        "it": "Scegli i giorni e l'orario in cui NASBox deve restare in pausa.",
+        "en": "Choose the days and time during which NASBox should stay paused.",
+    },
+    "dialogs.schedule.days_label": {"it": "Giorni", "en": "Days"},
+    "dialogs.schedule.start_label": {"it": "Dalle:", "en": "From:"},
+    "dialogs.schedule.end_label": {"it": "Alle:", "en": "To:"},
+    "dialogs.schedule.overnight_hint": {
+        "it": "Se l'orario di fine è uguale o precedente a quello di inizio, la finestra "
+              "attraversa la mezzanotte (es. 22:00 → 07:00).",
+        "en": "If the end time is equal to or earlier than the start, the window crosses "
+              "midnight (e.g. 22:00 → 07:00).",
+    },
+    "dialogs.schedule.no_days_title": {"it": "Nessun giorno selezionato", "en": "No day selected"},
+    "dialogs.schedule.no_days_body": {
+        "it": "Seleziona almeno un giorno per la finestra.",
+        "en": "Select at least one day for the window.",
+    },
+    "dialogs.schedule.same_time_title": {"it": "Orari uguali", "en": "Equal times"},
+    "dialogs.schedule.same_time_body": {
+        "it": "L'orario di inizio e quello di fine devono essere diversi.",
+        "en": "The start and end times must differ.",
+    },
+    "dialogs.schedule.day_mon": {"it": "Lun", "en": "Mon"},
+    "dialogs.schedule.day_tue": {"it": "Mar", "en": "Tue"},
+    "dialogs.schedule.day_wed": {"it": "Mer", "en": "Wed"},
+    "dialogs.schedule.day_thu": {"it": "Gio", "en": "Thu"},
+    "dialogs.schedule.day_fri": {"it": "Ven", "en": "Fri"},
+    "dialogs.schedule.day_sat": {"it": "Sab", "en": "Sat"},
+    "dialogs.schedule.day_sun": {"it": "Dom", "en": "Sun"},
+
     # --- dialogs.py: FolderSetupDialog ---
     "dialogs.folder.title_relocate": {"it": "Sposta la cartella NASBox", "en": "Move the NASBox folder"},
     "dialogs.folder.title_welcome": {"it": "Benvenuto in NASBox", "en": "Welcome to NASBox"},
@@ -118,6 +150,7 @@ STRINGS: dict[str, dict[str, str]] = {
     "status.sync_state_offline": {"it": "Sincronizzazione non disponibile finché il NAS è offline.", "en": "Synchronization unavailable while the NAS is offline."},
     "status.sync_state_paused_timed": {"it": "Sincronizzazione in pausa temporanea.", "en": "Synchronization is temporarily paused."},
     "status.sync_state_paused": {"it": "Sincronizzazione in pausa.", "en": "Synchronization is paused."},
+    "status.sync_state_scheduled": {"it": "In pausa programmata: riprende alle {until}.", "en": "Scheduled pause: resumes at {until}."},
     "status.sync_state_ready": {"it": "Sincronizzazione pronta: monitoraggio attivo, nessun trasferimento in corso.", "en": "Synchronization ready: monitoring is active, no transfer in progress."},
     "status.sync_state_pending": {"it": "Sincronizzazione pronta: {count} in coda.", "en": "Synchronization ready: {count} queued."},
     "status.sync_state_preparing": {"it": "Preparazione {direction} in corso…", "en": "Preparing {direction}…"},
@@ -193,6 +226,10 @@ STRINGS: dict[str, dict[str, str]] = {
         "en": "⏸ Paused (resumes in {mins}:{secs}) — connected to {where}",
     },
     "status.paused_msg": {"it": "⏸ In pausa — connesso a {where}", "en": "⏸ Paused — connected to {where}"},
+    "status.scheduled_pause_msg": {
+        "it": "⏸ In pausa programmata fino alle {until} — connesso a {where}",
+        "en": "⏸ Scheduled pause until {until} — connected to {where}",
+    },
     "status.active_msg": {"it": "✅ Sincronizzazione attiva — connesso a {where}", "en": "✅ Syncing — connected to {where}"},
     "status.connected_msg": {"it": "Connesso al NAS: {where}", "en": "Connected to NAS: {where}"},
     "status.version_tooltip": {"it": "Clicca per cercare aggiornamenti del client.", "en": "Click to check for client updates."},
@@ -400,6 +437,34 @@ STRINGS: dict[str, dict[str, str]] = {
               "share one authenticated connection instead of opening a new one each time. "
               "Cuts handshakes and, on the NAS, sshd/shell forks. Disable only if your SSH "
               "setup or a bastion rejects it.",
+    },
+
+    "settings.schedule_title": {"it": "Pianificazione sincronizzazione", "en": "Sync schedule"},
+    "settings.schedule_enabled_checkbox": {
+        "it": "Metti in pausa automaticamente nelle finestre indicate",
+        "en": "Pause automatically during the listed windows",
+    },
+    "settings.schedule_enabled_tooltip": {
+        "it": "Nelle finestre indicate NASBox non invia, non scarica e non resta in attesa "
+              "sul NAS: utile per tenere il NAS libero di notte o durante l'orario di lavoro.",
+        "en": "During the listed windows NASBox does not push, pull, or wait on the NAS: "
+              "useful to keep the NAS idle at night or during working hours.",
+    },
+    "settings.schedule_list_tooltip": {
+        "it": "Finestre ricorrenti. Un orario di fine non superiore a quello di inizio "
+              "significa che la finestra attraversa la mezzanotte.",
+        "en": "Recurring windows. An end time not later than the start spans midnight.",
+    },
+    "settings.schedule_add_btn": {"it": "Aggiungi…", "en": "Add…"},
+    "settings.schedule_add_tooltip": {"it": "Crea una nuova finestra di pausa.", "en": "Create a new pause window."},
+    "settings.schedule_edit_btn": {"it": "Modifica…", "en": "Edit…"},
+    "settings.schedule_edit_tooltip": {"it": "Modifica la finestra selezionata.", "en": "Edit the selected window."},
+    "settings.schedule_remove_btn": {"it": "Rimuovi", "en": "Remove"},
+    "settings.schedule_remove_tooltip": {"it": "Elimina la finestra selezionata.", "en": "Delete the selected window."},
+    "settings.schedule_note": {
+        "it": "Le finestre sono opzionali e si applicano solo al salvataggio; la pausa manuale "
+              "resta indipendente.",
+        "en": "Windows are optional and apply on save; the manual pause stays independent.",
     },
 
     "settings.feedback_title": {"it": "Feedback sincronizzazione", "en": "Sync feedback"},

@@ -169,6 +169,8 @@ class SyncEngine(QThread):
                 self._set_server_health("unknown")
 
         paused = self.cfg.is_paused()
+        schedule_active = self.cfg.schedule_active_at()
+        schedule_remaining = self.cfg.schedule_remaining_seconds() if schedule_active else None
         watcher = self.watchers.get()
         watcher_mode, watcher_detail = "disabled", ""
         if watcher is not None:
@@ -182,6 +184,8 @@ class SyncEngine(QThread):
         self.status_changed.emit({
             "paused": paused,
             "pause_remaining": self.cfg.pause_remaining_seconds(),
+            "schedule_active": schedule_active,
+            "schedule_remaining": schedule_remaining,
             "host": self._conn.host if self._conn else None,
             "via_jump": self._conn.via_jump if self._conn else False,
             "connected": self._conn is not None,

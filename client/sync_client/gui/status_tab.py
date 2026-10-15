@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import sys
 import time
+from datetime import datetime, timedelta
 
 from PyQt6.QtCore import Qt, QTimer, QUrl, pyqtSignal
 from PyQt6.QtGui import QDesktopServices
@@ -28,6 +29,15 @@ UPDATE_CHECK_INITIAL_DELAY_MS = 10_000
 UPDATE_CHECK_INTERVAL_MS = 60 * 60 * 1000
 RECENT_PROBLEM_SECONDS = 24 * 60 * 60
 RECENT_EVENT_SCAN_LIMIT = 20_000
+
+
+def _clock_after(seconds) -> str:
+    """HH:MM wall-clock time `seconds` from now, for schedule messaging."""
+    try:
+        moment = datetime.now() + timedelta(seconds=max(int(seconds), 0))
+    except (TypeError, ValueError):
+        return "--:--"
+    return moment.strftime("%H:%M")
 LOW_NAS_SPACE_BYTES = 5 * 1024 * 1024 * 1024
 PROBLEM_ACTIONS = {"ERROR", "SAFETY_BLOCK", "JOURNAL_BLOCK"}
 
@@ -233,7 +243,7 @@ class StatusTab(QWidget):
         self.sync_feedback_label.show()
 
     def _toggle_pause(self) -> None:
-        if self.cfg.is_paused():
+        if self.cfg.is_manually_paused():
             self.cfg.resume()
         else:
             self.cfg.pause_indefinitely()
@@ -251,7 +261,9 @@ class StatusTab(QWidget):
             self._refresh_pause_button()
 
     def _refresh_pause_button(self) -> None:
-        paused = self.cfg.is_paused()
+        # The toggle reflects the *manual* pause only: a recurring schedule must
+        # not make the button claim the user paused (and then "resume" nothing).
+        paused = self.cfg.is_manually_paused()
         self.pause_btn.setText(t("status.resume_btn") if paused else t("status.pause_btn"))
 
     def _tick_countdown(self) -> None:
@@ -287,6 +299,9 @@ class StatusTab(QWidget):
     def on_status_changed(self, status: dict) -> None:
         paused = status.get("paused", False)
         remaining = status.get("pause_remaining")
+        schedule_active = status.get("schedule_active", False)
+        schedule_remaining = status.get("schedule_remaining")
+        manual_paused = self.cfg.is_manually_paused()
         host = status.get("host")
         via_jump = status.get("via_jump", False)
         connected = status.get("connected", False)
@@ -312,13 +327,17 @@ class StatusTab(QWidget):
         elif not connected:
             text = t("status.nas_unreachable_msg")
             state = "error"
-        elif paused and remaining:
+        elif manual_paused and remaining:
             mins = int(remaining // 60)
             secs = int(remaining % 60)
             text = t("status.paused_countdown_msg", mins=f"{mins:02d}", secs=f"{secs:02d}", where=where)
             state = "paused"
-        elif paused:
+        elif manual_paused:
             text = t("status.paused_msg", where=where)
+            state = "paused"
+        elif schedule_active:
+            until = _clock_after(schedule_remaining)
+            text = t("status.scheduled_pause_msg", until=until, where=where)
             state = "paused"
         else:
             text = t("status.connected_msg", where=where)
@@ -330,7 +349,7 @@ class StatusTab(QWidget):
             self.status_label.style().unpolish(self.status_label)
             self.status_label.style().polish(self.status_label)
         self._refresh_pause_button()
-        self._refresh_sync_state(paused, remaining)
+        self._refresh_sync_state(paused, remaining, schedule_active, schedule_remaining)
         self._refresh_remote_lock(status)
         self._refresh_watcher(status)
         self._scheduler_status = status.get("scheduler") or {}
@@ -476,18 +495,30 @@ class StatusTab(QWidget):
             self.sync_feedback_label.hide()
         self._refresh_sync_state()
 
-    def _refresh_sync_state(self, paused: bool | None = None, remaining=None) -> None:
+    def _refresh_sync_state(
+        self, paused: bool | None = None, remaining=None,
+        schedule_active: bool | None = None, schedule_remaining=None,
+    ) -> None:
+        manual = self.cfg.is_manually_paused()
         if paused is None:
             paused = self.cfg.is_paused()
+        if remaining is None:
             remaining = self.cfg.pause_remaining_seconds()
+        if schedule_active is None:
+            schedule_active = self.cfg.schedule_active_at()
+            schedule_remaining = self.cfg.schedule_remaining_seconds() if schedule_active else None
         if not self._status_known:
             text = t("status.sync_state_starting")
         elif not self.cfg.is_configured():
             text = t("status.sync_state_not_configured")
         elif not self._connected:
             text = t("status.sync_state_offline")
-        elif paused and remaining:
+        elif manual and remaining:
             text = t("status.sync_state_paused_timed")
+        elif manual:
+            text = t("status.sync_state_paused")
+        elif paused and schedule_active:
+            text = t("status.sync_state_scheduled", until=_clock_after(schedule_remaining))
         elif paused:
             text = t("status.sync_state_paused")
         elif self._transfer_phases:

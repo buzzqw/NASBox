@@ -160,7 +160,7 @@ class TrayIcon(QSystemTrayIcon):
 
         menu.addSeparator()
 
-        toggle_label = t("tray.resume") if self.cfg.is_paused() else t("tray.pause")
+        toggle_label = t("tray.resume") if self.cfg.is_manually_paused() else t("tray.pause")
         toggle_action = menu.addAction(toggle_label)
         toggle_action.triggered.connect(self._toggle_pause)
 
@@ -246,7 +246,7 @@ class TrayIcon(QSystemTrayIcon):
         self.main_window.quit_application()
 
     def _toggle_pause(self) -> None:
-        if self.cfg.is_paused():
+        if self.cfg.is_manually_paused():
             self.cfg.resume()
         else:
             self.cfg.pause_indefinitely()

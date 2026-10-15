@@ -11,12 +11,13 @@ from PyQt6.QtWidgets import (
 from pathlib import Path
 
 from .. import paths, rsync_ops, trash
-from ..config import Config, SYNC_MODE_OPTIONS
+from ..config import Config, SYNC_MODE_OPTIONS, normalize_schedule
 from ..engine import SyncEngine
 from ..i18n import t
 from ..version import APP_NAME, APP_VERSION
 from ..repository_safety import RepositorySafetyError, bind_repository
 from .async_utils import run_in_background
+from .dialogs import ScheduleWindowDialog, WEEKDAY_KEYS
 
 LANGUAGE_OPTIONS = [
     ("auto", "settings.language_auto"),
@@ -46,6 +47,7 @@ class SettingsTab(QWidget):
         self._conflict_files: list[Path] = []
         self._dirty = False
         self._single_column = False
+        self._schedule_windows = cfg.pause_schedule()
 
         # This tab stacks a lot of group boxes -- without a scroll area, Qt's
         # layout system reports their combined minimum height as *this tab's*
@@ -210,6 +212,39 @@ class SettingsTab(QWidget):
         cadence_form.addRow(cadence_note)
         right_col.addWidget(cadence_box)
 
+        # --- scheduled pause ---
+        schedule_box = QGroupBox(t("settings.schedule_title"))
+        schedule_layout = QVBoxLayout(schedule_box)
+        self.schedule_enabled = QCheckBox(t("settings.schedule_enabled_checkbox"))
+        self.schedule_enabled.setChecked(bool(cfg.get("pause_schedule_enabled")))
+        self.schedule_enabled.setToolTip(t("settings.schedule_enabled_tooltip"))
+        schedule_layout.addWidget(self.schedule_enabled)
+        self.schedule_list = QListWidget()
+        self.schedule_list.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.schedule_list.setMaximumHeight(110)
+        self.schedule_list.setToolTip(t("settings.schedule_list_tooltip"))
+        schedule_layout.addWidget(self.schedule_list)
+        schedule_buttons = QHBoxLayout()
+        schedule_add_btn = QPushButton(t("settings.schedule_add_btn"))
+        schedule_add_btn.setToolTip(t("settings.schedule_add_tooltip"))
+        schedule_add_btn.clicked.connect(self._add_schedule_window)
+        schedule_edit_btn = QPushButton(t("settings.schedule_edit_btn"))
+        schedule_edit_btn.setToolTip(t("settings.schedule_edit_tooltip"))
+        schedule_edit_btn.clicked.connect(self._edit_schedule_window)
+        schedule_remove_btn = QPushButton(t("settings.schedule_remove_btn"))
+        schedule_remove_btn.setToolTip(t("settings.schedule_remove_tooltip"))
+        schedule_remove_btn.clicked.connect(self._remove_schedule_window)
+        schedule_buttons.addWidget(schedule_add_btn)
+        schedule_buttons.addWidget(schedule_edit_btn)
+        schedule_buttons.addWidget(schedule_remove_btn)
+        schedule_buttons.addStretch(1)
+        schedule_layout.addLayout(schedule_buttons)
+        schedule_note = QLabel(t("settings.schedule_note"))
+        schedule_note.setWordWrap(True)
+        schedule_layout.addWidget(schedule_note)
+        self._refresh_schedule_list()
+        right_col.addWidget(schedule_box)
+
         # --- sync feedback ---
         feedback_box = QGroupBox(t("settings.feedback_title"))
         feedback_layout = QVBoxLayout(feedback_box)
@@ -366,7 +401,7 @@ class SettingsTab(QWidget):
             spin.valueChanged.connect(self._mark_dirty)
         for checkbox in (
             self.delete_enabled, self.notify_sync_checkbox, self.animate_sync_checkbox,
-            self.multiplexing_checkbox,
+            self.multiplexing_checkbox, self.schedule_enabled,
         ):
             checkbox.toggled.connect(self._mark_dirty)
         self.language_combo.currentIndexChanged.connect(self._mark_dirty)
@@ -414,6 +449,47 @@ class SettingsTab(QWidget):
             self.exclude_list.setCurrentRow(min(row, self.exclude_list.count() - 1))
         self._mark_dirty()
 
+    def _schedule_summary(self, window: dict) -> str:
+        days = sorted(day for day in (window.get("days") or []) if 0 <= day <= 6)
+        day_names = ", ".join(t(WEEKDAY_KEYS[day]) for day in days)
+        return f"{day_names}  {window.get('start')}-{window.get('end')}"
+
+    def _refresh_schedule_list(self) -> None:
+        self.schedule_list.clear()
+        for window in self._schedule_windows:
+            item = QListWidgetItem(self._schedule_summary(window))
+            item.setData(Qt.ItemDataRole.UserRole, window)
+            self.schedule_list.addItem(item)
+
+    def _add_schedule_window(self) -> None:
+        dialog = ScheduleWindowDialog(self)
+        if dialog.exec():
+            window = dialog.window()
+            if window:
+                self._schedule_windows.append(window)
+                self._refresh_schedule_list()
+                self._mark_dirty()
+
+    def _edit_schedule_window(self) -> None:
+        row = self.schedule_list.currentRow()
+        if row < 0 or row >= len(self._schedule_windows):
+            return
+        dialog = ScheduleWindowDialog(self, self._schedule_windows[row])
+        if dialog.exec():
+            window = dialog.window()
+            if window:
+                self._schedule_windows[row] = window
+                self._refresh_schedule_list()
+                self._mark_dirty()
+
+    def _remove_schedule_window(self) -> None:
+        row = self.schedule_list.currentRow()
+        if row < 0 or row >= len(self._schedule_windows):
+            return
+        self._schedule_windows.pop(row)
+        self._refresh_schedule_list()
+        self._mark_dirty()
+
     def _save_settings(self) -> None:
         self.cfg.set("nas_lan", self.nas_lan.text().strip(), persist=False)
         self.cfg.set("nas_wan", self.nas_wan.text().strip(), persist=False)
@@ -439,6 +515,8 @@ class SettingsTab(QWidget):
             self.cfg.set("language", code, persist=False)
         patterns = [self.exclude_list.item(i).text() for i in range(self.exclude_list.count())]
         self.cfg.set("exclude_patterns", patterns, persist=False)
+        self.cfg.set("pause_schedule_enabled", self.schedule_enabled.isChecked(), persist=False)
+        self.cfg.set("pause_schedule", normalize_schedule(self._schedule_windows), persist=False)
         self.cfg.save()
         self.engine.wake()
         self._refresh_auto_exclude_label()

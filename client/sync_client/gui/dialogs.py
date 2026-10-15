@@ -2,10 +2,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from PyQt6.QtCore import QTime
 from PyQt6.QtWidgets import (
-    QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout,
-    QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPushButton, QSpinBox,
-    QVBoxLayout, QWizard, QWizardPage,
+    QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout,
+    QGridLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QMessageBox,
+    QPushButton, QSpinBox, QTimeEdit, QVBoxLayout, QWizard, QWizardPage,
 )
 
 from .. import rsync_ops
@@ -20,6 +21,93 @@ PAUSE_PRESETS = [
     ("dialogs.pause.preset_8h", 8 * 60 * 60),
     ("dialogs.pause.preset_custom", None),
 ]
+
+# Python weekday() order: Monday == 0.
+WEEKDAY_KEYS = [
+    "dialogs.schedule.day_mon",
+    "dialogs.schedule.day_tue",
+    "dialogs.schedule.day_wed",
+    "dialogs.schedule.day_thu",
+    "dialogs.schedule.day_fri",
+    "dialogs.schedule.day_sat",
+    "dialogs.schedule.day_sun",
+]
+
+
+class ScheduleWindowDialog(QDialog):
+    """Edit one recurring window: which days, and the start/end time.
+
+    A window whose end is at or before its start is an overnight window (for
+    example 22:00 -> 07:00), which the caller interprets as spanning midnight.
+    """
+
+    def __init__(self, parent=None, window: dict | None = None, weekdays: list[int] | None = None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle(t("dialogs.schedule.title"))
+        layout = QVBoxLayout(self)
+
+        intro = QLabel(t("dialogs.schedule.intro"))
+        intro.setWordWrap(True)
+        layout.addWidget(intro)
+
+        days_box = QGroupBox(t("dialogs.schedule.days_label"))
+        grid = QGridLayout(days_box)
+        self._day_checks = []
+        for index, key in enumerate(WEEKDAY_KEYS):
+            checkbox = QCheckBox(t(key))
+            grid.addWidget(checkbox, index // 4, index % 4)
+            self._day_checks.append(checkbox)
+        layout.addWidget(days_box)
+
+        form = QFormLayout()
+        self.start = QTimeEdit()
+        self.start.setDisplayFormat("HH:mm")
+        self.end = QTimeEdit()
+        self.end.setDisplayFormat("HH:mm")
+        form.addRow(t("dialogs.schedule.start_label"), self.start)
+        form.addRow(t("dialogs.schedule.end_label"), self.end)
+        layout.addLayout(form)
+
+        hint = QLabel(t("dialogs.schedule.overnight_hint"))
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(self._on_accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+        self._window: dict | None = None
+        source_days = (window or {}).get("days") if window else (weekdays if weekdays is not None else [0, 1, 2, 3, 4])
+        for day in source_days or []:
+            if 0 <= int(day) <= 6:
+                self._day_checks[int(day)].setChecked(True)
+        start = (window or {}).get("start", "08:00")
+        end = (window or {}).get("end", "18:00")
+        self.start.setTime(QTime.fromString(start, "HH:mm") if QTime.fromString(start, "HH:mm").isValid() else QTime(8, 0))
+        self.end.setTime(QTime.fromString(end, "HH:mm") if QTime.fromString(end, "HH:mm").isValid() else QTime(18, 0))
+
+    def _on_accept(self) -> None:
+        days = [index for index, checkbox in enumerate(self._day_checks) if checkbox.isChecked()]
+        if not days:
+            QMessageBox.warning(
+                self, t("dialogs.schedule.no_days_title"), t("dialogs.schedule.no_days_body"),
+            )
+            return
+        start = self.start.time().toString("HH:mm")
+        end = self.end.time().toString("HH:mm")
+        if start == end:
+            QMessageBox.warning(
+                self, t("dialogs.schedule.same_time_title"), t("dialogs.schedule.same_time_body"),
+            )
+            return
+        self._window = {"days": days, "start": start, "end": end}
+        self.accept()
+
+    def window(self) -> dict | None:
+        return self._window
 
 
 class PauseForDialog(QDialog):

@@ -4,6 +4,17 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 1.23.12 - 2026-10-15
+
+- Nuova funzionalita': **pianificazione della sincronizzazione**. In
+  Impostazioni si possono definire finestre ricorrenti (giorni + orario) in cui
+  NASBox resta in pausa: non invia, non scarica, non resta in attesa sul NAS e
+  non esegue i mirror. Le finestre possono attraversare la mezzanotte (es.
+  22:00 → 07:00). La pausa manuale resta indipendente: il pulsante Pausa/Riprendi
+  e la tray riflettono solo la pausa esplicita, mentre lo stato mostra la pausa
+  programmata con l'orario di ripresa. Utile per tenere il NAS libero di notte o
+  durante l'orario di lavoro.
+
 ## 1.23.11 - 2026-10-15
 
 Alleggerimento del carico sul NAS e delle prestazioni del client.

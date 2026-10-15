@@ -32,6 +32,113 @@ def normalize_sync_mode(value: Any) -> str:
     return value if isinstance(value, str) and value in SYNC_MODES else SYNC_MODE_BIDIRECTIONAL
 
 
+# --- scheduled pause ------------------------------------------------------
+#
+# A schedule is a list of windows, each {"days": [0..6], "start": "HH:MM",
+# "end": "HH:MM"} where days uses Python's weekday() (Monday == 0) and refers to
+# the day the window STARTS. A window whose end is at or before its start wraps
+# past midnight (an "overnight" window such as 22:00 -> 07:00). Outside every
+# window sync runs normally; inside one, the client treats the folder as paused
+# -- no push, no pull, no change-feed wait, no mirror -- which also keeps the
+# NAS quiet during the chosen hours.
+
+def _hhmm_to_minutes(value: Any) -> int | None:
+    if not isinstance(value, str) or ":" not in value:
+        return None
+    hours, _, minutes = value.partition(":")
+    try:
+        h, m = int(hours), int(minutes)
+    except ValueError:
+        return None
+    if not (0 <= h <= 23 and 0 <= m <= 59):
+        return None
+    return h * 60 + m
+
+
+def normalize_schedule_window(window: Any) -> dict | None:
+    if not isinstance(window, dict):
+        return None
+    start = _hhmm_to_minutes(window.get("start"))
+    end = _hhmm_to_minutes(window.get("end"))
+    if start is None or end is None or start == end:
+        return None
+    raw_days = window.get("days")
+    if not isinstance(raw_days, (list, tuple)):
+        return None
+    days = sorted({int(day) for day in raw_days if isinstance(day, int) and 0 <= day <= 6})
+    if not days:
+        return None
+    return {
+        "days": days,
+        "start": f"{start // 60:02d}:{start % 60:02d}",
+        "end": f"{end // 60:02d}:{end % 60:02d}",
+    }
+
+
+def normalize_schedule(windows: Any) -> list[dict]:
+    if not isinstance(windows, (list, tuple)):
+        return []
+    normalized = []
+    for window in windows:
+        clean = normalize_schedule_window(window)
+        if clean is not None:
+            normalized.append(clean)
+    return normalized
+
+
+def schedule_window_state(
+    window: dict, when: "datetime", *, want_remaining: bool = False,
+) -> tuple[bool, int | None]:
+    """Is this window active at `when`, and (optionally) seconds until it ends."""
+    start = _hhmm_to_minutes(window.get("start"))
+    end = _hhmm_to_minutes(window.get("end"))
+    days = window.get("days") or []
+    if start is None or end is None or start == end or not days:
+        return False, None
+    minutes = when.hour * 60 + when.minute
+    weekday = when.weekday()
+    if start < end:
+        active = weekday in days and start <= minutes < end
+        if not active:
+            return False, None
+        if not want_remaining:
+            return True, None
+        remaining = (end - minutes) * 60 - when.second
+        return True, max(remaining, 0)
+    # Overnight window: from `start` on a listed day to `end` the next morning.
+    if weekday in days and minutes >= start:
+        if not want_remaining:
+            return True, None
+        remaining = ((24 * 60 - minutes) + end) * 60 - when.second
+        return True, max(remaining, 0)
+    previous = (weekday - 1) % 7
+    if previous in days and minutes < end:
+        if not want_remaining:
+            return True, None
+        remaining = (end - minutes) * 60 - when.second
+        return True, max(remaining, 0)
+    return False, None
+
+
+def schedule_state(
+    windows: Any, when: "datetime | None" = None, *, want_remaining: bool = False,
+) -> tuple[bool, int | None]:
+    """Whether any schedule window is active now, and the wait until the soonest end."""
+    from datetime import datetime as _datetime
+
+    moment = when or _datetime.now()
+    active = False
+    soonest: int | None = None
+    for window in normalize_schedule(windows):
+        window_active, remaining = schedule_window_state(window, moment, want_remaining=want_remaining)
+        if not window_active:
+            continue
+        active = True
+        if want_remaining and remaining is not None:
+            soonest = remaining if soonest is None else min(soonest, remaining)
+    return active, soonest
+
+
 DEFAULTS: dict[str, Any] = {
     "nas_lan": "",
     "nas_wan": "",           # direct WAN hostname of the NAS, if it has one (leave empty if not)
@@ -90,6 +197,10 @@ DEFAULTS: dict[str, Any] = {
                                     # specific SSH setup or bastion conflicts with it.
     "paused": False,
     "pause_until": None,          # epoch seconds, or None
+    "pause_schedule_enabled": False,  # master switch for recurring pause windows
+    "pause_schedule": [],         # list of {"days": [0..6], "start": "HH:MM", "end": "HH:MM"};
+                                  # days is Python weekday() (Mon=0) and names the START day,
+                                  # so start>=end is an overnight window (e.g. 22:00 -> 07:00)
     "local_root": "",             # absolute path to the local NASBox folder -- "" means not set up yet
                                    # (first run shows the setup dialog). Exactly one per client: there is
                                    # no per-folder add/remove anymore -- see MANUALE.md §8.
@@ -230,6 +341,14 @@ class Config:
     # --- pause helpers ---
 
     def is_paused(self) -> bool:
+        return self.is_manually_paused() or self.schedule_active_at()
+
+    def is_manually_paused(self) -> bool:
+        """Only the explicit pause (indefinite or a one-shot timer), not a schedule.
+
+        The status bar and tray use this for the Pause/Resume toggle so that a
+        recurring window never makes the toggle lie about what the user set.
+        """
         with self._lock:
             if self._data.get("paused"):
                 return True
@@ -241,6 +360,30 @@ class Config:
                 self._data["pause_until"] = None
                 self.save()
             return False
+
+    # --- scheduled pause ---
+
+    def schedule_active_at(self, when=None) -> bool:
+        if not self.get("pause_schedule_enabled"):
+            return False
+        active, _remaining = schedule_state(self.get("pause_schedule") or [], when)
+        return active
+
+    def schedule_remaining_seconds(self, when=None):
+        """Seconds until the active scheduled window ends, or None if none is active."""
+        if not self.get("pause_schedule_enabled"):
+            return None
+        active, remaining = schedule_state(
+            self.get("pause_schedule") or [], when, want_remaining=True,
+        )
+        return remaining if active else None
+
+    def pause_schedule(self) -> list[dict]:
+        with self._lock:
+            return normalize_schedule(self._data.get("pause_schedule", []))
+
+    def set_pause_schedule(self, windows: list[dict]) -> None:
+        self.set("pause_schedule", normalize_schedule(windows))
 
     def pause_indefinitely(self) -> None:
         self.set("paused", True, persist=False)
