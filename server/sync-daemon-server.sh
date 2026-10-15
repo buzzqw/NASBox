@@ -33,7 +33,7 @@
 #
 set -uo pipefail
 
-VERSION="3.20.0"
+VERSION="3.20.1"
 SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -69,10 +69,11 @@ REPOSITORY_MARKER_NAME=".nasbox-root"
 DRY_RUN="false"
 
 # Even when the retention watermark says nothing can be old enough yet, re-scan
-# the trash at least this often. It bounds the cost of a wrong/backdated entry
-# (a client clock far behind, or a manually placed file) to one extra scan a day
-# instead of never.
-PRUNE_MAX_SKIP_SECONDS=86400
+# the trash at least this often. It bounds the cost of an anomalous entry (a
+# client clock far behind, or a file placed in the trash by hand) to one extra
+# scan a week instead of never -- while letting a normal trash that is far from
+# its cutoff skip weeks of the expensive walk.
+PRUNE_MAX_SKIP_SECONDS=604800
 
 # --- logging ---
 

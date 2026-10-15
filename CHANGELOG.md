@@ -14,11 +14,11 @@ Alleggerimento del carico sul NAS e delle prestazioni del client.
   `.sync-trash` a sei cifre passa da minuti a pochi secondi e il carico di
   sistema da tempesta di fork a trascurabile. In piu', il pass registra la
   versione piu' vecchia vista e **salta del tutto la scansione** finche' nessuna
-  versione puo' ancora superare la retention (con un limite di un giorno): su un
-  archivio di due mesi con retention 90 giorni significa non scansionare piu'
-  per settimane. La pulizia delle cartelle vuote gira solo quando il pass ha
-  davvero rimosso qualcosa, e `--wait-for-revision` non crea piu' una subshell a
-  ogni secondo in attesa.
+  versione puo' ancora superare la retention (con un limite di sicurezza
+  settimanale): su un archivio di due mesi con retention 90 giorni significa non
+  scansionare piu' per settimane. La pulizia delle cartelle vuote gira solo
+  quando il pass ha davvero rimosso qualcosa, e `--wait-for-revision` non crea
+  piu' una subshell a ogni secondo in attesa.
 - Client: multiplexing SSH (ControlMaster) per riusare una sola connessione
   autenticata tra i molti comandi brevi di un ciclo. Meno handshake e, sul NAS,
   molti meno processi `sshd`/shell. Disattivabile in Impostazioni.
