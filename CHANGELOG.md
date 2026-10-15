@@ -8,6 +8,11 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 Alleggerimento del carico sul NAS e delle prestazioni del client.
 
+- Server 3.21.0: `--file-states-current`/`--file-states` cerca i percorsi
+  richiesti nel manifest con un singolo `awk` invece di un ciclo `while read`
+  pura-bash sull'intero file. Su un manifest da 67k righe/8,4 MB quella lettura
+  costava ~10s per chiamata, eseguita una volta per ogni chunk di sync; ora e'
+  al di sotto del secondo e alleggerisce sensibilmente ogni sincronizzazione.
 - Server 3.20.0: il pass orario di pruning non esegue piu' `date` una volta per
   file. Il timestamp di ogni versione e' gia' nel nome (suffisso UTC) e viene
   ora convertito in epoch con sola aritmetica intera bash; la scansione di un

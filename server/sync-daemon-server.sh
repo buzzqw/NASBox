@@ -33,7 +33,7 @@
 #
 set -uo pipefail
 
-VERSION="3.20.1"
+VERSION="3.21.0"
 SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -710,7 +710,7 @@ cmd_file_states() {
     }
     local magic count path index encoded manifest_path manifest_line protocol
     local -a paths
-    local -A requested_manifest_paths manifest_entries
+    local -A manifest_entries
     IFS= read -r -d '' magic || return 1
     IFS= read -r -d '' count || return 1
     [[ "$magic" == "FILE_STATES_V1" || "$magic" == "FILE_STATES_V2" ]] || return 1
@@ -720,7 +720,6 @@ cmd_file_states() {
         IFS= read -r -d '' path || return 1
         valid_sync_relative_path "$path" || return 1
         paths[index]="$path"
-        requested_manifest_paths["$(encode_journal_field "$path")"]=1
     done
 
     if [[ "$compact_first" == "true" ]]; then
@@ -732,14 +731,32 @@ cmd_file_states() {
         return 0
     fi
 
-    # Read the manifest once for the requested paths. Looking up each path with
-    # a separate awk scan turns a 3,000-file batch into millions of comparisons.
-    while IFS=$'\t' read -r manifest_path _manifest_digest _manifest_size _manifest_mtime _manifest_device _manifest_ts; do
-        [[ "$manifest_path" == "NASBOX_MANIFEST_V1" ]] && continue
-        if [[ -n "${requested_manifest_paths[$manifest_path]:-}" ]]; then
-            manifest_entries["$manifest_path"]="$manifest_path"$'\t'"$_manifest_digest"$'\t'"$_manifest_size"$'\t'"$_manifest_mtime"$'\t'"$_manifest_device"$'\t'"$_manifest_ts"
-        fi
-    done < "$MANIFEST_FILE"
+    # Look up the requested paths in the manifest with a single awk process.
+    # The previous pure-bash `while read` walked every manifest line on every
+    # batch; on a weak ARM NAS that alone cost ~10s per call and it runs once per
+    # sync chunk, so it dominated an active sync. awk (already required by the
+    # manifest compaction) does the same lookup in well under a second. Only the
+    # requested encoded paths are matched, and the matching lines are read back
+    # into the associative array the per-path jobs below already use.
+    local want_file match_file
+    want_file="$(mktemp "$STATE_DIR/fs-want.XXXXXX")" || return 1
+    match_file="$(mktemp "$STATE_DIR/fs-match.XXXXXX")" || { rm -f "$want_file"; return 1; }
+    for ((index = 0; index < count; index++)); do
+        printf '%s\n' "$(encode_journal_field "${paths[index]}")"
+    done > "$want_file"
+    if ! awk -F '\t' -v want_file="$want_file" '
+        BEGIN { while ((getline wline < want_file) > 0) if (wline != "") wanted[wline] = 1 }
+        FNR == 1 && $0 == "NASBOX_MANIFEST_V1" { next }
+        ($1 in wanted) { print }
+    ' "$MANIFEST_FILE" > "$match_file" 2>/dev/null; then
+        rm -f "$want_file" "$match_file"
+        return 1
+    fi
+    while IFS= read -r manifest_line; do
+        manifest_path="${manifest_line%%$'\t'*}"
+        [[ -n "$manifest_path" ]] && manifest_entries["$manifest_path"]="$manifest_line"
+    done < "$match_file"
+    rm -f "$want_file" "$match_file"
 
     # Each path's digest/size/mtime -- a full-content sha256sum for anything
     # that exists -- used to be computed one file after another; on a large
