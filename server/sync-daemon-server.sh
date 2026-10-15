@@ -33,7 +33,7 @@
 #
 set -uo pipefail
 
-VERSION="3.18.0"
+VERSION="3.19.0"
 SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -1529,18 +1529,25 @@ cmd_journal_status() {
     printf 'MANIFEST_REVISION=%s\n' "$(cat "$MANIFEST_REVISION_FILE" 2>/dev/null || echo 0)"
 }
 
+MANIFEST_REVISION=""
 read_manifest_revision() {
-    local revision
+    # Sets MANIFEST_REVISION instead of printing: the only caller is a hot
+    # one-second wait loop, and `$(read_manifest_revision)` would fork a
+    # subshell every second for every client. `raw=$(<file)` is a bash
+    # special case that reads the file in-process, with no fork either.
+    local raw
+    MANIFEST_REVISION=""
     if [[ ! -f "$MANIFEST_REVISION_FILE" ]]; then
-        printf '0'
+        MANIFEST_REVISION="0"
         return 0
     fi
-    revision=$(<"$MANIFEST_REVISION_FILE")
+    raw=$(<"$MANIFEST_REVISION_FILE")
     # Keep the value within bash arithmetic's portable signed range. The
     # revision writer only emits decimal integers, so anything else is a
     # corrupt protocol state rather than a reason to inspect SHARE_ROOT.
-    [[ "$revision" =~ ^[0-9]{1,18}$ ]] || return 1
-    printf '%s' "$((10#$revision))"
+    [[ "$raw" =~ ^[0-9]{1,18}$ ]] || return 1
+    MANIFEST_REVISION=$((10#$raw))
+    return 0
 }
 
 print_change_wait_response() {
@@ -1564,7 +1571,7 @@ cmd_wait_for_revision() {
         return 2
     fi
 
-    current=$(read_manifest_revision) || {
+    read_manifest_revision && current="$MANIFEST_REVISION" || {
         print_change_wait_response "ERROR" "0"
         printf 'wait revision: manifest.revision non valido\n' >&2
         return 1
@@ -1583,7 +1590,7 @@ cmd_wait_for_revision() {
         use_inotify="true"
     fi
     while :; do
-        current=$(read_manifest_revision) || {
+        read_manifest_revision && current="$MANIFEST_REVISION" || {
             print_change_wait_response "ERROR" "0"
             printf 'wait revision: manifest.revision non valido\n' >&2
             return 1
@@ -1611,7 +1618,7 @@ cmd_wait_for_revision() {
                 continue
             fi
             if (( event_status == 2 )); then
-                current=$(read_manifest_revision) || {
+                read_manifest_revision && current="$MANIFEST_REVISION" || {
                     print_change_wait_response "ERROR" "0"
                     printf 'wait revision: manifest.revision non valido\n' >&2
                     return 1
@@ -1658,25 +1665,56 @@ TS_SUFFIX_REGEX='-([0-9]{4}-[0-9]{2}-[0-9]{2}--[0-9]{2}-[0-9]{2}-[0-9]{2})(-([0-
 # not re-read per file), only converted to a "X.Y giorni" string for the log
 # line where a human actually needs to read it -- via bash arithmetic, still
 # no extra fork.
+# Days between 1970-01-01 and the given proleptic-Gregorian civil date (UTC),
+# via Howard Hinnant's days_from_civil. Pure 64-bit bash integer math, valid for
+# any year a trash name can carry, and -- crucially -- no fork. The result is
+# left in CIVIL_DAYS (rather than printed) so callers never need a `$(...)`
+# subshell; that substitution, not the arithmetic, is what used to make a
+# six-figure pruning walk fork once per file.
+CIVIL_DAYS=0
+civil_days_since_epoch() {
+    local y=$((10#$1)) m=$((10#$2)) d=$((10#$3))
+    (( m <= 2 )) && (( y-- ))
+    local era yoe doy doe
+    if (( y >= 0 )); then era=$(( y / 400 )); else era=$(( (y - 399) / 400 )); fi
+    yoe=$(( y - era * 400 ))
+    local mp=$(( m > 2 ? m - 3 : m + 9 ))
+    doy=$(( (153 * mp + 2) / 5 + d - 1 ))
+    doe=$(( yoe * 365 + yoe / 4 - yoe / 100 + doy ))
+    CIVIL_DAYS=$(( era * 146097 + doe - 719468 ))
+}
+
+# Epoch seconds a trashed version represents, parsed from its filename suffix
+# (falling back to the file mtime when the name carries no timestamp). Sets the
+# global FILE_EPOCH ("" when unknown) instead of printing, so the hot pruning
+# walk can call it once per file with no subshell and no `date` fork.
+#
+# The modern client stamps every version with a UTC "…-HHMMSSZ" suffix, so those
+# names -- the overwhelming majority -- are resolved entirely in integer
+# arithmetic. Only legacy names with no UTC marker (a handful, historically)
+# still need the `date` built-in, which is a dependency the daemon already has.
+FILE_EPOCH=""
 file_epoch() {
     local file="$1"
     local base="${file##*/}"
+    FILE_EPOCH=""
     if [[ "$base" =~ $TS_SUFFIX_REGEX ]]; then
         local ts="${BASH_REMATCH[1]}"
         local utc_suffix="${BASH_REMATCH[2]}"
         local y="${ts:0:4}" mo="${ts:5:2}" d="${ts:8:2}" h="${ts:12:2}" mi="${ts:15:2}" s="${ts:18:2}"
-        local epoch
         if [[ -n "$utc_suffix" ]]; then
-            epoch=$(date -u -d "${y}-${mo}-${d} ${h}:${mi}:${s}" '+%s' 2>/dev/null)
-        else
-            epoch=$(date -d "${y}-${mo}-${d} ${h}:${mi}:${s}" '+%s' 2>/dev/null)
+            civil_days_since_epoch "$y" "$mo" "$d"
+            FILE_EPOCH=$(( CIVIL_DAYS * 86400 + 10#$h * 3600 + 10#$mi * 60 + 10#$s ))
+            return
         fi
-        if [[ -n "$epoch" ]]; then
-            echo "$epoch"
+        local legacy
+        legacy=$(date -d "${y}-${mo}-${d} ${h}:${mi}:${s}" '+%s' 2>/dev/null)
+        if [[ -n "$legacy" ]]; then
+            FILE_EPOCH="$legacy"
             return
         fi
     fi
-    stat -c '%Y' "$file" 2>/dev/null || stat -f '%m' "$file" 2>/dev/null
+    FILE_EPOCH=$(stat -c '%Y' "$file" 2>/dev/null || stat -f '%m' "$file" 2>/dev/null)
 }
 
 # "3.4" style day count from a whole-second age, computed with bash integer
@@ -1764,7 +1802,8 @@ collect_prune_candidates() {
     # This metadata walk can take minutes on a large trash directory. It must
     # remain outside SYNC_LOCK_FILE; paths are checked again before deletion.
     while IFS= read -r -d '' file; do
-        epoch="$(file_epoch "$file")"
+        file_epoch "$file"
+        epoch="$FILE_EPOCH"
         [[ -z "$epoch" ]] && continue
         age_seconds=$(( now - epoch ))
         if (( age_seconds > retention_seconds )); then
@@ -1781,6 +1820,7 @@ collect_prune_candidates() {
 prune_candidates() {
     local trash="$1" candidates="$2"
     local now retention_seconds file epoch age_seconds rel age_display
+    local removed=0
     now=$(date '+%s')
     retention_seconds=$(( RETENTION_DAYS * 86400 ))
 
@@ -1788,7 +1828,8 @@ prune_candidates() {
         # The unlocked scan may have raced a transfer; only remove a candidate
         # that is still old while this shared lock excludes transfers.
         [[ -f "$file" ]] || continue
-        epoch="$(file_epoch "$file")"
+        file_epoch "$file"
+        epoch="$FILE_EPOCH"
         [[ -n "$epoch" ]] || continue
         age_seconds=$(( now - epoch ))
         (( age_seconds > retention_seconds )) || continue
@@ -1796,13 +1837,18 @@ prune_candidates() {
         age_display="$(format_age_days "$age_seconds")"
         if [[ "$DRY_RUN" == "true" ]]; then
             log INFO "[dry-run] rimuoverei versione: $rel (età ${age_display}gg > retention ${RETENTION_DAYS}gg)"
+            removed=$(( removed + 1 ))
         elif rm -f "$file"; then
             log INFO "Rimossa versione storica: $rel (età ${age_display}gg > retention ${RETENTION_DAYS}gg)"
             log_event "PRUNE_REMOTE_TRASH" "$rel" "age=${age_display}d retention=${RETENTION_DAYS}d"
+            removed=$(( removed + 1 ))
         else
             log ERROR "Impossibile rimuovere versione storica: $rel"
         fi
     done < "$candidates"
+    # Hand the count back so the caller only pays for the empty-directory sweep
+    # when this pass actually emptied something.
+    printf '%d' "$removed"
 }
 
 collect_empty_dirs() {
@@ -1875,6 +1921,7 @@ run_once_pass() {
     }
     log INFO "sync-daemon-server v$VERSION: avvio pass di pruning (SHARE_ROOT=$SHARE_ROOT, retention=${RETENTION_DAYS}gg, dry-run=$DRY_RUN)"
     local trash file_candidates dir_candidates staging_candidates
+    local removed=0
     trash="$(trash_dir)"
     if [[ -d "$trash" ]]; then
         if [[ "$RETENTION_DAYS" != "0" ]]; then
@@ -1883,7 +1930,7 @@ run_once_pass() {
             if [[ -s "$file_candidates" ]]; then
                 exec 8>"$SYNC_LOCK_FILE" || { rm -f "$file_candidates"; return 1; }
                 if flock -n 8; then
-                    prune_candidates "$trash" "$file_candidates"
+                    removed="$(prune_candidates "$trash" "$file_candidates")"
                     flock -u 8
                 else
                     log INFO "Pruning rimandato: trasferimento NASBox in corso."
@@ -1892,19 +1939,25 @@ run_once_pass() {
             fi
             rm -f "$file_candidates"
 
-            dir_candidates="$(mktemp "$STATE_DIR/prune-dirs.XXXXXX")" || return 1
-            collect_empty_dirs "$trash" "$dir_candidates"
-            if [[ -s "$dir_candidates" ]]; then
-                exec 8>"$SYNC_LOCK_FILE" || { rm -f "$dir_candidates"; return 1; }
-                if flock -n 8; then
-                    remove_empty_dirs "$dir_candidates"
-                    flock -u 8
-                else
-                    log INFO "Pulizia cartelle storiche rimandata: trasferimento NASBox in corso."
+            # collect_empty_dirs is a second full traversal of the trash tree.
+            # It can only find something to remove if this pass removed files, so
+            # skip it entirely on the common "nothing is old enough yet" pass --
+            # which is most hourly passes on a trash that is already caught up.
+            if [[ "$removed" =~ ^[0-9]+$ ]] && (( removed > 0 )); then
+                dir_candidates="$(mktemp "$STATE_DIR/prune-dirs.XXXXXX")" || return 1
+                collect_empty_dirs "$trash" "$dir_candidates"
+                if [[ -s "$dir_candidates" ]]; then
+                    exec 8>"$SYNC_LOCK_FILE" || { rm -f "$dir_candidates"; return 1; }
+                    if flock -n 8; then
+                        remove_empty_dirs "$dir_candidates"
+                        flock -u 8
+                    else
+                        log INFO "Pulizia cartelle storiche rimandata: trasferimento NASBox in corso."
+                    fi
+                    exec 8>&-
                 fi
-                exec 8>&-
+                rm -f "$dir_candidates"
             fi
-            rm -f "$dir_candidates"
         fi
     else
         log INFO "Nessuno storico ancora presente ($trash non esiste)."

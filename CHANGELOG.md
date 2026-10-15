@@ -4,6 +4,14 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+- Server 3.19.0: il pass orario di pruning non esegue piu' `date` una volta per
+  file. Il timestamp di ogni versione e' gia' nel nome (suffisso UTC) e viene
+  ora convertito in epoch con sola aritmetica intera bash; la scansione di un
+  `.sync-trash` a sei cifre passa da minuti a pochi secondi e il carico di
+  sistema da tempesta di fork a trascurabile. La pulizia delle cartelle vuote
+  gira solo quando il pass ha davvero rimosso qualcosa, e `--wait-for-revision`
+  non crea piu' una subshell a ogni secondo in attesa.
+
 ## 1.23.6 - 2026-09-19
 
 - Evitato che un cambio asincrono della connessione NAS durante un ciclo di
