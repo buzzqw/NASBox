@@ -128,6 +128,8 @@ class SyncStateStore:
     def __init__(self, cfg: Config) -> None:
         self.cfg = cfg
         self._lock = threading.RLock()
+        self._local = threading.local()
+        self._device_id_cache: str | None = None
         paths.ensure_dirs()
         self._db_path = paths.sync_state_db_file()
         self._init_db()
@@ -138,14 +140,47 @@ class SyncStateStore:
         conn.execute("PRAGMA busy_timeout=10000")
         return conn
 
+    def _thread_connection(self) -> sqlite3.Connection:
+        conn = getattr(self._local, "connection", None)
+        if conn is None:
+            conn = self._connect()
+            self._local.connection = conn
+        return conn
+
     @contextmanager
     def _connection(self):
-        conn = self._connect()
+        # One SQLite connection per thread, reused across calls. The previous
+        # implementation opened, committed and closed a brand-new connection for
+        # every single query -- and `local_fingerprint` alone did that several
+        # times per reconciled file -- which dominated a large import. Commits
+        # happen only at the outermost block on a thread (nested uses share the
+        # same transaction, so atomicity is preserved), and a failure rolls the
+        # whole outermost block back.
+        conn = self._thread_connection()
+        depth = getattr(self._local, "depth", 0)
+        self._local.depth = depth + 1
         try:
             yield conn
-            conn.commit()
+            if depth == 0:
+                conn.commit()
+        except BaseException:
+            if depth == 0:
+                conn.rollback()
+            raise
         finally:
-            conn.close()
+            self._local.depth = depth
+
+    def close(self) -> None:
+        """Release this thread's cached connection (best-effort cleanup)."""
+        conn = getattr(self._local, "connection", None)
+        if conn is not None:
+            try:
+                conn.close()
+            except sqlite3.Error:
+                pass
+            finally:
+                self._local.connection = None
+                self._local.depth = 0
 
     def _init_db(self) -> None:
         with self._connection() as conn:
@@ -280,12 +315,18 @@ class SyncStateStore:
         return hashlib.sha256(identity.encode()).hexdigest() if repository_id else self._legacy_repository()
 
     def device_id(self) -> str:
+        # Cached after the first read: this is called once per reconciled file
+        # (see local_fingerprint) and never changes for the life of the store.
+        if self._device_id_cache is not None:
+            return self._device_id_cache
         with self._lock, self._connection() as conn:
             row = conn.execute("SELECT value FROM meta WHERE key = 'device_id'").fetchone()
             if row:
+                self._device_id_cache = row[0]
                 return row[0]
             value = uuid.uuid4().hex[:8]
             conn.execute("INSERT INTO meta(key, value) VALUES ('device_id', ?)", (value,))
+            self._device_id_cache = value
             return value
 
     def clear_scheduler_queue(self, device_id: str) -> None:

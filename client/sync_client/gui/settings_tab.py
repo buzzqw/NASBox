@@ -201,6 +201,10 @@ class SettingsTab(QWidget):
         self.metrics_refresh_spin.setValue(int(cfg.get("metrics_refresh_seconds") or 15))
         self.metrics_refresh_spin.setToolTip(t("settings.metrics_refresh_note"))
         cadence_form.addRow(t("settings.metrics_refresh_label"), self.metrics_refresh_spin)
+        self.multiplexing_checkbox = QCheckBox(t("settings.multiplexing_checkbox"))
+        self.multiplexing_checkbox.setChecked(bool(cfg.get("ssh_multiplexing", True)))
+        self.multiplexing_checkbox.setToolTip(t("settings.multiplexing_tooltip"))
+        cadence_form.addRow(self.multiplexing_checkbox)
         cadence_note = QLabel(t("settings.cadence_note"))
         cadence_note.setWordWrap(True)
         cadence_form.addRow(cadence_note)
@@ -362,6 +366,7 @@ class SettingsTab(QWidget):
             spin.valueChanged.connect(self._mark_dirty)
         for checkbox in (
             self.delete_enabled, self.notify_sync_checkbox, self.animate_sync_checkbox,
+            self.multiplexing_checkbox,
         ):
             checkbox.toggled.connect(self._mark_dirty)
         self.language_combo.currentIndexChanged.connect(self._mark_dirty)
@@ -427,6 +432,7 @@ class SettingsTab(QWidget):
         self._apply_metrics_refresh_interval()
         self.cfg.set("notify_sync_completion", self.notify_sync_checkbox.isChecked(), persist=False)
         self.cfg.set("animate_sync_icon", self.animate_sync_checkbox.isChecked(), persist=False)
+        self.cfg.set("ssh_multiplexing", self.multiplexing_checkbox.isChecked(), persist=False)
         self.cfg.set("tray_single_click", self.tray_click_combo.currentData() or "menu", persist=False)
         code = self.language_combo.currentData()
         if code:

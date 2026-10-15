@@ -387,6 +387,20 @@ STRINGS: dict[str, dict[str, str]] = {
         "it": "Intervallo della dashboard read-only. Non esegue scansioni dei file.",
         "en": "Read-only dashboard interval. It does not scan files.",
     },
+    "settings.multiplexing_checkbox": {
+        "it": "Riutilizza una sola connessione SSH (piu' leggero sul NAS)",
+        "en": "Reuse a single SSH connection (lighter on the NAS)",
+    },
+    "settings.multiplexing_tooltip": {
+        "it": "Multiplexing SSH (ControlMaster): i molti comandi brevi di un ciclo di "
+              "sincronizzazione condividono una connessione autenticata invece di aprirne "
+              "una nuova ogni volta. Riduce handshake e, sul NAS, i processi sshd/shell. "
+              "Disattivalo solo se il tuo SSH o un bastion lo rifiuta.",
+        "en": "SSH multiplexing (ControlMaster): the many short commands of a sync cycle "
+              "share one authenticated connection instead of opening a new one each time. "
+              "Cuts handshakes and, on the NAS, sshd/shell forks. Disable only if your SSH "
+              "setup or a bastion rejects it.",
+    },
 
     "settings.feedback_title": {"it": "Feedback sincronizzazione", "en": "Sync feedback"},
     "settings.notify_sync_checkbox": {

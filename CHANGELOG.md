@@ -4,6 +4,10 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 1.23.11 - 2026-10-15
+
+Alleggerimento del carico sul NAS e delle prestazioni del client.
+
 - Server 3.19.0: il pass orario di pruning non esegue piu' `date` una volta per
   file. Il timestamp di ogni versione e' gia' nel nome (suffisso UTC) e viene
   ora convertito in epoch con sola aritmetica intera bash; la scansione di un
@@ -11,6 +15,22 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
   sistema da tempesta di fork a trascurabile. La pulizia delle cartelle vuote
   gira solo quando il pass ha davvero rimosso qualcosa, e `--wait-for-revision`
   non crea piu' una subshell a ogni secondo in attesa.
+- Client: multiplexing SSH (ControlMaster) per riusare una sola connessione
+  autenticata tra i molti comandi brevi di un ciclo. Meno handshake e, sul NAS,
+  molti meno processi `sshd`/shell. Disattivabile in Impostazioni.
+- Client: quando il change feed conferma che nulla e' cambiato, il pull non
+  acquisisce piu' il lease NAS ne' ripete i controlli di sicurezza: elimina il
+  costo di controllo piu' alto di un client inattivo. La revisione riportata
+  dal feed evita anche una lettura di stato ridondante.
+- Client: i chunk push gia' noti come "conservativi" non tentano piu' la
+  pianificazione staging speculativa (un lease e un batch di stati remoti in
+  meno per chunk).
+- Client: corretta una crescita quadratica nel push. La ricerca del candidato
+  staging e la risoluzione dei percorsi mancanti rileggevano l'intera baseline
+  per ogni percorso; ora la baseline viene letta una volta per pass.
+- Client: lo stato SQLite usa una connessione persistente per thread e memorizza
+  `device_id`, eliminando un ciclo apri/commit/chiudi per file riconciliato e
+  uno per ogni lettura dell'identificativo dispositivo.
 
 ## 1.23.6 - 2026-09-19
 

@@ -61,6 +61,10 @@ DEFAULT_SYSTEM_EXCLUDES = [
 MAX_TRANSFER_ERROR_BYTES = 64 * 1024
 MAX_PENDING_TRANSFER_ITEMS = 4096
 
+# Resolved once, lazily by _multiplex_socket_dir(): the directory for the SSH
+# ControlMaster sockets, "" if unusable, None before the first resolution.
+_MULTIPLEX_DIR: Optional[str] = None
+
 # rsync's default --delete mode (--delete-during) applies deletions incrementally,
 # directory by directory, as the transfer proceeds -- using a source-side file list
 # captured once at the very start. A local file created *during* an in-flight pull
@@ -421,6 +425,31 @@ def resolve_connection(cfg: Config) -> Optional[NasConnection]:
     return None
 
 
+def _multiplex_socket_dir() -> Optional[str]:
+    """Directory holding the SSH ControlMaster sockets, or None if unusable.
+
+    Multiplexing turns a burst of independent one-shot SSH calls (lock, hash
+    batch, journal, confirm...) into channels of a single authenticated
+    connection. That removes a full TCP+SSH handshake and -- on the NAS side --
+    an sshd plus login-shell fork per call, which is the dominant control-plane
+    cost of a sync. The path is kept short (unix socket paths are length
+    limited) and per-uid so concurrent users never collide.
+    """
+    global _MULTIPLEX_DIR
+    if _MULTIPLEX_DIR is not None:
+        return _MULTIPLEX_DIR or None
+    try:
+        directory = os.path.join(tempfile.gettempdir(), f"nasbox-ssh-{os.getuid()}")
+        os.makedirs(directory, mode=0o700, exist_ok=True)
+        os.chmod(directory, 0o700)
+        _MULTIPLEX_DIR = directory
+    except (OSError, AttributeError):
+        # No uid (non-POSIX) or an unwritable temp dir: fall back to plain SSH
+        # rather than ever failing a transfer over an optimization.
+        _MULTIPLEX_DIR = ""
+    return _MULTIPLEX_DIR or None
+
+
 def ssh_opts(cfg: Config, conn: NasConnection) -> list[str]:
     port = int(cfg.get("ssh_port") or 22)
     opts = [
@@ -429,6 +458,18 @@ def ssh_opts(cfg: Config, conn: NasConnection) -> list[str]:
         "-o", "ConnectTimeout=15",
         "-o", "ServerAliveInterval=30",
     ]
+    if cfg.get("ssh_multiplexing", True):
+        socket_dir = _multiplex_socket_dir()
+        if socket_dir:
+            # %C is a connection-unique hash (local host, user, host, port), so
+            # direct and bastion routes to the same NAS share one master, and
+            # two different NAS hosts never do. ControlPersist lets the master
+            # close by itself a minute after the last command.
+            opts += [
+                "-o", "ControlMaster=auto",
+                "-o", f"ControlPath={socket_dir}/cm-%C",
+                "-o", "ControlPersist=60",
+            ]
     known_hosts = (cfg.get("ssh_known_hosts") or "").strip()
     if cfg.get("ssh_host_key_pinned") and known_hosts:
         opts += ["-o", f"UserKnownHostsFile={known_hosts}"]
@@ -1262,21 +1303,32 @@ def _decode_manifest_path(value: bytes) -> str:
 
 def remote_manifest_snapshot(
     cfg: Config, conn: NasConnection, previous_revision: int,
+    known_revision: int | None = None,
 ) -> tuple[int, dict[str, RemoteState] | None] | None:
-    """Fetch the compact manifest only when its logical revision changed."""
+    """Fetch the compact manifest only when its logical revision changed.
+
+    When the change feed has already reported the new revision (`known_revision`
+    greater than `previous_revision`), the extra `--journal-status` probe is
+    skipped: the export below is authoritative for the entries anyway, and the
+    returned revision is never ahead of the truth, so a further change during
+    the export is caught by the next feed cycle.
+    """
     script_path = (cfg.get("remote_server_script") or "").strip()
     if not script_path:
         return None
-    ok, status, _error = run_remote_script(
-        cfg, conn, script_path, ["--journal-status"], timeout=30,
-    )
-    if not ok:
-        return None
-    values = dict(line.split("=", 1) for line in status.splitlines() if "=" in line)
-    try:
-        revision = int(values.get("MANIFEST_REVISION", ""))
-    except ValueError:
-        return None
+    if known_revision is not None and known_revision > previous_revision:
+        revision = known_revision
+    else:
+        ok, status, _error = run_remote_script(
+            cfg, conn, script_path, ["--journal-status"], timeout=30,
+        )
+        if not ok:
+            return None
+        values = dict(line.split("=", 1) for line in status.splitlines() if "=" in line)
+        try:
+            revision = int(values.get("MANIFEST_REVISION", ""))
+        except ValueError:
+            return None
     if revision == previous_revision:
         return revision, None
 

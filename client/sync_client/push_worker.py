@@ -304,17 +304,28 @@ class PushWorker(TransferWorker):
                     max_deletes = 1000
 
                 ordered_paths = sorted(resolved_paths)
+                baseline_pairs = self._baseline_content_pairs()
                 staging_candidates = [
-                    path for path in ordered_paths if self._is_staging_candidate(path)
+                    path for path in ordered_paths
+                    if self._is_staging_candidate(path, baseline_pairs)
                 ]
                 staging_candidate_set = set(staging_candidates)
                 conservative_paths = [
                     path for path in ordered_paths if path not in staging_candidate_set
                 ]
-                chunks = [
-                    *_chunked(staging_candidates, STAGING_CHUNK_SIZE),
-                    *_chunked(conservative_paths, PUSH_CHUNK_SIZE),
-                ] if ordered_paths else [[]]
+                if ordered_paths:
+                    # Each chunk already knows whether it is a pure batch of new
+                    # files (worth trying to stage outside the lease) or a batch
+                    # that contains existing paths (which must plan under the
+                    # lease). Passing that in lets a conservative chunk skip the
+                    # speculative staging plan entirely -- one lease and one
+                    # remote file-state batch saved per conservative chunk.
+                    chunks = [
+                        *((paths, True) for paths in _chunked(staging_candidates, STAGING_CHUNK_SIZE)),
+                        *((paths, False) for paths in _chunked(conservative_paths, PUSH_CHUNK_SIZE)),
+                    ]
+                else:
+                    chunks = [([], True)]
                 has_work = bool(ordered_paths)
                 if has_work:
                     self.batch_size_known.emit(len(ordered_paths))
@@ -322,10 +333,10 @@ class PushWorker(TransferWorker):
                 overall_ok = True
                 deletes_committed = 0
                 remote_progress_done = 0
-                for chunk_index, chunk_paths in enumerate(chunks):
+                for chunk_index, (chunk_paths, try_staging) in enumerate(chunks):
                     chunk_ok, deleted_count, delete_limit_hit = self._run_chunk(
                         chunk_index, chunk_paths, remote_progress_done, len(ordered_paths),
-                        max_deletes, deletes_committed, watcher,
+                        max_deletes, deletes_committed, watcher, try_staging=try_staging,
                     )
                     deletes_committed += deleted_count
                     remote_progress_done += len(chunk_paths)
@@ -396,7 +407,7 @@ class PushWorker(TransferWorker):
     def _run_chunk(
         self, chunk_index: int, chunk_paths: list[str], remote_progress_done: int,
         remote_progress_total: int, max_deletes: int, deletes_committed: int, watcher,
-        *, allow_large_staging: bool = True,
+        *, allow_large_staging: bool = True, try_staging: bool = True,
     ) -> tuple[bool, int, bool]:
         """Process one chunk under a short-lived NAS lock.
 
@@ -406,11 +417,12 @@ class PushWorker(TransferWorker):
         one PC from monopolizing the repository for an unbounded time.
         """
         chunk_set = set(chunk_paths)
-        staged_result = self._try_run_staged_chunk(
-            chunk_set, remote_progress_done, remote_progress_total, chunk_index, watcher,
-        )
-        if staged_result is not None:
-            return staged_result
+        if try_staging:
+            staged_result = self._try_run_staged_chunk(
+                chunk_set, remote_progress_done, remote_progress_total, chunk_index, watcher,
+            )
+            if staged_result is not None:
+                return staged_result
         if allow_large_staging and len(chunk_set) > PUSH_CHUNK_SIZE:
             # An apparently new path exists on the NAS after all. Rebuild the
             # conservative plan in small chunks, so an out-of-band edit cannot
@@ -843,6 +855,9 @@ class PushWorker(TransferWorker):
             paths.discard("")
             paths.update(self.sync_state.changed_paths(self.cfg.local_root(), on_progress=self._on_hash_progress))
         resolved: set[str] = set()
+        # Computed at most once: previously every missing path re-read the whole
+        # baseline with all_entries(), which is O(missing paths x baseline).
+        baseline_cache: dict | None = None
         for path in paths:
             if not path or rsync_ops.path_is_excluded(self.cfg, path):
                 continue
@@ -852,7 +867,9 @@ class PushWorker(TransferWorker):
             except FileNotFoundError:
                 # A missing path with baseline descendants is a moved/deleted
                 # directory event. Queue its files, not the directory itself.
-                baseline = self.sync_state.all_entries()
+                if baseline_cache is None:
+                    baseline_cache = self.sync_state.all_entries()
+                baseline = baseline_cache
                 if any(candidate.startswith(path.rstrip("/") + "/") for candidate in baseline):
                     self._directory_events.add(path)
                     resolved.update(
@@ -888,19 +905,29 @@ class PushWorker(TransferWorker):
             return 0
         return info.st_size if stat.S_ISREG(info.st_mode) else 0
 
-    def _is_staging_candidate(self, relative_path: str) -> bool:
+    def _is_staging_candidate(
+        self, relative_path: str, baseline_pairs: set[tuple[str, int]] | None = None,
+    ) -> bool:
         local = self.sync_state.local_fingerprint(self.cfg.local_root(), relative_path)
         baseline = self.sync_state.get(relative_path)
         if local is None or (baseline is not None and not baseline.is_tombstone):
             return False
         # Keep a possible rename source in the same reconciliation chunk. A
         # staging-only destination would otherwise be separated from the
-        # missing baseline path and could only be uploaded, never moved.
-        return not any(
-            candidate != relative_path and not fingerprint.is_tombstone
-            and fingerprint.digest == local.digest and fingerprint.size == local.size
-            for candidate, fingerprint in self.sync_state.all_entries().items()
-        )
+        # missing baseline path and could only be uploaded, never moved. The
+        # set of baseline (digest, size) pairs is computed once per pass: doing
+        # a full all_entries() scan per path made this O(paths x baseline), the
+        # dominant local cost of a large import.
+        if baseline_pairs is None:
+            baseline_pairs = self._baseline_content_pairs()
+        return (local.digest, local.size) not in baseline_pairs
+
+    def _baseline_content_pairs(self) -> set[tuple[str, int]]:
+        return {
+            (fingerprint.digest, fingerprint.size)
+            for fingerprint in self.sync_state.all_entries().values()
+            if not fingerprint.is_tombstone
+        }
 
     def _build_plan(
         self, relative_paths: set[str],

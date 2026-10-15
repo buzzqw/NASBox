@@ -84,6 +84,10 @@ DEFAULTS: dict[str, Any] = {
     "ssh_known_hosts": "",          # dedicated known_hosts file after explicit host-key pinning
     "ssh_host_key_pinned": False,
     "ssh_jump_key_pinned": False,
+    "ssh_multiplexing": True,       # reuse one SSH connection (ControlMaster) across the many
+                                    # short remote commands of a sync -- far less handshake and,
+                                    # on the NAS, far fewer sshd/shell forks. Disable only if a
+                                    # specific SSH setup or bastion conflicts with it.
     "paused": False,
     "pause_until": None,          # epoch seconds, or None
     "local_root": "",             # absolute path to the local NASBox folder -- "" means not set up yet

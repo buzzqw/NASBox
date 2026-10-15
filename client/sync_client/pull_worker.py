@@ -191,6 +191,17 @@ class PullWorker(TransferWorker):
                 self.cfg, self._conn, self._last_manifest_revision,
                 on_start=self._set_current_process,
             )
+            if feed_result is not None and feed_result.result == "TIMEOUT":
+                # The read-only wait already proved nothing was committed on the
+                # NAS since our last revision. Waking the whole pull path just to
+                # re-read that same revision -- acquiring the transfer lease,
+                # replaying the journal, re-validating safety and exporting
+                # nothing -- was pure idle control-plane load, the most expensive
+                # part of a client that is simply sitting still. Skip it unless
+                # the periodic full reconciliation is due.
+                if now - self._last_full_pull < LEGACY_FULL_PULL_INTERVAL_SECONDS:
+                    self._last_pull = now
+                    return
             if feed_result is None and now - self._last_pull < poll_interval:
                 return
         elif now - self._last_pull < poll_interval:
@@ -240,8 +251,17 @@ class PullWorker(TransferWorker):
                         return
                     run_ts = rsync_ops.new_run_ts()
                     self._self_cancelled = False
+                    # A CHANGED feed response already told us the new revision,
+                    # so the snapshot can skip its own --journal-status probe and
+                    # go straight to the export.
+                    known_revision = (
+                        feed_result.revision
+                        if feed_result is not None and feed_result.result == "CHANGED"
+                        else None
+                    )
                     snapshot = rsync_ops.remote_manifest_snapshot(
                         self.cfg, self._conn, self._last_manifest_revision,
+                        known_revision=known_revision,
                     )
                     if snapshot is None:
                         raise rsync_ops.RemoteLockError("impossibile leggere la revisione del manifest NAS")

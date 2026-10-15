@@ -61,6 +61,37 @@ class ChangeFeedClientTests(unittest.TestCase):
             ):
                 self.assertIsNone(rsync_ops.wait_for_remote_revision(cfg, rsync_ops.NasConnection("nas"), 7, 1))
 
+    def test_manifest_snapshot_uses_journal_status_without_a_known_revision(self) -> None:
+        with ClientEnvironment():
+            cfg = Config()
+            cfg.set("remote_server_script", "/tmp/server.sh", persist=False)
+            status = (
+                "JOURNAL_FILE=/x\nMANIFEST_FILE=/y\nJOURNAL_BYTES=1\n"
+                "MANIFEST_BYTES=2\nJOURNAL_MAX_BYTES=3\nMANIFEST_REVISION=7\n"
+            )
+            with patch.object(rsync_ops, "run_remote_script", return_value=(True, status, "")) as status_call, \
+                    patch.object(rsync_ops, "run_remote_script_bytes") as export_call:
+                result = rsync_ops.remote_manifest_snapshot(cfg, rsync_ops.NasConnection("nas"), 7)
+            status_call.assert_called_once()
+            export_call.assert_not_called()
+            self.assertEqual(result, (7, None))
+
+    def test_manifest_snapshot_skips_journal_status_when_feed_knows_the_revision(self) -> None:
+        with ClientEnvironment():
+            cfg = Config()
+            cfg.set("remote_server_script", "/tmp/server.sh", persist=False)
+            with patch.object(rsync_ops, "run_remote_script") as status_call, \
+                    patch.object(
+                        rsync_ops, "run_remote_script_bytes",
+                        return_value=(True, b"NASBOX_MANIFEST_V1\n", ""),
+                    ) as export_call:
+                result = rsync_ops.remote_manifest_snapshot(
+                    cfg, rsync_ops.NasConnection("nas"), 7, known_revision=9,
+                )
+            status_call.assert_not_called()
+            export_call.assert_called_once()
+            self.assertEqual(result, (9, {}))
+
 
 class ChangeFeedServerTests(unittest.TestCase):
     def test_revision_already_changed_returns_without_waiting(self) -> None:
