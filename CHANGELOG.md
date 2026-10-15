@@ -4,6 +4,16 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 1.23.14 - 2026-10-15
+
+- Nuova **cronologia per-file**: dalla scheda Cronologia, "Versioni del file…"
+  apre una timeline del file selezionato che unisce le versioni locali e quelle
+  sul NAS, con ripristino diretto.
+- Nuovo **ripristino da conflitto**: nella scheda Conflitti, "Ripristina
+  versione…" apre la cronologia del file in conflitto e ripristina una versione
+  precedente come originale; le copie di conflitto vengono spostate nello
+  storico locale e la versione ripristinata viene marcata per la sincronizzazione.
+
 ## 1.23.13 - 2026-10-15
 
 - Nuova funzionalita': **selezione delle cartelle da sincronizzare** (selective

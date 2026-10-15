@@ -14,6 +14,7 @@ from ..engine import SyncEngine
 from ..i18n import t
 from ..logger import EventLogger
 from .async_utils import run_in_background
+from .dialogs import FileVersionDialog
 from .format_utils import human_size
 
 ROOT_GROUP_KEY = ""  # dirname() of a file directly in the NASBox root
@@ -126,6 +127,10 @@ class HistoryTab(QWidget):
         self.restore_btn.setToolTip(t("history.restore_tooltip"))
         self.restore_btn.clicked.connect(self._restore_selected)
         buttons_row.addWidget(self.restore_btn)
+        self.file_versions_btn = QPushButton(t("history.file_versions_btn"))
+        self.file_versions_btn.setToolTip(t("history.file_versions_tooltip"))
+        self.file_versions_btn.clicked.connect(self._file_versions_selected)
+        buttons_row.addWidget(self.file_versions_btn)
         self.delete_btn = QPushButton(t("history.delete_btn"))
         self.delete_btn.setToolTip(t("history.delete_tooltip"))
         self.delete_btn.clicked.connect(self._delete_selected)
@@ -378,6 +383,26 @@ class HistoryTab(QWidget):
         ) != QMessageBox.StandardButton.Yes:
             return
         self._restore_local_many(versions, local_root)
+
+    def _file_versions_selected(self) -> None:
+        """Open the focused version timeline (local + NAS) for the selected file."""
+        local_root = self.cfg.local_root()
+        if not local_root:
+            QMessageBox.warning(self, t("history.not_configured_title"), t("history.not_configured_body"))
+            return
+        relative = None
+        for item in self.tree.selectedItems():
+            version = item.data(0, VERSION_ROLE)
+            if version is not None:
+                relative = version.relative_path
+                break
+        if relative is None:
+            QMessageBox.information(self, t("history.file_versions_title"), t("history.file_versions_select"))
+            return
+        dialog = FileVersionDialog(
+            self, self.cfg, self.engine, relative, local_root, on_restored=self.refresh,
+        )
+        dialog.exec()
 
     def _restore_item(self, item: QTreeWidgetItem) -> None:
         local_root = self.cfg.local_root()

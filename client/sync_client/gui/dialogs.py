@@ -5,15 +5,17 @@ from pathlib import Path
 from PyQt6.QtCore import Qt, QTime
 from PyQt6.QtWidgets import (
     QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout,
-    QGridLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QListWidget,
-    QListWidgetItem, QMessageBox, QPushButton, QSpinBox, QTimeEdit,
-    QVBoxLayout, QWizard, QWizardPage,
+    QGridLayout, QGroupBox, QHBoxLayout, QHeaderView, QLabel, QLineEdit,
+    QListWidget, QListWidgetItem, QMessageBox, QPushButton, QSpinBox, QTimeEdit,
+    QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWizard, QWizardPage,
 )
 
 from .. import rsync_ops
+from .. import trash
 from ..i18n import t
 from ..selective import list_directories, minimize_excluded
 from .async_utils import run_in_background
+from .format_utils import human_size
 
 PAUSE_PRESETS = [
     ("dialogs.pause.preset_15m", 15 * 60),
@@ -110,6 +112,168 @@ class ScheduleWindowDialog(QDialog):
 
     def window(self) -> dict | None:
         return self._window
+
+
+class FileVersionDialog(QDialog):
+    """Version history for a single file, across local history and the NAS.
+
+    Lists every retained version of one path (local trash + NAS trash) and
+    restores the chosen one to its original location, overwriting the current
+    file. Reused by the Conflicts tab (restore an older version instead of
+    picking a conflict copy) and the History tab (a focused per-file timeline).
+    """
+
+    SOURCE_ROLE = 200
+
+    def __init__(self, parent, cfg, engine, relative_path: str, local_root: str, on_restored=None) -> None:
+        super().__init__(parent)
+        self.cfg = cfg
+        self.engine = engine
+        self.relative_path = relative_path
+        self.local_root = local_root
+        self._on_restored = on_restored
+        self._busy = False
+
+        self.setWindowTitle(t("dialogs.fileversions.title", path=relative_path))
+        layout = QVBoxLayout(self)
+        self.info = QLabel(t("dialogs.fileversions.loading"))
+        self.info.setWordWrap(True)
+        layout.addWidget(self.info)
+
+        self.table = QTreeWidget()
+        self.table.setColumnCount(4)
+        self.table.setHeaderLabels([
+            t("dialogs.fileversions.col_source"),
+            t("dialogs.fileversions.col_version"),
+            t("dialogs.fileversions.col_size"),
+            t("dialogs.fileversions.col_age"),
+        ])
+        self.table.header().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        self.table.itemSelectionChanged.connect(self._update_buttons)
+        layout.addWidget(self.table, 1)
+
+        buttons = QDialogButtonBox()
+        self.restore_btn = buttons.addButton(
+            t("dialogs.fileversions.restore_btn"), QDialogButtonBox.ButtonRole.AcceptRole,
+        )
+        close_btn = buttons.addButton(
+            t("dialogs.fileversions.close_btn"), QDialogButtonBox.ButtonRole.RejectRole,
+        )
+        self.restore_btn.setEnabled(False)
+        self.restore_btn.clicked.connect(self._restore)
+        close_btn.clicked.connect(self.reject)
+        layout.addWidget(buttons)
+        self.resize(640, 430)
+
+        self._load()
+
+    # --- loading ---
+
+    def _load(self) -> None:
+        self._busy = True
+        run_in_background(self, "_file_versions_call", self._gather, self._on_loaded)
+
+    def _gather(self):
+        local = [
+            version for version in trash.list_local_versions()
+            if version.relative_path == self.relative_path
+        ]
+        remote = []
+        conn = self.engine.connection
+        if conn is not None:
+            ok, versions, _detail = trash.list_remote_versions(self.cfg, conn)
+            if ok:
+                remote = [
+                    version for version in versions
+                    if version.relative_path == self.relative_path
+                ]
+        return local, remote
+
+    def _on_loaded(self, result, exc: Exception | None) -> None:
+        self._busy = False
+        if exc is not None:
+            self.info.setText(t("dialogs.fileversions.load_failed", detail=str(exc)))
+            return
+        local, remote = result
+        entries = [("local", version) for version in local] + [("nas", version) for version in remote]
+        entries.sort(key=lambda entry: entry[1].age_days)
+        self.table.clear()
+        for source, version in entries:
+            item = QTreeWidgetItem([
+                t(f"dialogs.fileversions.source_{source}"),
+                version.timestamp,
+                human_size(version.size),
+                f"{version.age_days:.1f}",
+            ])
+            item.setData(0, self.SOURCE_ROLE, (source, version))
+            self.table.addTopLevelItem(item)
+        if not entries:
+            self.info.setText(t("dialogs.fileversions.empty", path=self.relative_path))
+        elif len(local) and len(remote):
+            self.info.setText(
+                t("dialogs.fileversions.count_both", local=len(local), nas=len(remote))
+            )
+        elif remote:
+            self.info.setText(t("dialogs.fileversions.count_nas", nas=len(remote)))
+        else:
+            self.info.setText(t("dialogs.fileversions.count_local", local=len(local)))
+        self._update_buttons()
+
+    def _selected(self):
+        item = self.table.currentItem()
+        return item.data(0, self.SOURCE_ROLE) if item is not None else None
+
+    def _update_buttons(self) -> None:
+        self.restore_btn.setEnabled(self._selected() is not None and not self._busy)
+
+    # --- restore ---
+
+    def _restore(self) -> None:
+        entry = self._selected()
+        if entry is None:
+            return
+        source, version = entry
+        if QMessageBox.question(
+            self, t("dialogs.fileversions.confirm_title"),
+            t("dialogs.fileversions.confirm_body", path=self.relative_path, timestamp=version.timestamp),
+        ) != QMessageBox.StandardButton.Yes:
+            return
+        self._busy = True
+        self.restore_btn.setEnabled(False)
+        run_in_background(
+            self, "_file_restore_call",
+            lambda: self._do_restore(source, version), self._on_restore_done,
+        )
+
+    def _do_restore(self, source: str, version):
+        if source == "nas":
+            conn = self.engine.connection
+            if conn is None:
+                return False, t("history.nas_unreachable_body")
+            return rsync_ops.restore_remote_version(
+                self.cfg, conn, version.remote_trash_relative_path,
+                Path(self.local_root, self.relative_path),
+            )
+        ok = trash.restore_version(version, self.local_root)
+        return ok, "" if ok else t("dialogs.fileversions.restore_failed")
+
+    def _on_restore_done(self, result, exc: Exception | None) -> None:
+        self._busy = False
+        self._update_buttons()
+        if exc is not None:
+            QMessageBox.warning(self, t("dialogs.fileversions.restore_failed_title"), str(exc))
+            return
+        ok, detail = result
+        if not ok:
+            QMessageBox.warning(self, t("dialogs.fileversions.restore_failed_title"), detail)
+            return
+        if self._on_restored is not None:
+            self._on_restored()
+        QMessageBox.information(
+            self, t("history.restore_done_title"),
+            t("dialogs.fileversions.restore_done_body", path=self.relative_path),
+        )
+        self.accept()
 
 
 class SelectiveSyncDialog(QDialog):

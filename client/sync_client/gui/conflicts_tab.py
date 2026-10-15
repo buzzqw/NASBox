@@ -15,6 +15,7 @@ from ..config import Config
 from ..engine import SyncEngine
 from ..i18n import t
 from .async_utils import run_in_background
+from .dialogs import FileVersionDialog
 
 
 GROUP_ROLE = Qt.ItemDataRole.UserRole
@@ -73,6 +74,10 @@ class ConflictsTab(QWidget):
         self.open_btn = QPushButton(t("conflicts.open_btn"))
         self.open_btn.clicked.connect(self._open_selected)
         choose_row.addWidget(self.open_btn)
+        self.restore_btn = QPushButton(t("conflicts.restore_btn"))
+        self.restore_btn.setToolTip(t("conflicts.restore_tooltip"))
+        self.restore_btn.clicked.connect(self._restore_version)
+        choose_row.addWidget(self.restore_btn)
         self.keep_btn = QPushButton(t("conflicts.keep_btn"))
         self.keep_btn.setObjectName("primaryButton")
         self.keep_btn.clicked.connect(self._keep_selected)
@@ -174,6 +179,7 @@ class ConflictsTab(QWidget):
         selected = self._selected_candidate() is not None
         self.open_btn.setEnabled(selected)
         self.keep_btn.setEnabled(selected and not self._busy)
+        self.restore_btn.setEnabled(self._selected_group() is not None and not self._busy)
 
     def _open_selected(self) -> None:
         path = self._selected_candidate()
@@ -204,3 +210,36 @@ class ConflictsTab(QWidget):
             return str(path.relative_to(self.cfg.local_root()))
         except ValueError:
             return str(path)
+
+    def _restore_version(self) -> None:
+        """Open the file's version history and restore an older version.
+
+        On success the restored file becomes the original again and the conflict
+        copies are moved into local history, resolving the conflict in one step.
+        """
+        group = self._selected_group()
+        local_root = self.cfg.local_root()
+        if group is None or not local_root:
+            return
+        relative = self._relative(group.original)
+        dialog = FileVersionDialog(
+            self, self.cfg, self.engine, relative, local_root,
+            on_restored=lambda: self._resolve_after_restore(group, local_root, relative),
+        )
+        dialog.exec()
+
+    def _resolve_after_restore(self, group, local_root: str, relative: str) -> None:
+        ok, detail = conflicts.resolve_conflict(
+            group, group.original, local_root, self.engine.sync_state,
+        )
+        if not ok:
+            QMessageBox.warning(self, t("conflicts.resolve_failed_title"), detail)
+            return
+        try:
+            # The restored version replaces the original, so it must be uploaded
+            # as the new current version rather than left as a local-only edit.
+            self.engine.sync_state.mark_pending({relative})
+        except Exception:
+            pass
+        self.engine.wake()
+        self.refresh()

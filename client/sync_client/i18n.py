@@ -99,6 +99,54 @@ STRINGS: dict[str, dict[str, str]] = {
         "en": "No subfolder to show (the NASBox folder is empty).",
     },
 
+    "dialogs.fileversions.title": {"it": "Cronologia: {path}", "en": "History: {path}"},
+    "dialogs.fileversions.loading": {"it": "Lettura delle versioni…", "en": "Loading versions…"},
+    "dialogs.fileversions.col_source": {"it": "Origine", "en": "Source"},
+    "dialogs.fileversions.col_version": {"it": "Versione", "en": "Version"},
+    "dialogs.fileversions.col_size": {"it": "Dimensione", "en": "Size"},
+    "dialogs.fileversions.col_age": {"it": "Età (giorni)", "en": "Age (days)"},
+    "dialogs.fileversions.source_local": {"it": "Locale", "en": "Local"},
+    "dialogs.fileversions.source_nas": {"it": "NAS", "en": "NAS"},
+    "dialogs.fileversions.empty": {
+        "it": "Nessuna versione storica per {path}.",
+        "en": "No historical version for {path}.",
+    },
+    "dialogs.fileversions.count_local": {
+        "it": "{local} versioni nello storico locale.",
+        "en": "{local} versions in local history.",
+    },
+    "dialogs.fileversions.count_nas": {
+        "it": "{nas} versioni nello storico del NAS.",
+        "en": "{nas} versions in NAS history.",
+    },
+    "dialogs.fileversions.count_both": {
+        "it": "{local} versioni locali e {nas} sul NAS.",
+        "en": "{local} local versions and {nas} on the NAS.",
+    },
+    "dialogs.fileversions.load_failed": {
+        "it": "Impossibile leggere le versioni: {detail}",
+        "en": "Could not read versions: {detail}",
+    },
+    "dialogs.fileversions.restore_btn": {"it": "Ripristina selezionata", "en": "Restore selected"},
+    "dialogs.fileversions.close_btn": {"it": "Chiudi", "en": "Close"},
+    "dialogs.fileversions.confirm_title": {"it": "Ripristinare la versione?", "en": "Restore this version?"},
+    "dialogs.fileversions.confirm_body": {
+        "it": "La versione di {path} del {timestamp} sostituirà il file attuale. "
+              "Proseguire?",
+        "en": "The {timestamp} version of {path} will replace the current file. Continue?",
+    },
+    "dialogs.fileversions.restore_failed_title": {"it": "Ripristino non riuscito", "en": "Restore failed"},
+    "dialogs.fileversions.restore_failed": {
+        "it": "la versione non è più disponibile",
+        "en": "the version is no longer available",
+    },
+    "dialogs.fileversions.restore_done_body": {
+        "it": "{path} è stato ripristinato. La sincronizzazione porterà la versione "
+              "ripristinata sul NAS e sugli altri PC.",
+        "en": "{path} has been restored. Syncing will bring the restored version to the "
+              "NAS and the other PCs.",
+    },
+
     # --- dialogs.py: FolderSetupDialog ---
     "dialogs.folder.title_relocate": {"it": "Sposta la cartella NASBox", "en": "Move the NASBox folder"},
     "dialogs.folder.title_welcome": {"it": "Benvenuto in NASBox", "en": "Welcome to NASBox"},
@@ -882,6 +930,18 @@ STRINGS: dict[str, dict[str, str]] = {
     "history.col_size": {"it": "Dimensione", "en": "Size"},
     "history.col_age": {"it": "Età (giorni)", "en": "Age (days)"},
     "history.restore_btn": {"it": "Ripristina selezionati…", "en": "Restore selected…"},
+    "history.file_versions_btn": {"it": "Versioni del file…", "en": "File versions…"},
+    "history.file_versions_tooltip": {
+        "it": "Apri la cronologia completa del file selezionato (versioni locali e sul NAS) "
+              "e ripristina quella che preferisci.",
+        "en": "Open the full history of the selected file (local and NAS versions) and "
+              "restore the one you want.",
+    },
+    "history.file_versions_title": {"it": "Versioni del file", "en": "File versions"},
+    "history.file_versions_select": {
+        "it": "Seleziona una versione di un file (una riga foglia) nell'elenco.",
+        "en": "Select a file's version (a leaf row) in the list.",
+    },
     "history.restore_tooltip": {
         "it": "Seleziona più file e cartelle con Ctrl o Maiusc. Per ogni file viene ripristinata la versione più recente selezionata. Doppio click ripristina subito una sola riga.",
         "en": "Select multiple files and folders with Ctrl or Shift. The newest selected version of each file is restored. Double-click restores one row immediately.",
@@ -1279,6 +1339,13 @@ STRINGS: dict[str, dict[str, str]] = {
     "conflicts.keep_label": {"it": "Versione da mantenere:", "en": "Version to keep:"},
     "conflicts.open_btn": {"it": "Apri", "en": "Open"},
     "conflicts.keep_btn": {"it": "Mantieni selezionata", "en": "Keep selected"},
+    "conflicts.restore_btn": {"it": "Ripristina versione…", "en": "Restore version…"},
+    "conflicts.restore_tooltip": {
+        "it": "Apri la cronologia del file (versioni locali e sul NAS), ripristina una "
+              "versione precedente come originale e sposta le copie di conflitto nello storico.",
+        "en": "Open the file's history (local and NAS versions), restore an earlier version "
+              "as the original, and move the conflict copies into history.",
+    },
     "conflicts.original_present": {"it": "originale presente", "en": "original present"},
     "conflicts.original_missing": {"it": "originale mancante", "en": "original missing"},
     "conflicts.original_option": {"it": "Versione originale", "en": "Original version"},
