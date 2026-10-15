@@ -8,13 +8,17 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 Alleggerimento del carico sul NAS e delle prestazioni del client.
 
-- Server 3.19.0: il pass orario di pruning non esegue piu' `date` una volta per
+- Server 3.20.0: il pass orario di pruning non esegue piu' `date` una volta per
   file. Il timestamp di ogni versione e' gia' nel nome (suffisso UTC) e viene
   ora convertito in epoch con sola aritmetica intera bash; la scansione di un
   `.sync-trash` a sei cifre passa da minuti a pochi secondi e il carico di
-  sistema da tempesta di fork a trascurabile. La pulizia delle cartelle vuote
-  gira solo quando il pass ha davvero rimosso qualcosa, e `--wait-for-revision`
-  non crea piu' una subshell a ogni secondo in attesa.
+  sistema da tempesta di fork a trascurabile. In piu', il pass registra la
+  versione piu' vecchia vista e **salta del tutto la scansione** finche' nessuna
+  versione puo' ancora superare la retention (con un limite di un giorno): su un
+  archivio di due mesi con retention 90 giorni significa non scansionare piu'
+  per settimane. La pulizia delle cartelle vuote gira solo quando il pass ha
+  davvero rimosso qualcosa, e `--wait-for-revision` non crea piu' una subshell a
+  ogni secondo in attesa.
 - Client: multiplexing SSH (ControlMaster) per riusare una sola connessione
   autenticata tra i molti comandi brevi di un ciclo. Meno handshake e, sul NAS,
   molti meno processi `sshd`/shell. Disattivabile in Impostazioni.

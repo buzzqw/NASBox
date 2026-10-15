@@ -116,6 +116,38 @@ class PruneRetentionTests(unittest.TestCase):
             self.assertEqual(first.returncode, 0, first.stderr)
             self.assertEqual(second.returncode, 0, second.stderr)
             self.assertEqual([p.name for p in trash.iterdir()], [fresh_name])
+            # The second pass must skip the whole metadata walk: the oldest
+            # version is still far inside the retention window.
+            self.assertIn("Pruning saltato", second.stderr)
+
+    def test_watermark_is_written_after_a_complete_scan(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            sandbox = Path(directory)
+            script, _share, trash, config = self.fixture(sandbox, retention=30)
+            (trash / f"a.txt-{run_ts(100)}").write_text("old")
+            (trash / f"b.txt-{run_ts(1)}").write_text("fresh")
+
+            result = self.run_once(script, config)
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            watermark = (sandbox / "state" / "trash-watermark").read_text().split()
+            self.assertEqual(len(watermark), 2)
+            self.assertTrue(all(value.isdigit() for value in watermark))
+
+    def test_past_watermark_triggers_a_new_scan(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            sandbox = Path(directory)
+            script, _share, trash, config = self.fixture(sandbox, retention=30)
+            state = sandbox / "state"
+            state.mkdir(exist_ok=True)
+            (state / "trash-watermark").write_text("1 1\n")  # ancient scan
+            old = trash / f"c.txt-{run_ts(100)}"
+            old.write_text("old")
+
+            result = self.run_once(script, config)
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertFalse(old.exists())
 
 
 if __name__ == "__main__":

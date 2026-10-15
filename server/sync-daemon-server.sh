@@ -33,7 +33,7 @@
 #
 set -uo pipefail
 
-VERSION="3.19.0"
+VERSION="3.20.0"
 SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -44,6 +44,7 @@ EVENTS_FILE="$STATE_DIR/events.jsonl"
 PID_FILE="$STATE_DIR/daemon.pid"
 DAEMON_LOCK_FILE="$STATE_DIR/daemon.lock"
 STAMP_FILE="$STATE_DIR/last-run"
+TRASH_WATERMARK_FILE="$STATE_DIR/trash-watermark"
 SYNC_LOCK_FILE="$STATE_DIR/sync-transfer.lock"
 SYNC_LOCK_OWNER_FILE="$STATE_DIR/sync-transfer.lock.owner"
 TRANSFER_QUEUE_DIR="$STATE_DIR/transfer-queue"
@@ -66,6 +67,12 @@ FILE_STATES_PARALLELISM=8
 TRASH_DIRNAME=".sync-trash"
 REPOSITORY_MARKER_NAME=".nasbox-root"
 DRY_RUN="false"
+
+# Even when the retention watermark says nothing can be old enough yet, re-scan
+# the trash at least this often. It bounds the cost of a wrong/backdated entry
+# (a client clock far behind, or a manually placed file) to one extra scan a day
+# instead of never.
+PRUNE_MAX_SKIP_SECONDS=86400
 
 # --- logging ---
 
@@ -1793,11 +1800,52 @@ cmd_init_repository() {
     echo "Repository NASBox inizializzato (ID $id)."
 }
 
+# --- trash retention watermark -------------------------------------------
+#
+# Every version's retention is decided from the UTC timestamp in its filename,
+# and a version is only ever added with a "now-ish" timestamp. So the oldest
+# version currently in the trash can only get older, never younger: until *that*
+# one crosses the retention cutoff, no other version can either. Recording the
+# oldest epoch seen at the last complete scan lets an hourly pass skip the whole
+# metadata walk (minutes on a six-figure trash) until a scan could actually find
+# something. The file holds "<oldest_epoch> <last_scan_epoch>".
+read_trash_watermark() {
+    TRASH_OLDEST=""
+    TRASH_LAST_SCAN=""
+    [[ -f "$TRASH_WATERMARK_FILE" ]] || return 1
+    local oldest last
+    read -r oldest last < "$TRASH_WATERMARK_FILE" 2>/dev/null || return 1
+    [[ "$oldest" =~ ^[0-9]+$ && "$last" =~ ^[0-9]+$ ]] || return 1
+    TRASH_OLDEST="$oldest"
+    TRASH_LAST_SCAN="$last"
+    return 0
+}
+
+trash_scan_due() {
+    local now="$1"
+    read_trash_watermark || return 0  # no/invalid watermark -> must scan
+    local retention_seconds=$(( RETENTION_DAYS * 86400 ))
+    (( now >= TRASH_OLDEST + retention_seconds )) && return 0
+    (( now - TRASH_LAST_SCAN >= PRUNE_MAX_SKIP_SECONDS )) && return 0
+    return 1
+}
+
+write_trash_watermark() {
+    local oldest="$1" now="$2" tmp
+    [[ "$oldest" =~ ^[0-9]+$ ]] || oldest="$now"
+    tmp="${TRASH_WATERMARK_FILE}.tmp.$$"
+    if printf '%s %s\n' "$oldest" "$now" > "$tmp" 2>/dev/null; then
+        mv -f "$tmp" "$TRASH_WATERMARK_FILE" 2>/dev/null || rm -f "$tmp"
+    fi
+}
+
 collect_prune_candidates() {
     local trash="$1" candidates="$2"
     local now retention_seconds processed=0 file epoch age_seconds
     now=$(date '+%s')
     retention_seconds=$(( RETENTION_DAYS * 86400 ))
+    PRUNE_MIN_EPOCH=""
+    PRUNE_CAPPED="false"
 
     # This metadata walk can take minutes on a large trash directory. It must
     # remain outside SYNC_LOCK_FILE; paths are checked again before deletion.
@@ -1811,7 +1859,14 @@ collect_prune_candidates() {
             (( processed++ ))
             if (( processed >= PRUNE_MAX_FILES_PER_PASS )); then
                 log INFO "Pass di pruning limitato a $PRUNE_MAX_FILES_PER_PASS versioni; continuera' al prossimo intervallo."
+                PRUNE_CAPPED="true"
                 break
+            fi
+        else
+            # Only survivors feed the watermark: the candidates above will be
+            # deleted by this pass, so they must not dictate the next cutoff.
+            if [[ -z "$PRUNE_MIN_EPOCH" ]] || (( epoch < PRUNE_MIN_EPOCH )); then
+                PRUNE_MIN_EPOCH="$epoch"
             fi
         fi
     done < <(find "$trash" -type f -print0 2>/dev/null)
@@ -1925,38 +1980,52 @@ run_once_pass() {
     trash="$(trash_dir)"
     if [[ -d "$trash" ]]; then
         if [[ "$RETENTION_DAYS" != "0" ]]; then
-            file_candidates="$(mktemp "$STATE_DIR/prune-files.XXXXXX")" || return 1
-            collect_prune_candidates "$trash" "$file_candidates"
-            if [[ -s "$file_candidates" ]]; then
-                exec 8>"$SYNC_LOCK_FILE" || { rm -f "$file_candidates"; return 1; }
-                if flock -n 8; then
-                    removed="$(prune_candidates "$trash" "$file_candidates")"
-                    flock -u 8
-                else
-                    log INFO "Pruning rimandato: trasferimento NASBox in corso."
-                fi
-                exec 8>&-
-            fi
-            rm -f "$file_candidates"
-
-            # collect_empty_dirs is a second full traversal of the trash tree.
-            # It can only find something to remove if this pass removed files, so
-            # skip it entirely on the common "nothing is old enough yet" pass --
-            # which is most hourly passes on a trash that is already caught up.
-            if [[ "$removed" =~ ^[0-9]+$ ]] && (( removed > 0 )); then
-                dir_candidates="$(mktemp "$STATE_DIR/prune-dirs.XXXXXX")" || return 1
-                collect_empty_dirs "$trash" "$dir_candidates"
-                if [[ -s "$dir_candidates" ]]; then
-                    exec 8>"$SYNC_LOCK_FILE" || { rm -f "$dir_candidates"; return 1; }
+            local scan_now
+            scan_now=$(date '+%s')
+            if trash_scan_due "$scan_now"; then
+                file_candidates="$(mktemp "$STATE_DIR/prune-files.XXXXXX")" || return 1
+                collect_prune_candidates "$trash" "$file_candidates"
+                if [[ -s "$file_candidates" ]]; then
+                    exec 8>"$SYNC_LOCK_FILE" || { rm -f "$file_candidates"; return 1; }
                     if flock -n 8; then
-                        remove_empty_dirs "$dir_candidates"
+                        removed="$(prune_candidates "$trash" "$file_candidates")"
                         flock -u 8
                     else
-                        log INFO "Pulizia cartelle storiche rimandata: trasferimento NASBox in corso."
+                        log INFO "Pruning rimandato: trasferimento NASBox in corso."
                     fi
                     exec 8>&-
                 fi
-                rm -f "$dir_candidates"
+                rm -f "$file_candidates"
+
+                # Record the oldest version seen so the next hourly passes can
+                # skip the whole walk until one of them could actually be old
+                # enough. Only trust it after a COMPLETE scan: a scan capped by
+                # PRUNE_MAX_FILES_PER_PASS stopped early and did not see every
+                # file, so its minimum is not authoritative.
+                if [[ "$PRUNE_CAPPED" != "true" ]]; then
+                    write_trash_watermark "$PRUNE_MIN_EPOCH" "$scan_now"
+                fi
+
+                # collect_empty_dirs is a second full traversal of the trash tree.
+                # It can only find something to remove if this pass removed files,
+                # so skip it entirely when nothing was pruned.
+                if [[ "$removed" =~ ^[0-9]+$ ]] && (( removed > 0 )); then
+                    dir_candidates="$(mktemp "$STATE_DIR/prune-dirs.XXXXXX")" || return 1
+                    collect_empty_dirs "$trash" "$dir_candidates"
+                    if [[ -s "$dir_candidates" ]]; then
+                        exec 8>"$SYNC_LOCK_FILE" || { rm -f "$dir_candidates"; return 1; }
+                        if flock -n 8; then
+                            remove_empty_dirs "$dir_candidates"
+                            flock -u 8
+                        else
+                            log INFO "Pulizia cartelle storiche rimandata: trasferimento NASBox in corso."
+                        fi
+                        exec 8>&-
+                    fi
+                    rm -f "$dir_candidates"
+                fi
+            else
+                log INFO "Pruning saltato: la versione piu' vecchia dello storico e' ancora entro la retention (${RETENTION_DAYS}gg)."
             fi
         fi
     else
