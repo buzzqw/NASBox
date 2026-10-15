@@ -17,7 +17,7 @@ from ..i18n import t
 from ..version import APP_NAME, APP_VERSION
 from ..repository_safety import RepositorySafetyError, bind_repository
 from .async_utils import run_in_background
-from .dialogs import ScheduleWindowDialog, WEEKDAY_KEYS
+from .dialogs import ScheduleWindowDialog, SelectiveSyncDialog, WEEKDAY_KEYS
 
 LANGUAGE_OPTIONS = [
     ("auto", "settings.language_auto"),
@@ -48,6 +48,7 @@ class SettingsTab(QWidget):
         self._dirty = False
         self._single_column = False
         self._schedule_windows = cfg.pause_schedule()
+        self._selective_excludes = cfg.selective_sync_excludes()
 
         # This tab stacks a lot of group boxes -- without a scroll area, Qt's
         # layout system reports their combined minimum height as *this tab's*
@@ -354,6 +355,16 @@ class SettingsTab(QWidget):
         exclude_add_row.addWidget(self.remove_exclude_btn)
         exclude_layout.addLayout(exclude_add_row)
 
+        selective_row = QHBoxLayout()
+        self.selective_btn = QPushButton(t("settings.selective_btn"))
+        self.selective_btn.setToolTip(t("settings.selective_tooltip"))
+        self.selective_btn.clicked.connect(self._choose_selective_folders)
+        selective_row.addWidget(self.selective_btn)
+        self.selective_label = QLabel()
+        self.selective_label.setWordWrap(True)
+        selective_row.addWidget(self.selective_label, 1)
+        exclude_layout.addLayout(selective_row)
+
         # Read-only, separate from the editable list above: this one isn't a
         # pattern the user typed in, it's computed automatically from "Script
         # server sul NAS" (see rsync_ops.server_package_excluded_path) and
@@ -365,6 +376,7 @@ class SettingsTab(QWidget):
         self.auto_exclude_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         exclude_layout.addWidget(self.auto_exclude_label)
         self._refresh_auto_exclude_label()
+        self._refresh_selective_label()
 
         root.addWidget(exclude_box)
 
@@ -449,6 +461,31 @@ class SettingsTab(QWidget):
             self.exclude_list.setCurrentRow(min(row, self.exclude_list.count() - 1))
         self._mark_dirty()
 
+    def _refresh_selective_label(self) -> None:
+        if not self._selective_excludes:
+            self.selective_label.setText(t("settings.selective_none"))
+        else:
+            self.selective_label.setText(
+                t("settings.selective_count", count=len(self._selective_excludes))
+            )
+
+    def _choose_selective_folders(self) -> None:
+        root = self.cfg.local_root()
+        if not root:
+            QMessageBox.information(
+                self,
+                t("settings.selective_needs_folder_title"),
+                t("settings.selective_needs_folder_body"),
+            )
+            return
+        dialog = SelectiveSyncDialog(self, root=root, excluded=self._selective_excludes)
+        if dialog.exec():
+            result = dialog.excluded_paths()
+            if result is not None:
+                self._selective_excludes = result
+                self._refresh_selective_label()
+                self._mark_dirty()
+
     def _schedule_summary(self, window: dict) -> str:
         days = sorted(day for day in (window.get("days") or []) if 0 <= day <= 6)
         day_names = ", ".join(t(WEEKDAY_KEYS[day]) for day in days)
@@ -517,6 +554,7 @@ class SettingsTab(QWidget):
         self.cfg.set("exclude_patterns", patterns, persist=False)
         self.cfg.set("pause_schedule_enabled", self.schedule_enabled.isChecked(), persist=False)
         self.cfg.set("pause_schedule", normalize_schedule(self._schedule_windows), persist=False)
+        self.cfg.set("selective_sync_excludes", self._selective_excludes, persist=False)
         self.cfg.save()
         self.engine.wake()
         self._refresh_auto_exclude_label()

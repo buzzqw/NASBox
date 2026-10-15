@@ -1512,6 +1512,13 @@ def _exclude_args(cfg: Config) -> list[str]:
         pattern = pattern.strip()
         if pattern:
             args += ["--exclude", pattern]
+    # Selective sync: anchored to the folder the user picked (rsync's leading
+    # "/" means "at the transfer root"), so a name never catches an unrelated
+    # same-named folder deeper in the tree.
+    for path in cfg.selective_sync_excludes():
+        anchored = str(path).strip().strip("/")
+        if anchored:
+            args += ["--exclude", f"/{anchored}"]
     return args
 
 
@@ -1541,6 +1548,10 @@ def path_is_excluded(cfg: Config, relative_path: str) -> bool:
         if pattern.endswith("/") and any(fnmatch.fnmatch(part, directory_pattern) for part in parts):
             return True
         if fnmatch.fnmatch(relative_path, pattern) or any(fnmatch.fnmatch(part, pattern) for part in parts):
+            return True
+    for raw_path in cfg.selective_sync_excludes():
+        selected = str(raw_path).strip().strip("/")
+        if selected and (relative_path == selected or relative_path.startswith(selected + "/")):
             return True
     return False
 

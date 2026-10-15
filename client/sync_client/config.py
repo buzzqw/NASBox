@@ -207,6 +207,9 @@ DEFAULTS: dict[str, Any] = {
     "exclude_patterns": [],       # rsync-style patterns (e.g. "node_modules/", "*.tmp") never synced
                                    # in either direction -- NASBox's answer to Dropbox's "selective sync",
                                    # but scoped to patterns instead of whole subfolders.
+    "selective_sync_excludes": [],  # exact relative subfolders (e.g. "RPG", "lavoro/archivio") kept out
+                                    # of sync by the folder picker. Anchored: a name matches only that
+                                    # path and its children, never a same-named folder elsewhere.
     "mirrors": [],                # external folders mirrored ONE-WAY into local_root (see mirrors.py):
                                    # each entry is {"source": str (absolute path), "dest": str (relative
                                    # subfolder name inside NASBox), "enabled": bool,
@@ -302,6 +305,16 @@ class Config:
 
     def set_exclude_patterns(self, patterns: list[str]) -> None:
         self.set("exclude_patterns", list(patterns))
+
+    def selective_sync_excludes(self) -> list[str]:
+        with self._lock:
+            raw = self._data.get("selective_sync_excludes", [])
+        return [str(path) for path in raw] if isinstance(raw, list) else []
+
+    def set_selective_sync_excludes(self, paths: list[str]) -> None:
+        from .selective import minimize_excluded
+
+        self.set("selective_sync_excludes", minimize_excluded(paths or []))
 
     # --- external folder mirrors ---
 

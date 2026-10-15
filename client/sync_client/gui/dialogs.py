@@ -2,15 +2,17 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PyQt6.QtCore import QTime
+from PyQt6.QtCore import Qt, QTime
 from PyQt6.QtWidgets import (
     QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout,
-    QGridLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QMessageBox,
-    QPushButton, QSpinBox, QTimeEdit, QVBoxLayout, QWizard, QWizardPage,
+    QGridLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QListWidget,
+    QListWidgetItem, QMessageBox, QPushButton, QSpinBox, QTimeEdit,
+    QVBoxLayout, QWizard, QWizardPage,
 )
 
 from .. import rsync_ops
 from ..i18n import t
+from ..selective import list_directories, minimize_excluded
 from .async_utils import run_in_background
 
 PAUSE_PRESETS = [
@@ -108,6 +110,93 @@ class ScheduleWindowDialog(QDialog):
 
     def window(self) -> dict | None:
         return self._window
+
+
+class SelectiveSyncDialog(QDialog):
+    """Pick which subfolders of the NASBox folder take part in sync.
+
+    Checked folders sync; unchecked ones are kept out (anchored excludes, so a
+    name only matches that exact folder and its children). Excluding a folder
+    does not delete what was already synced -- it just stops managing it.
+    """
+
+    MAX_DIRECTORIES = 1000
+
+    def __init__(self, parent=None, root: str = "", excluded=None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle(t("dialogs.selective.title"))
+        layout = QVBoxLayout(self)
+
+        intro = QLabel(t("dialogs.selective.intro"))
+        intro.setWordWrap(True)
+        layout.addWidget(intro)
+
+        toolbar = QHBoxLayout()
+        select_all = QPushButton(t("dialogs.selective.select_all"))
+        select_all.clicked.connect(lambda: self._set_all(True))
+        select_none = QPushButton(t("dialogs.selective.select_none"))
+        select_none.clicked.connect(lambda: self._set_all(False))
+        toolbar.addWidget(select_all)
+        toolbar.addWidget(select_none)
+        toolbar.addStretch(1)
+        layout.addLayout(toolbar)
+
+        self.list = QListWidget()
+        layout.addWidget(self.list)
+
+        note = QLabel(t("dialogs.selective.note"))
+        note.setWordWrap(True)
+        layout.addWidget(note)
+        self._status = QLabel("")
+        self._status.setWordWrap(True)
+        layout.addWidget(self._status)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(self._on_accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+        self._result: list[str] | None = None
+        self._excluded = {
+            str(path).strip().strip("/") for path in (excluded or []) if str(path).strip().strip("/")
+        }
+        ignore_names = set(rsync_ops.EXCLUDE_DIRNAMES) | {rsync_ops.REPOSITORY_MARKER_NAME}
+        directories, truncated = (
+            list_directories(root, ignore_names, limit=self.MAX_DIRECTORIES) if root else ([], False)
+        )
+        for relative in directories:
+            item = QListWidgetItem(relative)
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            item.setCheckState(
+                Qt.CheckState.Unchecked if self._is_excluded(relative) else Qt.CheckState.Checked
+            )
+            self.list.addItem(item)
+        if truncated:
+            self._status.setText(t("dialogs.selective.truncated", limit=self.MAX_DIRECTORIES))
+        elif not directories:
+            self._status.setText(t("dialogs.selective.empty"))
+
+    def _is_excluded(self, relative: str) -> bool:
+        return any(relative == kept or relative.startswith(kept + "/") for kept in self._excluded)
+
+    def _set_all(self, checked: bool) -> None:
+        state = Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked
+        for index in range(self.list.count()):
+            self.list.item(index).setCheckState(state)
+
+    def _on_accept(self) -> None:
+        unchecked = [
+            self.list.item(index).text()
+            for index in range(self.list.count())
+            if self.list.item(index).checkState() == Qt.CheckState.Unchecked
+        ]
+        self._result = minimize_excluded(unchecked)
+        self.accept()
+
+    def excluded_paths(self) -> list[str] | None:
+        return self._result
 
 
 class PauseForDialog(QDialog):

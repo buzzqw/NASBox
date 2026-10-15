@@ -70,6 +70,35 @@ STRINGS: dict[str, dict[str, str]] = {
     "dialogs.schedule.day_sat": {"it": "Sab", "en": "Sat"},
     "dialogs.schedule.day_sun": {"it": "Dom", "en": "Sun"},
 
+    "dialogs.selective.title": {"it": "Cartelle da sincronizzare", "en": "Folders to sync"},
+    "dialogs.selective.intro": {
+        "it": "Togli la spunta alle cartelle che NON vuoi sincronizzare con il NAS. "
+              "La scelta è ancorata alla cartella selezionata: un nome non cattura "
+              "cartelle omonime altrove.",
+        "en": "Uncheck the folders you do NOT want synced with the NAS. The choice is "
+              "anchored to the selected folder: a name never catches same-named folders "
+              "elsewhere.",
+    },
+    "dialogs.selective.select_all": {"it": "Seleziona tutto", "en": "Select all"},
+    "dialogs.selective.select_none": {"it": "Deseleziona tutto", "en": "Select none"},
+    "dialogs.selective.note": {
+        "it": "Escludere una cartella non cancella ciò che è già sincronizzato: smette "
+              "solo di essere gestita. Le novità nelle cartelle spuntate continuano ad "
+              "arrivare e a partire.",
+        "en": "Excluding a folder does not delete what is already synced: it simply stops "
+              "being managed. Changes in checked folders keep flowing both ways.",
+    },
+    "dialogs.selective.truncated": {
+        "it": "Elenco limitato alle prime {limit} cartelle: usa i pattern in Impostazioni "
+              "per escluderne altre.",
+        "en": "List limited to the first {limit} folders: use the patterns in Settings to "
+              "exclude more.",
+    },
+    "dialogs.selective.empty": {
+        "it": "Nessuna sottocartella da mostrare (la cartella NASBox è vuota).",
+        "en": "No subfolder to show (the NASBox folder is empty).",
+    },
+
     # --- dialogs.py: FolderSetupDialog ---
     "dialogs.folder.title_relocate": {"it": "Sposta la cartella NASBox", "en": "Move the NASBox folder"},
     "dialogs.folder.title_welcome": {"it": "Benvenuto in NASBox", "en": "Welcome to NASBox"},
@@ -509,6 +538,26 @@ STRINGS: dict[str, dict[str, str]] = {
     "settings.exclude_add_tooltip": {"it": "Aggiunge il pattern scritto sopra all'elenco.", "en": "Adds the pattern typed above to the list."},
     "settings.exclude_remove_btn": {"it": "Rimuovi selezionato", "en": "Remove selected"},
     "settings.exclude_remove_tooltip": {"it": "Rimuove il pattern selezionato nell'elenco.", "en": "Removes the pattern selected in the list."},
+    "settings.selective_btn": {"it": "Scegli cartelle…", "en": "Choose folders…"},
+    "settings.selective_tooltip": {
+        "it": "Scegli quali sottocartelle della cartella NASBox sincronizzare: l'alternativa "
+              "per-cartella ai pattern, ancorata al percorso scelto.",
+        "en": "Choose which subfolders of the NASBox folder to sync: the per-folder "
+              "alternative to patterns, anchored to the chosen path.",
+    },
+    "settings.selective_none": {
+        "it": "Tutte le sottocartelle sono sincronizzate.",
+        "en": "All subfolders are synced.",
+    },
+    "settings.selective_count": {
+        "it": "Cartelle escluse: {count}.",
+        "en": "Excluded folders: {count}.",
+    },
+    "settings.selective_needs_folder_title": {"it": "Cartella non impostata", "en": "Folder not set"},
+    "settings.selective_needs_folder_body": {
+        "it": "Configura prima la cartella NASBox locale, poi scegli le sottocartelle.",
+        "en": "Set up the local NASBox folder first, then choose its subfolders.",
+    },
     "settings.auto_exclude_active": {
         "it": "🔒 Esclusa automaticamente anche: {path} (cartella dello script server sul NAS, non modificabile qui).",
         "en": "🔒 Also automatically excluded: {path} (the NAS server script's own folder, not editable here).",

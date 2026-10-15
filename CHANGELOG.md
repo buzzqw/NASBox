@@ -4,6 +4,16 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 1.23.13 - 2026-10-15
+
+- Nuova funzionalita': **selezione delle cartelle da sincronizzare** (selective
+  sync). Dalla scheda Impostazioni, "Scegli cartelle…" mostra l'albero delle
+  sottocartelle della cartella NASBox con caselle da spuntare: le cartelle non
+  spuntate restano fuori dalla sincronizzazione in entrambe le direzioni. La
+  scelta e' ancorata al percorso (una cartella omonima altrove non viene
+  toccata) e convive con i pattern manuali. Escludere una cartella non cancella
+  cio' che era gia' sincronizzato.
+
 ## 1.23.12 - 2026-10-15
 
 - Nuova funzionalita': **pianificazione della sincronizzazione**. In
