@@ -108,6 +108,34 @@ class SyncModeTests(unittest.TestCase):
                 self.assertEqual(push.request_full_sync.called, push_enabled)
                 self.assertEqual(pull.reset_schedule.called, pull_enabled)
 
+    def test_pull_tick_skips_the_nas_lease_after_a_change_feed_timeout(self) -> None:
+        """An unchanged feed must not wake the lease/safety/journal round-trips."""
+        import tempfile
+        import time
+        from unittest.mock import patch
+
+        from sync_client import rsync_ops
+
+        with tempfile.TemporaryDirectory() as local_root:
+            self.cfg.set("sync_mode", SYNC_MODE_PULL_ONLY, persist=False)
+            self.cfg.set("remote_change_feed_available", True, persist=False)
+            self.cfg.set("remote_server_script", "/tmp/server.sh", persist=False)
+            self.cfg.set_local_root(local_root)
+            watchers = Mock()
+            watchers.get.return_value = None
+            worker = PullWorker(self.cfg, Mock(), watchers, threading.Lock(), Mock())
+            worker.set_connection(object())
+            worker._last_manifest_revision = 5
+            worker._last_full_pull = time.time()
+            with patch.object(
+                rsync_ops, "wait_for_remote_revision",
+                return_value=rsync_ops.RemoteRevisionWait("TIMEOUT", 5),
+            ), patch.object(
+                rsync_ops, "remote_lock",
+                side_effect=AssertionError("lease must not be taken when the feed reports no change"),
+            ):
+                worker._tick()
+
 
 if __name__ == "__main__":
     unittest.main()
