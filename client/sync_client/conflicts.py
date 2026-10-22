@@ -11,6 +11,12 @@ from . import trash
 from .sync_state import SyncStateStore
 
 
+CONFLICT_TAG = " (conflitto da "
+# rsync glob matching every conflict copy name. Mirrors use it so their
+# `--delete` pass never removes a conflict copy from the mirrored folder:
+# those copies are what the Conflicts tab lists, and the mirror's source
+# folder obviously does not contain them.
+CONFLICT_GLOB = "* (conflitto da *)"
 CONFLICT_RE = re.compile(
     r"^(?P<stem>.*) \(conflitto da (?P<origin>[^ )]+) [^)]+\)(?P<suffix>\.[^/]*)?$"
 )
@@ -114,3 +120,34 @@ def resolve_conflict(
     finally:
         if temporary is not None:
             temporary.unlink(missing_ok=True)
+
+
+def discard_conflict_copies(
+    group: ConflictGroup, local_root: str,
+    sync_state: SyncStateStore | None = None,
+) -> tuple[bool, str]:
+    """Move every alternative version into local history, keeping the original.
+
+    This is the explicit "delete the conflicts" action: unlike resolve_conflict
+    it never rewrites the original file, it only clears the extra copies.
+    """
+    root = Path(local_root).resolve()
+    original = group.original.resolve()
+    try:
+        original.relative_to(root)
+    except ValueError:
+        return False, "percorso conflitto fuori dalla cartella NASBox"
+
+    for path in sorted(group.candidates):
+        if not path.exists():
+            continue
+        try:
+            path.resolve().relative_to(root)
+        except ValueError:
+            return False, "percorso conflitto fuori dalla cartella NASBox"
+        if not trash.move_to_local_trash(path, str(root)):
+            return False, f"impossibile spostare nello storico {path.name}"
+
+    if sync_state is not None and group.group_id:
+        sync_state.mark_conflict_resolved(group.group_id, str(original.relative_to(root)))
+    return True, ""

@@ -1346,6 +1346,32 @@ STRINGS: dict[str, dict[str, str]] = {
         "en": "Open the file's history (local and NAS versions), restore an earlier version "
               "as the original, and move the conflict copies into history.",
     },
+    "conflicts.discard_btn": {"it": "Elimina copie", "en": "Delete copies"},
+    "conflicts.discard_tooltip": {
+        "it": "Sposta tutte le copie di conflitto nello storico (locale e NAS) senza "
+              "toccare il file originale.",
+        "en": "Move every conflict copy into history (local and NAS) without "
+              "touching the original file.",
+    },
+    "conflicts.discard_confirm_title": {"it": "Eliminare le copie di conflitto?", "en": "Delete the conflict copies?"},
+    "conflicts.discard_confirm_body": {
+        "it": "{count} copie di {path} verranno spostate nello storico. "
+              "Il file originale non viene modificato.",
+        "en": "{count} copies of {path} will be moved into history. "
+              "The original file is not modified.",
+    },
+    "conflicts.discard_done_title": {"it": "Copie eliminate", "en": "Copies deleted"},
+    "conflicts.discard_done_body": {
+        "it": "Le copie di conflitto sono nello storico e possono essere ripristinate.",
+        "en": "The conflict copies are in history and can be restored.",
+    },
+    "conflicts.remote_cleanup_failed_title": {"it": "Pulizia NAS incompleta", "en": "NAS cleanup incomplete"},
+    "conflicts.remote_cleanup_failed_body": {
+        "it": "Le copie locali sono state spostate nello storico, ma alcune copie sul NAS "
+              "non sono state rimosse:\n{detail}\n\nRiprova tra poco con \"Aggiorna\".",
+        "en": "The local copies were moved into history, but some copies on the NAS "
+              "could not be removed:\n{detail}\n\nTry again shortly with \"Refresh\".",
+    },
     "conflicts.original_present": {"it": "originale presente", "en": "original present"},
     "conflicts.original_missing": {"it": "originale mancante", "en": "original missing"},
     "conflicts.original_option": {"it": "Versione originale", "en": "Original version"},

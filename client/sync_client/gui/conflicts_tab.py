@@ -11,6 +11,7 @@ from PyQt6.QtWidgets import (
 )
 
 from .. import conflicts
+from .. import rsync_ops
 from ..config import Config
 from ..engine import SyncEngine
 from ..i18n import t
@@ -78,6 +79,10 @@ class ConflictsTab(QWidget):
         self.restore_btn.setToolTip(t("conflicts.restore_tooltip"))
         self.restore_btn.clicked.connect(self._restore_version)
         choose_row.addWidget(self.restore_btn)
+        self.discard_btn = QPushButton(t("conflicts.discard_btn"))
+        self.discard_btn.setToolTip(t("conflicts.discard_tooltip"))
+        self.discard_btn.clicked.connect(self._discard_copies)
+        choose_row.addWidget(self.discard_btn)
         self.keep_btn = QPushButton(t("conflicts.keep_btn"))
         self.keep_btn.setObjectName("primaryButton")
         self.keep_btn.clicked.connect(self._keep_selected)
@@ -180,6 +185,7 @@ class ConflictsTab(QWidget):
         self.open_btn.setEnabled(selected)
         self.keep_btn.setEnabled(selected and not self._busy)
         self.restore_btn.setEnabled(self._selected_group() is not None and not self._busy)
+        self.discard_btn.setEnabled(self._selected_group() is not None and not self._busy)
 
     def _open_selected(self) -> None:
         path = self._selected_candidate()
@@ -197,13 +203,78 @@ class ConflictsTab(QWidget):
             t("conflicts.confirm_body", path=self._relative(chosen)),
         ) != QMessageBox.StandardButton.Yes:
             return
+        remote_paths = self._candidate_relatives(group)
         ok, detail = conflicts.resolve_conflict(group, chosen, local_root, self.engine.sync_state)
         if not ok:
             QMessageBox.warning(self, t("conflicts.resolve_failed_title"), detail)
             return
         QMessageBox.information(self, t("conflicts.resolve_done_title"), t("conflicts.resolve_done_body"))
         self.engine.wake()
+        self._purge_remote_copies(remote_paths)
+
+    def _discard_copies(self) -> None:
+        """Move every alternative version into history, keeping the original."""
+        group = self._selected_group()
+        local_root = self.cfg.local_root()
+        if group is None or not local_root:
+            return
+        if QMessageBox.question(
+            self, t("conflicts.discard_confirm_title"),
+            t("conflicts.discard_confirm_body", count=len(group.candidates), path=self._relative(group.original)),
+        ) != QMessageBox.StandardButton.Yes:
+            return
+        remote_paths = self._candidate_relatives(group)
+        ok, detail = conflicts.discard_conflict_copies(group, local_root, self.engine.sync_state)
+        if not ok:
+            QMessageBox.warning(self, t("conflicts.resolve_failed_title"), detail)
+            return
+        QMessageBox.information(self, t("conflicts.discard_done_title"), t("conflicts.discard_done_body"))
+        self.engine.wake()
+        self._purge_remote_copies(remote_paths)
+
+    def _candidate_relatives(self, group: conflicts.ConflictGroup) -> list[str]:
+        return [self._relative(path) for path in group.candidates]
+
+    def _purge_remote_copies(self, relatives: list[str]) -> None:
+        """Remove the conflict copies from the NAS as well.
+
+        Moving only the local copies is not enough: in archive mode the client
+        never propagates deletions to the NAS, so the pull would bring them
+        back. `browse_delete` moves them into the NAS trash (same retention),
+        so this stays reversible.
+        """
+        if not relatives:
+            self.refresh()
+            return
+        self.count_label.setText(t("conflicts.scanning"))
+
+        def worker() -> list[str]:
+            conn = rsync_ops.resolve_connection(self.cfg)
+            if conn is None:
+                return ["NAS non raggiungibile"]
+            problems: list[str] = []
+            device_id = self.engine.sync_state.device_id()
+            for relative in relatives:
+                ok, detail = rsync_ops.browse_delete(self.cfg, conn, relative, device_id)
+                if not ok and "non trovato" not in (detail or ""):
+                    problems.append(f"{relative}: {detail}")
+            return problems
+
+        run_in_background(self, "_purge_call", worker, self._on_purge_done)
+
+    def _on_purge_done(self, result, exc: Exception | None) -> None:
+        problems = [] if result is None else result
+        if exc is not None:
+            problems = [str(exc)]
         self.refresh()
+        if problems:
+            shown = "\n".join(problems[:10])
+            if len(problems) > 10:
+                shown += f"\n… (+{len(problems) - 10})"
+            QMessageBox.warning(
+                self, t("conflicts.remote_cleanup_failed_title"),
+                t("conflicts.remote_cleanup_failed_body", detail=shown),
+            )
 
     def _relative(self, path: Path) -> str:
         try:
@@ -229,6 +300,7 @@ class ConflictsTab(QWidget):
         dialog.exec()
 
     def _resolve_after_restore(self, group, local_root: str, relative: str) -> None:
+        remote_paths = self._candidate_relatives(group)
         ok, detail = conflicts.resolve_conflict(
             group, group.original, local_root, self.engine.sync_state,
         )
@@ -242,4 +314,4 @@ class ConflictsTab(QWidget):
         except Exception:
             pass
         self.engine.wake()
-        self.refresh()
+        self._purge_remote_copies(remote_paths)

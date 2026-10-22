@@ -16,6 +16,7 @@ import time
 import stat
 import os
 import hashlib
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterator
@@ -23,6 +24,7 @@ from typing import Iterator
 from PyQt6.QtCore import pyqtSignal
 
 from . import rsync_ops
+from .conflicts import CONFLICT_TAG
 from .config import Config
 from .i18n import t
 from .lock_coordinator import LockCoordinator
@@ -1007,6 +1009,17 @@ class PushWorker(TransferWorker):
                     )
                     if not ok:
                         raise rsync_ops.RemoteLockError(detail or "impossibile conservare la versione locale in conflitto")
+                    # Keep a local copy too: the local original is about to be
+                    # replaced by the NAS version, and the Conflicts tab only
+                    # lists files inside the local NASBox folder.
+                    try:
+                        local_conflict = Path(self.cfg.local_root(), conflict_path)
+                        local_conflict.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.copy2(Path(self.cfg.local_root(), relative_path), local_conflict)
+                    except OSError as exc:
+                        raise rsync_ops.RemoteLockError(
+                            f"impossibile conservare localmente la versione in conflitto: {exc}"
+                        ) from exc
                     self._conflict_journal_items.append(rsync_ops.TransferItem("upload", conflict_path))
                     self._causal_journal_versions[conflict_path] = local_fp.causal
                     self._causal_journal_versions[relative_path] = remote.causal
@@ -1213,7 +1226,7 @@ class PushWorker(TransferWorker):
         # Random names turned a transient failure (and, before the convergence
         # fix, a planner loop) into unbounded remote history growth.
         token = hashlib.sha256(f"{relative_path}\0{digest}".encode()).hexdigest()[:8]
-        tag = f" (conflitto da {self.sync_state.device_id()} {token})"
+        tag = f"{CONFLICT_TAG}{self.sync_state.device_id()} {token})"
         suffix = path.suffix
         max_name_bytes = 240  # below the common NAME_MAX=255 on NAS filesystems
         if len(os.fsencode(tag + suffix)) >= max_name_bytes:

@@ -28,6 +28,7 @@ import time
 from PyQt6.QtCore import QThread, pyqtSignal
 
 from .config import Config
+from .conflicts import CONFLICT_GLOB
 from .logger import EventLogger
 from . import paths, rsync_ops
 from .watcher import FolderWatcher
@@ -107,6 +108,28 @@ def validate_mirror(cfg: Config, source: str, dest: str) -> tuple[bool, str]:
             return False, t("mirrors.err_dest_taken")
 
     return True, ""
+
+
+def _mirror_rsync_command(cfg: Config, source: str, destination: str) -> list[str]:
+    """Build the one-way rsync command used by every mirror pass."""
+    cmd = [
+        "rsync", "-a", "--delete-after", "--partial",
+        "--partial-dir=.sync-partial", "--delay-updates", "--info=progress2",
+    ]
+    for pattern in cfg.exclude_patterns():
+        pattern = pattern.strip()
+        if pattern:
+            cmd += ["--exclude", pattern]
+    for name in MIRROR_EXCLUDE_DIRNAMES:
+        cmd += ["--exclude", name]
+    # Conflict copies are created inside the mirrored destination by the sync
+    # engine, not by the source folder. rsync --delete would remove them on the
+    # next pass (making them invisible to the Conflicts tab before anyone can
+    # review them), so protect them explicitly. --exclude also protects them
+    # from deletion, which is exactly what we need here.
+    cmd += ["--exclude", CONFLICT_GLOB]
+    cmd += [f"{source}/", f"{destination}/"]
+    return cmd
 
 
 class MirrorWatcher(QThread):
@@ -206,17 +229,7 @@ class MirrorWatcher(QThread):
 
         destination = f"{self.root}/{dest}"
         self._emit_status("syncing", self._t("mirrors.state_syncing"))
-        cmd = [
-            "rsync", "-a", "--delete-after", "--partial",
-            "--partial-dir=.sync-partial", "--delay-updates", "--info=progress2",
-        ]
-        for pattern in self.cfg.exclude_patterns():
-            pattern = pattern.strip()
-            if pattern:
-                cmd += ["--exclude", pattern]
-        for name in MIRROR_EXCLUDE_DIRNAMES:
-            cmd += ["--exclude", name]
-        cmd += [f"{source}/", f"{destination}/"]
+        cmd = _mirror_rsync_command(self.cfg, source, destination)
 
         acquired = False
         try:

@@ -4,6 +4,20 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 1.23.15 - 2026-10-22
+
+- Corretto il tab **Conflitti** che restava vuoto: le copie di conflitto in cui
+  vince la versione locale venivano create solo sul NAS e non scaricate, quindi
+  la scansione locale non poteva elencarle. Ora la copia viene mantenuta anche
+  in locale (e simmetricamente anche la versione locale perdente), cosi' i
+  conflitti sono sempre visibili e risolvibili dal client.
+- Nuovo pulsante **"Elimina copie"** nella scheda Conflitti: sposta tutte le
+  versioni alternative nello storico senza toccare il file originale.
+- La risoluzione e l'eliminazione dei conflitti rimuovono le copie anche dal
+  NAS (nello storico NAS), cosi' non ricompaiono con la modalita' archivio.
+- I mirror escludono le copie `(conflitto da ...)`: il loro `rsync --delete`
+  non le cancella piu' dalla cartella replicata prima che si possano rivedere.
+
 ## 1.23.14 - 2026-10-15
 
 - Nuova **cronologia per-file**: dalla scheda Cronologia, "Versioni del file…"

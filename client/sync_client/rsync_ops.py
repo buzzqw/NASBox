@@ -1372,8 +1372,53 @@ def remote_manifest_snapshot(
     return revision, entries
 
 
+def _download_conflict_copy(cfg: Config, conn: NasConnection, relative_path: str) -> bool:
+    """Fetch a remote-side conflict copy into the local NASBox tree.
+
+    LOCAL_WINS conflicts preserve the NAS version with a plain `cp` on the NAS.
+    Without this download the copy exists only there, while scan_conflict_groups
+    (and therefore the Conflicts tab) only looks at the local folder -- so the
+    conflict could never be reviewed or resolved from the client.
+    """
+    local_root = cfg.local_root()
+    if not local_root or not _BROWSE_PATH_VALID(relative_path):
+        return False
+    destination = Path(local_root, relative_path)
+    # Download inside the internal partial dir: the folder watcher and the
+    # conflict scanner both ignore it, so a half-written copy can never be
+    # scanned, pushed or resolved by mistake.
+    temporary = Path(local_root, PARTIAL_DIRNAME, relative_path)
+    try:
+        temporary.parent.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        return False
+    user = cfg.get("nas_user")
+    source = f"{user}@{conn.host}:{shlex.quote(f'{_remote_dir(cfg)}/{relative_path}')}"
+    cmd = [
+        "rsync", "-a", *_old_args_flag(cfg, conn),
+        "-e", _ssh_e_arg(cfg, conn), source, str(temporary),
+    ]
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    if proc.returncode != 0:
+        temporary.unlink(missing_ok=True)
+        return False
+    try:
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        temporary.replace(destination)
+    except OSError:
+        return False
+    return True
+
+
 def copy_remote_file(cfg: Config, conn: NasConnection, source_relative: str, destination_relative: str) -> bool:
-    """Copy a remote losing version to a conflict name while the lock is held."""
+    """Preserve the remote losing version under a conflict name, on both sides.
+
+    The NAS copy keeps the bytes safe even if the client dies here; the local
+    copy is what makes the conflict visible in the Conflicts tab.
+    """
     valid = lambda path: path and not path.startswith("/") and ".." not in path.split("/")
     if not valid(source_relative) or not valid(destination_relative):
         return False
@@ -1385,12 +1430,15 @@ def copy_remote_file(cfg: Config, conn: NasConnection, source_relative: str, des
     )
     user = cfg.get("nas_user")
     try:
-        return subprocess.run(
+        copied = subprocess.run(
             ["ssh", *ssh_opts(cfg, conn), f"{user}@{conn.host}", remote_cmd],
             capture_output=True, timeout=30,
         ).returncode == 0
     except (OSError, subprocess.TimeoutExpired):
         return False
+    if not copied:
+        return False
+    return _download_conflict_copy(cfg, conn, destination_relative)
 
 
 def upload_conflict_copy(
