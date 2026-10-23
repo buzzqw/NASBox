@@ -2485,8 +2485,16 @@ cmd_status() {
     printf '%-18s %s\n' "Storico (spazio):" "$size"
     printf '%-18s %s\n' "Journal (spazio):" "$(wc -c < "$JOURNAL_FILE" 2>/dev/null || echo 0) byte"
     printf '%-18s %s\n' "Manifest (spazio):" "$(wc -c < "$MANIFEST_FILE" 2>/dev/null || echo 0) byte"
-    printf '%-18s %s\n' "Log server (spazio):" "$(wc -c < "$LOG_FILE" 2>/dev/null || echo 0) byte"
-    printf '%-18s %s\n' "Eventi (spazio):" "$(wc -c < "$EVENTS_FILE" 2>/dev/null || echo 0) byte"
+    if [[ -f "$LOG_FILE" ]]; then
+        printf '%-18s %s\n' "Log server (spazio):" "$(wc -c < "$LOG_FILE" 2>/dev/null || echo 0) byte"
+    else
+        printf '%-18s %s\n' "Log server (spazio):" "0 byte"
+    fi
+    if [[ -f "$EVENTS_FILE" ]]; then
+        printf '%-18s %s\n' "Eventi (spazio):" "$(wc -c < "$EVENTS_FILE" 2>/dev/null || echo 0) byte"
+    else
+        printf '%-18s %s\n' "Eventi (spazio):" "0 byte"
+    fi
     read_sync_lock_diagnostics
     if [[ "$SYNC_LOCK_HELD" == "true" ]]; then
         printf '%-18s occupato (host %s, device %s, PID %s, età %s secondi, fase %s %s/%s)\n' \
