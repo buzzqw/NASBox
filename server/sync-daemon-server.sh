@@ -33,7 +33,7 @@
 #
 set -uo pipefail
 
-VERSION="3.21.0"
+VERSION="3.22.0"
 SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -53,6 +53,7 @@ JOURNAL_FILE="$STATE_DIR/transfer-journal.tsv"
 MANIFEST_FILE="$STATE_DIR/manifest.tsv"
 JOURNAL_LOCK_FILE="$STATE_DIR/transfer-journal.lock"
 MANIFEST_REVISION_FILE="$STATE_DIR/manifest.revision"
+MANIFEST_SWEEP_FILE="$STATE_DIR/manifest-sweep.stamp"
 TRANSACTION_DIR="$STATE_DIR/transactions"
 STAGING_DIRNAME=".nasbox-staging"
 CHANGE_WAIT_MAX_TIMEOUT_SECONDS=3600
@@ -74,6 +75,11 @@ DRY_RUN="false"
 # scan a week instead of never -- while letting a normal trash that is far from
 # its cutoff skip weeks of the expensive walk.
 PRUNE_MAX_SKIP_SECONDS=604800
+
+# Tombstone cleanup rewrites the whole manifest. Doing it on every read would
+# turn a read-only export back into a write storm, so the sweep runs at most
+# once a day even when the journal is empty.
+MANIFEST_SWEEP_MAX_SKIP_SECONDS=86400
 
 # --- logging ---
 
@@ -375,33 +381,30 @@ encode_journal_field() {
     printf '%s' "$value"
 }
 
-compact_manifest_unlocked() {
-    ensure_journal_files
-    local journal_lines tombstone_cutoff_seconds now_epoch
-    journal_lines=$(wc -l < "$JOURNAL_FILE" 2>/dev/null || echo 0)
-    if (( journal_lines <= 1 )); then
-        # Sweep old tombstones even when no new journal transaction arrived.
-        if (( TOMBSTONE_TTL_DAYS > 0 )); then
-            now_epoch=$(date '+%s')
-            tombstone_cutoff_seconds=$(( TOMBSTONE_TTL_DAYS * 86400 ))
-            local tmp_sweep="${MANIFEST_FILE}.sweep.$$"
-            awk -F '\t' -v now="$now_epoch" -v cutoff="$tombstone_cutoff_seconds" '
-                NR == 1 { print; next }
-                {
-                    if ($2 == "" && $3 == "0" && NF >= 6) {
-                        age = now - int($6)
-                        if (age > cutoff) next
-                    }
-                    print
-                }
-            ' "$MANIFEST_FILE" > "$tmp_sweep" && mv -f "$tmp_sweep" "$MANIFEST_FILE" || { rm -f "$tmp_sweep"; return 1; }
-        fi
-        return 0
+manifest_sweep_due() {
+    local now last=0
+    now=$(date '+%s')
+    if [[ -f "$MANIFEST_SWEEP_FILE" ]]; then
+        last=$(<"$MANIFEST_SWEEP_FILE") || last=0
     fi
-    local tmp="${MANIFEST_FILE}.tmp.$$"
+    [[ "$last" =~ ^[0-9]+$ ]] || last=0
+    (( now - last >= MANIFEST_SWEEP_MAX_SKIP_SECONDS ))
+}
+
+mark_manifest_sweep() {
+    mkdir -p "$STATE_DIR" 2>/dev/null || true
+    date '+%s' > "$MANIFEST_SWEEP_FILE" 2>/dev/null || true
+}
+
+# Render the authoritative union of manifest + journal on stdout, without
+# writing anything. This is what readers use: --manifest-export used to call
+# the compactor and rewrote the whole manifest on every read, which is
+# needless NAS CPU/disk churn for every client change notification.
+render_manifest_unlocked() {
+    local now_epoch tombstone_cutoff_seconds
     now_epoch=$(date '+%s')
     tombstone_cutoff_seconds=$(( TOMBSTONE_TTL_DAYS * 86400 ))
-    if ! awk -F '\t' -v now="$now_epoch" -v cutoff="$tombstone_cutoff_seconds" '
+    awk -F '\t' -v now="$now_epoch" -v cutoff="$tombstone_cutoff_seconds" '
         FILENAME == ARGV[1] {
             if (FNR == 1 && $0 == "NASBOX_MANIFEST_V1") next
             if (NF >= 6) state[$1] = $0
@@ -444,13 +447,37 @@ compact_manifest_unlocked() {
                 print state[path]
             }
         }
-    ' "$MANIFEST_FILE" "$JOURNAL_FILE" > "$tmp"; then
+    ' "$MANIFEST_FILE" "$JOURNAL_FILE"
+}
+
+compact_manifest_unlocked() {
+    ensure_journal_files
+    local journal_lines tmp
+    journal_lines=$(wc -l < "$JOURNAL_FILE" 2>/dev/null || echo 0)
+    if (( journal_lines <= 1 )); then
+        # Sweep old tombstones at most once a day even when no transaction
+        # arrived. Without the watermark this was a full manifest rewrite on
+        # every single read.
+        if (( TOMBSTONE_TTL_DAYS > 0 )) && manifest_sweep_due; then
+            tmp="${MANIFEST_FILE}.sweep.$$"
+            if ! render_manifest_unlocked > "$tmp"; then
+                rm -f "$tmp"
+                return 1
+            fi
+            mv -f "$tmp" "$MANIFEST_FILE" || { rm -f "$tmp"; return 1; }
+            mark_manifest_sweep
+        fi
+        return 0
+    fi
+    tmp="${MANIFEST_FILE}.tmp.$$"
+    if ! render_manifest_unlocked > "$tmp"; then
         rm -f "$tmp"
         return 1
     fi
     mv -f "$tmp" "$MANIFEST_FILE" || { rm -f "$tmp"; return 1; }
     printf 'NASBOX_JOURNAL_V1\n' > "${JOURNAL_FILE}.tmp" || { rm -f "${JOURNAL_FILE}.tmp"; return 1; }
     mv -f "${JOURNAL_FILE}.tmp" "$JOURNAL_FILE"
+    mark_manifest_sweep
 }
 
 cmd_journal_append() {
@@ -577,23 +604,60 @@ cmd_journal_compact() {
 
 cmd_manifest_export() {
     ensure_journal_files
-    cmd_journal_compact >/dev/null || return 1
-    cat "$MANIFEST_FILE"
+    local journal_lines lock_held="false"
+    # A shared lock keeps the manifest+journal pair consistent without blocking
+    # other readers or rewriting anything. Writers still take the exclusive
+    # side, so an export cannot observe half an append.
+    if command -v flock >/dev/null 2>&1; then
+        exec 9>"$JOURNAL_LOCK_FILE" 2>/dev/null || true
+        if flock -s 9 2>/dev/null; then
+            lock_held="true"
+        fi
+    fi
+    journal_lines=$(wc -l < "$JOURNAL_FILE" 2>/dev/null || echo 0)
+    local rendered
+    if (( journal_lines <= 1 )); then
+        rendered=$(<"$MANIFEST_FILE")
+    else
+        rendered=$(render_manifest_unlocked) || {
+            [[ "$lock_held" == "true" ]] && flock -u 9
+            exec 9>&-
+            return 1
+        }
+    fi
+    # Release before streaming over SSH: appends must not wait for the network.
+    [[ "$lock_held" == "true" ]] && flock -u 9
+    exec 9>&-
+    printf '%s\n' "$rendered"
 }
 
 cmd_manifest_get() {
-    local path="${1:-}" encoded
+    local path="${1:-}" encoded journal_lines
     [[ -n "$path" && "$path" != /* && "/$path/" != */../* ]] || {
         echo "MANIFEST_INVALID" >&2
         return 1
     }
     encoded="$(encode_journal_field "$path")"
-    cmd_journal_compact >/dev/null || return 1
-    awk -F '\t' -v wanted="$encoded" '
+    ensure_journal_files
+    local lock_held="false"
+    if command -v flock >/dev/null 2>&1; then
+        exec 9>"$JOURNAL_LOCK_FILE" 2>/dev/null || true
+        if flock -s 9 2>/dev/null; then
+            lock_held="true"
+        fi
+    fi
+    journal_lines=$(wc -l < "$JOURNAL_FILE" 2>/dev/null || echo 0)
+    if (( journal_lines <= 1 )); then
+        cat "$MANIFEST_FILE"
+    else
+        render_manifest_unlocked || { [[ "$lock_held" == "true" ]] && flock -u 9; exec 9>&-; return 1; }
+    fi | awk -F '\t' -v wanted="$encoded" '
         FNR == 1 && $0 == "NASBOX_MANIFEST_V1" { next }
         $1 == wanted { print "MANIFEST_HIT\t" $0; found = 1; exit }
         END { if (!found) print "MANIFEST_MISS" }
-    ' "$MANIFEST_FILE"
+    '
+    [[ "$lock_held" == "true" ]] && flock -u 9
+    exec 9>&-
 }
 
 valid_sync_relative_path() {

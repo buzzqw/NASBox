@@ -4,6 +4,60 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 1.24.0 - 2026-10-23
+
+Questa release rende visibile e gestibile ciò che prima era nascosto, e toglie
+lavoro inutile al NAS.
+
+- **Conflitti davvero protetti:** corretto `CONFLICT_GLOB`. Il vecchio pattern
+  conteneva spazi e `rsync` non lo applicava come singola regola, quindi
+  `--delete-after` dei mirror cancellava le copie di conflitto dopo pochi
+  minuti. Ora il pattern è `*conflitto*` e un test esegue davvero `rsync` su
+  directory temporanee per impedire il ritorno del bug.
+- **Conflict Center 2.0:** tabella con dimensione, data e dispositivo di
+  origine; filtro per percorso; versione consigliata preselezionata (contenuto
+  più recente); anteprima diff per i file di testo; metadati e messaggi chiari
+  per i binari; selezione multipla e "Risolvi selezionati (mantieni
+  originale)"; badge nella scheda Conflitti, nella tray e nella card di stato.
+- **Risoluzione più sicura e reattiva:** la promozione della versione scelta è
+  un rename atomico (niente doppia copia del file), gira in background, usa il
+  gate di trasferimento e la pulizia delle copie sul NAS avviene sotto un solo
+  lease (`browse_delete_many`) invece di un lock per file. La scansione dei
+  conflitti usa `os.walk` con pruning delle directory interne e non riscrive il
+  database quando il gruppo non è cambiato.
+- **Guardia anti conflict-storm:** dopo 3 conflitti per lo stesso percorso in
+  un'ora viene riutilizzato un unico nome stabile, così un albero di build
+  continuamente modificato non accumula decine di copie intere. Nuove chiavi
+  `conflict_storm_limit` e `conflict_storm_window_seconds`.
+- **Cartelle mirror autoritative:** le sottocartelle di destinazione dei mirror
+  non vengono più scaricate dal NAS né trasformate in conflitti; la sorgente
+  locale è autoritativa. Questo risolve alla radice il caso di una cartella
+  LaTeX/Git/build replicata ogni 5 minuti che generava conflitti a ripetizione.
+  Le cancellazioni locali continuano a propagarsi solo quando la propagazione
+  è attiva.
+- **NAS più leggero (server 3.22.0):** `--manifest-export` e `--manifest-get`
+  sono ora read-only: rendono la vista manifest+journal in streaming e non
+  riscrivono più l'intero manifest a ogni lettura. La compattazione resta
+  legata alla soglia del journal e la pulizia dei tombstone ha un watermark
+  giornaliero. L'export prende un lock condiviso per coerenza.
+- **NAS più leggero (client):** health check adattivo (5 minuti quando il NAS è
+  stabile), ricerca aggiornamento server ogni 5 minuti, preview della coda a
+  5 minuti quando la finestra non è visibile, riconciliazione completa ogni 2
+  ore invece di 15 minuti (forzabile con "Sincronizza tutto ora"), metriche a
+  30 secondi di default. Nuovo profilo "NAS-friendly" in Impostazioni.
+- **Compressione rsync configurabile:** automatica (disattivata sul percorso
+  LAN diretto, attiva su WAN/bastione), sempre attiva o sempre disattiva.
+  Meno CPU sul NAS sulle reti veloci.
+- **Profili di esclusione rapidi:** LaTeX/documenti, sviluppo/build, Office e
+  sistema/NAS, aggiungibili con un clic e removibili singolarmente. Pensati per
+  fermare il churn di `.aux`, `.log`, `.idx`, `.synctex.gz`, `.git/`,
+  `node_modules/`, `build/` e simili.
+- **Stato più leggibile:** la scheda principale mostra solo ciò che serve ogni
+  giorno; lock, watcher, coda e pending sono in "Mostra dettagli tecnici". I
+  conflitti aperti compaiono come problema azionabile.
+- **Cartelle esterne:** nuova nota che spiega il contratto "la sorgente è
+  autoritativa" e il comportamento delle cancellazioni.
+
 ## 1.23.15 - 2026-10-22
 
 - Corretto il tab **Conflitti** che restava vuoto: le copie di conflitto in cui

@@ -58,7 +58,7 @@ def test_dialog_restore_local_overwrites_the_original(tmp_path):
         assert (root / "doc.txt").read_text() == "old content"
 
 
-def test_conflict_tab_resolve_after_restore_moves_candidates(tmp_path):
+def test_conflict_tab_resolve_after_restore_moves_candidates(qtbot, tmp_path):
     with ClientEnvironment():
         cfg = Config()
         root = tmp_path / "nasbox"
@@ -74,8 +74,9 @@ def test_conflict_tab_resolve_after_restore_moves_candidates(tmp_path):
         tab = ConflictsTab(cfg, engine)
         tab._resolve_after_restore(groups[0], str(root), "doc.txt")
 
+        candidate = root / "doc (conflitto da dev1 deadbeef).txt"
+        qtbot.waitUntil(lambda: not candidate.exists(), timeout=5000)
         assert (root / "doc.txt").exists()
-        assert not (root / "doc (conflitto da dev1 deadbeef).txt").exists()
 
 
 def test_settings_unaffected_smoke(qtbot, tmp_path):

@@ -1106,42 +1106,85 @@ def browse_list(cfg: Config, conn: NasConnection, relative_path: str) -> list[Br
     return entries
 
 
-def browse_delete(cfg: Config, conn: NasConnection, relative_path: str, device_id: str) -> tuple[bool, str]:
+def browse_delete(
+    cfg: Config, conn: NasConnection, relative_path: str, device_id: str,
+    *, lease: "RemoteLock | None" = None, validate: bool = True,
+) -> tuple[bool, str]:
     """Move a remote file or folder into the NAS trash (same retention as sync)."""
     if not _BROWSE_PATH_VALID(relative_path):
         return False, "percorso non valido"
     script_path = (cfg.get("remote_server_script") or "").strip()
     if not script_path:
         return False, "script server NAS non configurato"
-    try:
-        validate_transfer_safety(cfg, conn, destructive=False, direction="upload")
-    except RepositorySafetyError as exc:
-        return False, str(exc)
+    if validate:
+        try:
+            validate_transfer_safety(cfg, conn, destructive=False, direction="upload")
+        except RepositorySafetyError as exc:
+            return False, str(exc)
     payload = b"\0".join((
         b"BROWSE_DELETE_V1", new_run_ts().encode("ascii"), device_id.encode("ascii"),
         os.fsencode(relative_path),
     )) + b"\0"
+
+    def _run() -> tuple[bool, str]:
+        ok, output, error = run_remote_script_input_bytes(
+            cfg, conn, script_path, ["--browse-delete"], payload, timeout=120,
+        )
+        if not ok:
+            return False, error or "cancellazione remota fallita"
+        values = output.split(b"\0")
+        if len(values) < 2 or values[0] != b"BROWSE_DELETE_V1":
+            return False, "risposta del NAS non valida"
+        if values[1] == b"OK":
+            return True, ""
+        detail = values[2].decode(errors="replace") if len(values) > 2 else ""
+        return False, detail or "cancellazione remota fallita"
+
+    # Browse mutations must use the same NAS transaction lock as push/pull.
+    # The server command also takes the journal lock, so filesystem and history
+    # updates cannot interleave with an rsync transaction.
+    if lease is not None:
+        return _run()
     try:
-        # Browse mutations must use the same NAS transaction lock as push/pull.
-        # The server command also takes the journal lock, so filesystem and
-        # history updates cannot interleave with an rsync transaction.
         with remote_lock(cfg, conn, owner_id=device_id):
-            ok, output, error = run_remote_script_input_bytes(
-                cfg, conn, script_path, ["--browse-delete"], payload, timeout=120,
-            )
+            return _run()
     except RemoteLockBusy:
         return False, "NAS occupato da un'altra sincronizzazione; riprova tra poco"
     except RemoteLockError as exc:
         return False, str(exc)
-    if not ok:
-        return False, error or "cancellazione remota fallita"
-    values = output.split(b"\0")
-    if len(values) < 2 or values[0] != b"BROWSE_DELETE_V1":
-        return False, "risposta del NAS non valida"
-    if values[1] == b"OK":
-        return True, ""
-    detail = values[2].decode(errors="replace") if len(values) > 2 else ""
-    return False, detail or "cancellazione remota fallita"
+
+
+def browse_delete_many(
+    cfg: Config, conn: NasConnection, relative_paths: list[str], device_id: str,
+) -> list[tuple[str, bool, str]]:
+    """Delete several remote paths under one lease.
+
+    Conflict cleanup used to acquire the NAS lease once per copy. With a storm
+    that means dozens of lock handshakes and journal commits. One lease for the
+    whole list is both faster and kinder to the NAS; each path still gets its
+    own recoverable server-side transaction.
+    """
+    paths = [path for path in relative_paths if path]
+    if not paths:
+        return []
+    try:
+        validate_transfer_safety(cfg, conn, destructive=False, direction="upload")
+    except RepositorySafetyError as exc:
+        return [(path, False, str(exc)) for path in paths]
+    results: list[tuple[str, bool, str]] = []
+    try:
+        with remote_lock(cfg, conn, owner_id=device_id) as lease:
+            for path in paths:
+                ok, detail = browse_delete(
+                    cfg, conn, path, device_id, lease=lease, validate=False,
+                )
+                results.append((path, ok, detail))
+    except RemoteLockBusy:
+        detail = "NAS occupato da un'altra sincronizzazione; riprova tra poco"
+        return [(path, False, detail) for path in paths]
+    except RemoteLockError as exc:
+        return [(path, False, str(exc)) for path in paths]
+    return results
 
 
 def browse_rename(
@@ -1570,6 +1613,26 @@ def _exclude_args(cfg: Config) -> list[str]:
     return args
 
 
+def _mirror_owned_exclude_args(cfg: Config) -> list[str]:
+    """Anchored rsync excludes for subtrees owned by a one-way mirror."""
+    return [
+        arg
+        for root in cfg.mirror_owned_roots()
+        for arg in ("--exclude", f"/{root}")
+    ]
+
+
+def path_is_mirror_owned(cfg: Config, relative_path: str) -> bool:
+    """True when a path lives under an enabled mirror's destination folder."""
+    path = relative_path.replace("\\", "/").strip("/")
+    if not path:
+        return False
+    return any(
+        path == root or path.startswith(root + "/")
+        for root in cfg.mirror_owned_roots()
+    )
+
+
 def path_is_excluded(cfg: Config, relative_path: str) -> bool:
     """Apply the same practical exclude rules to pre-transfer conflict checks."""
     parts = [part for part in relative_path.replace("\\", "/").split("/") if part]
@@ -1637,6 +1700,25 @@ def _partial_transfer_args(*, append_verify: bool = False) -> list[str]:
     if append_verify:
         return ["--partial", "--append-verify"]
     return ["--partial", f"--partial-dir={PARTIAL_DIRNAME}", "--delay-updates"]
+
+
+def _compression_args(cfg: Config, conn: NasConnection) -> list[str]:
+    """rsync -z policy.
+
+    On a direct LAN link compression is usually a net loss: it burns the NAS
+    CPU (often the weakest machine in the chain) to save bandwidth that is
+    already plentiful. "auto" therefore disables it only for the configured LAN
+    address; WAN and bastion routes keep it. Users can force either behaviour.
+    """
+    mode = str(cfg.get("compression_mode") or "auto").strip().lower()
+    if mode == "off":
+        return []
+    if mode == "on":
+        return ["-z"]
+    lan = str(cfg.get("nas_lan") or "").strip()
+    if lan and conn.host == lan and not conn.via_jump:
+        return []
+    return ["-z"]
 
 
 def _bwlimit_args(cfg: Config, direction: str) -> list[str]:
@@ -1998,8 +2080,11 @@ def _run_transfer(
     # can safely use append+full verification. Canonical push/pull keeps
     # delay-updates to preserve atomic publication of complete files.
     use_append_verify = append_verify and remote_destination is not None and not keep_backups
+    # A mirror destination is locally authoritative: never let a full/targeted
+    # pull write NAS-side content back into it. Push still uploads it normally.
+    direction_excludes = _mirror_owned_exclude_args(cfg) if direction == "download" else []
     cmd = [
-        "rsync", "-avz",
+        "rsync", "-av", *_compression_args(cfg, conn),
         f"--skip-compress={RSYNC_SKIP_COMPRESS_SUFFIXES}",
         # NASBox files belong to the SSH account, not to the remote UID/GID
         # from another machine. Avoid chgrp/chown/mode failures on Synology
@@ -2016,6 +2101,7 @@ def _run_transfer(
         "--info=progress2",
         *(["--backup", f"--backup-dir={backup_dir}", f"--suffix=-{run_ts}"] if keep_backups else []),
         *_exclude_args(cfg),
+        *direction_excludes,
         "--out-format=%i|%l|%n",
         "-e", _ssh_e_arg(cfg, conn),
         src, dst,

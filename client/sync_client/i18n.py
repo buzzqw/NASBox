@@ -1455,6 +1455,141 @@ STRINGS: dict[str, dict[str, str]] = {
     "browse.deleting": {"it": "Eliminazione in corso…", "en": "Deleting…"},
     "browse.delete_failed_title": {"it": "Eliminazione fallita", "en": "Deletion failed"},
     "browse.delete_partial_body": {"it": "Eliminazione fallita per: {names}", "en": "Deletion failed for: {names}"},
+
+    # --- Conflict Center 2.0 -------------------------------------------------
+    "conflicts.search_placeholder": {
+        "it": "Filtra per percorso…", "en": "Filter by path…",
+    },
+    "conflicts.col_size": {"it": "Dimensione", "en": "Size"},
+    "conflicts.col_modified": {"it": "Modificato", "en": "Modified"},
+    "conflicts.col_origin": {"it": "Origine", "en": "Origin"},
+    "conflicts.no_selection": {
+        "it": "Seleziona un conflitto per vedere le versioni.",
+        "en": "Select a conflict to see its versions.",
+    },
+    "conflicts.detail_meta": {
+        "it": "{alternatives} alternative · {size} in totale · origine {origin} · {status}",
+        "en": "{alternatives} alternatives · {size} total · origin {origin} · {status}",
+    },
+    "conflicts.preview_title": {"it": "Confronto versioni", "en": "Version comparison"},
+    "conflicts.preview_missing": {
+        "it": "La versione selezionata non è più disponibile.",
+        "en": "The selected version is no longer available.",
+    },
+    "conflicts.preview_binary": {
+        "it": "Anteprima non disponibile per un file binario ({size}). Usa “Apri” per confrontarlo con l'applicazione predefinita.",
+        "en": "Preview unavailable for a binary file ({size}). Use “Open” to compare it with the default application.",
+    },
+    "conflicts.preview_too_large": {
+        "it": "File troppo grande per l'anteprima ({size}). Apri la versione per confrontarla.",
+        "en": "File too large for the preview ({size}). Open the version to compare it.",
+    },
+    "conflicts.preview_original": {"it": "originale", "en": "original"},
+    "conflicts.preview_alternative": {"it": "alternativa", "en": "alternative"},
+    "conflicts.preview_identical": {
+        "it": "Il contenuto è identico; cambiano solo data o metadati.",
+        "en": "The content is identical; only date or metadata differ.",
+    },
+    "conflicts.preview_truncated": {"it": "… anteprima troncata …", "en": "… preview truncated …"},
+    "conflicts.recommended": {"it": "consigliata", "en": "recommended"},
+    "conflicts.resolve_all_btn": {
+        "it": "Risolvi selezionati (mantieni originale)",
+        "en": "Resolve selected (keep original)",
+    },
+    "conflicts.resolve_all_tooltip": {
+        "it": "Per ogni conflitto selezionato mantiene l'originale (o la versione più recente se l'originale manca) e archivia le alternative.",
+        "en": "For every selected conflict keep the original (or the newest version if the original is missing) and archive the alternatives.",
+    },
+    "conflicts.resolve_all_confirm_title": {
+        "it": "Risolvi conflitti selezionati", "en": "Resolve selected conflicts",
+    },
+    "conflicts.resolve_all_confirm_body": {
+        "it": "Risolvere {count} conflitti mantenendo l'originale? Le alternative finiranno nello storico locale e in quello del NAS.",
+        "en": "Resolve {count} conflicts keeping the original? Alternatives will move to local and NAS history.",
+    },
+    "conflicts.resolving": {
+        "it": "Risoluzione in corso…", "en": "Resolving…",
+    },
+    "conflicts.resolve_failed_detail": {
+        "it": "Risoluzione non riuscita: {detail}", "en": "Resolution failed: {detail}",
+    },
+    "conflicts.partial_done": {
+        "it": "{resolved} conflitti risolti; {problems} pulizie remote da riprovare. Dettagli nel log.",
+        "en": "{resolved} conflicts resolved; {problems} remote cleanups need a retry. See the log for details.",
+    },
+    "conflicts.remote_unreachable": {
+        "it": "NAS non raggiungibile: la copia locale è stata risolta, la pulizia remota verrà ritentata al prossimo giro.",
+        "en": "NAS unreachable: the local copy was resolved, remote cleanup will be retried later.",
+    },
+    "conflicts.scheduler_timeout": {
+        "it": "Attesa del turno di sincronizzazione scaduta: riprova quando i trasferimenti sono fermi.",
+        "en": "Timed out waiting for the sync turn: retry when transfers are idle.",
+    },
+
+    # --- compact status / badges ---------------------------------------------
+    "status.details_show": {"it": "Mostra dettagli tecnici", "en": "Show technical details"},
+    "status.details_hide": {"it": "Nascondi dettagli tecnici", "en": "Hide technical details"},
+    "status.conflict_stat": {
+        "it": "{count} conflitti da rivedere — apri il Conflict Center",
+        "en": "{count} conflicts to review — open the Conflict Center",
+    },
+    "status.problem_conflicts": {
+        "it": "{count} conflitti aspettano una decisione.",
+        "en": "{count} conflicts are waiting for a decision.",
+    },
+    "status.attention_action_conflicts": {
+        "it": "Apri Conflitti", "en": "Open Conflicts",
+    },
+    "tray.conflicts_suffix": {"it": " · {count} conflitti", "en": " · {count} conflicts"},
+    "tray.conflicts_action": {
+        "it": "Rivedi {count} conflitti…", "en": "Review {count} conflicts…",
+    },
+    "settings.compression_label": {"it": "Compressione rsync", "en": "rsync compression"},
+    "settings.compression_auto": {
+        "it": "Automatica (disattiva in LAN)", "en": "Automatic (off on LAN)",
+    },
+    "settings.compression_on": {"it": "Sempre attiva", "en": "Always on"},
+    "settings.compression_off": {"it": "Sempre disattiva", "en": "Always off"},
+    "settings.compression_tooltip": {
+        "it": "In LAN gigabit la compressione spesso costa più CPU sul NAS di quanta banda risparmi. Automatica la disattiva solo per l'indirizzo LAN diretto.",
+        "en": "On a gigabit LAN compression often costs more NAS CPU than bandwidth it saves. Automatic disables it only for the direct LAN address.",
+    },
+    "settings.exclude_profile_label": {"it": "Profilo rapido:", "en": "Quick profile:"},
+    "settings.exclude_profile_add": {"it": "Aggiungi profilo", "en": "Add profile"},
+    "settings.exclude_profile_tooltip": {
+        "it": "Aggiunge un gruppo di esclusioni tipiche (LaTeX, sviluppo, Office, sistema). Puoi rimuoverle una per una.",
+        "en": "Adds a bundle of common excludes (LaTeX, development, Office, system). You can remove them individually.",
+    },
+    "settings.profile_latex": {"it": "LaTeX / build documenti", "en": "LaTeX / document builds"},
+    "settings.profile_dev": {"it": "Sviluppo / build", "en": "Development / build"},
+    "settings.profile_office": {"it": "Office / file temporanei", "en": "Office / temporary files"},
+    "settings.profile_os": {"it": "Sistema / NAS", "en": "System / NAS"},
+    "settings.profile_added": {
+        "it": "{count} esclusioni aggiunte. Salva per applicarle.",
+        "en": "{count} exclusions added. Save to apply them.",
+    },
+    "settings.full_pull_label": {
+        "it": "Riconciliazione completa ogni", "en": "Full reconciliation every",
+    },
+    "settings.full_pull_note": {
+        "it": "Scansione completa di sicurezza del NAS. Il change feed continua a svegliare il client sugli eventi reali, quindi un intervallo alto non ritarda le modifiche.",
+        "en": "Periodic full NAS safety scan. The change feed still wakes the client for real events, so a high interval does not delay changes.",
+    },
+    "settings.nas_friendly_btn": {
+        "it": "Applica profilo NAS-friendly", "en": "Apply NAS-friendly profile",
+    },
+    "settings.nas_friendly_tooltip": {
+        "it": "Imposta controlli più distanziati, riconciliazione completa ogni 6 ore e compressione automatica: meno carico sul NAS, sincronizzazione ancora guidata dagli eventi.",
+        "en": "Sets spaced checks, a six-hour full reconciliation and automatic compression: less NAS load while sync stays event-driven.",
+    },
+    "settings.nas_friendly_applied": {
+        "it": "Profilo NAS-friendly impostato. Salva per applicarlo.",
+        "en": "NAS-friendly profile set. Save to apply it.",
+    },
+    "mirrors.authority_note": {
+        "it": "La cartella sorgente è autoritativa: le modifiche fatte sul NAS dentro una cartella mirror non vengono scaricate né trasformate in conflitti. Le cancellazioni locali vengono propagate solo se la propagazione delle cancellazioni è attiva.",
+        "en": "The source folder is authoritative: NAS-side edits inside a mirror folder are neither downloaded nor turned into conflicts. Local deletions propagate only when delete propagation is enabled.",
+    },
 }
 
 

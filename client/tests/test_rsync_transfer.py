@@ -38,6 +38,38 @@ class _FakeProcess:
         self.returncode = 137
 
 
+class CompressionPolicyTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.environment = ClientEnvironment()
+        self.environment.__enter__()
+        self.cfg = Config()
+        self.cfg.set("nas_lan", "10.0.0.5", persist=False)
+
+    def tearDown(self) -> None:
+        self.environment.__exit__(None, None, None)
+
+    def test_auto_disables_compression_on_direct_lan(self) -> None:
+        conn = rsync_ops.NasConnection("10.0.0.5")
+        self.assertEqual(rsync_ops._compression_args(self.cfg, conn), [])
+
+    def test_auto_keeps_compression_on_wan_or_bastion(self) -> None:
+        self.assertEqual(rsync_ops._compression_args(self.cfg, rsync_ops.NasConnection("203.0.113.7")), ["-z"])
+        self.assertEqual(
+            rsync_ops._compression_args(self.cfg, rsync_ops.NasConnection("10.0.0.5", via_jump=True)),
+            ["-z"],
+        )
+
+    def test_forced_modes_win(self) -> None:
+        self.cfg.set("compression_mode", "on", persist=False)
+        self.assertEqual(
+            rsync_ops._compression_args(self.cfg, rsync_ops.NasConnection("10.0.0.5")), ["-z"],
+        )
+        self.cfg.set("compression_mode", "off", persist=False)
+        self.assertEqual(
+            rsync_ops._compression_args(self.cfg, rsync_ops.NasConnection("203.0.113.7")), [],
+        )
+
+
 class RsyncTransferTests(unittest.TestCase):
     def setUp(self) -> None:
         self.environment = ClientEnvironment()

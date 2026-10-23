@@ -22,6 +22,13 @@ def tray_icon(qapp):
         return tray
 
 
+def test_tray_conflict_count_surfaces_in_tooltip(tray_icon):
+    tray_icon.set_conflict_count(2)
+    assert "2" in tray_icon.toolTip()
+    tray_icon.set_conflict_count(0)
+    assert "2" not in tray_icon.toolTip()
+
+
 def test_tray_transfer_completion_duration(tray_icon):
     tray_icon.on_transfer_preparing("upload")
     assert "upload" in tray_icon._active_transfers

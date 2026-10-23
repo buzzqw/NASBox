@@ -6,7 +6,7 @@ cartella NASBox** — con il NAS; il NAS gira un demone leggero che applica la
 retention dello storico. Tutti i PC collegati vedono, con un ritardo di al
 più qualche decina di secondi, i file che gli altri ci mettono dentro.
 
-Versione documentata: client `1.23.1`, server NAS `3.17.0`.
+Versione documentata: client `1.24.0`, server NAS `3.22.0`.
 
 Il modello è deliberatamente quello di Dropbox: **una** cartella per PC,
 niente elenchi di condivisioni da aggiungere/modificare/rimuovere a mano.
@@ -490,6 +490,11 @@ normale ciclo di sincronizzazione.
   Qualunque modifica fatta altrove alla copia dentro NASBox viene sovrascritta
   (o eliminata, se la cartella sorgente non contiene più quel file) alla
   passata successiva.
+- Le modifiche fatte **sul NAS** dentro una cartella mirror non vengono
+  scaricate e non vengono trasformate in conflitti: la sorgente locale è
+  autoritativa. Le cancellazioni locali vengono propagate al NAS solo se la
+  propagazione delle cancellazioni è attiva; in modalità archivio restano
+  locali. La nota nella scheda **Cartelle esterne** riepiloga il contratto.
 - La copia si aggiorna quasi subito dopo ogni modifica della sorgente
   (rilevamento inotify, come per la cartella NASBox), con un re-sync periodico
   di sicurezza ogni 5 minuti che recupera anche le modifiche avvenute col PC
@@ -577,26 +582,30 @@ ciclo. Se la versione NAS vince, la copia locale viene prima salvata sul NAS e
 il file originale locale viene sostituito con la versione NAS; se vince la
 versione locale, il file NAS originale viene conservato come copia di conflitto.
 
-Se il tab **Log** mostra più conflitti consecutivi sullo stesso percorso,
-mettere in pausa la sincronizzazione e non cancellare manualmente né il file
-originale né le copie di conflitto prima di aver confrontato i contenuti.
+Il tab **Conflitti** è il punto di lavoro consigliato:
 
-Per eliminare in sicurezza copie di conflitto già presenti:
+- la tabella mostra percorso, numero di alternative, dimensione totale, data
+  dell'ultima versione e dispositivo di origine;
+- il pannello a destra propone la versione **consigliata** (contenuto più
+  recente) e mostra un diff per i file di testo, oppure metadati e un invito ad
+  aprire i file binari;
+- **Mantieni selezionata** promuove una versione a originale (rename atomico,
+  in background, senza duplicare il file);
+- **Risolvi selezionati (mantieni originale)** risolve più conflitti in un
+  colpo; se l'originale non esiste usa la versione più recente;
+- **Elimina copie** conserva l'originale e archivia le alternative;
+- la pulizia delle copie sul NAS avviene sotto un solo lease e in modo
+  recuperabile; se il NAS non è raggiungibile, la parte locale resta risolta e
+  il messaggio indica che la pulizia remota verrà ritentata.
 
-1. fermare o mettere in pausa **tutti** i client che usano il repository;
-2. attendere che il tab **Trasferimenti** non mostri operazioni attive;
-3. confrontare le copie con il file canonico e conservare prima ogni versione
-   utile;
-4. rimuovere le copie dal tab **Storico** oppure seguire la procedura di
-   pulizia amministrativa del NAS;
-5. verificare che non restino copie locali o remote e solo dopo riavviare i
-   client.
+Il badge **Conflitti (N)** nella scheda, nella tray e nella card di stato rende
+immediatamente visibile un conflitto aperto. Se lo stesso percorso produce
+conflitti ripetuti, NASBox riusa un solo nome stabile dopo la soglia
+`conflict_storm_limit` (default 3 in un'ora) invece di accumulare copie intere.
 
-Non cancellare copie remote mentre un client le sta ancora scaricando o ha già
-le relative modifiche nella coda locale: la cancellazione può essere osservata
-come una nuova modifica e produrre conflitti annidati. Le copie non necessarie
-vanno quindi rimosse con i client fermi, non con `rm` durante una sincronizzazione
-attiva.
+Non cancellare copie remote con `rm` mentre un client le sta scaricando: la
+cancellazione può essere osservata come una nuova modifica. Usare il tab
+Conflitti o lo Storico.
 
 ## 9. Limite di banda
 
@@ -606,6 +615,19 @@ impostazioni" i nuovi limiti vengono usati dal ciclo di sincronizzazione
 successivo, senza riavviare l'app — puoi ad esempio lasciare libero lo
 scaricamento e limitare solo il caricamento (o viceversa).
 
+### Compressione rsync
+
+Sempre in **Frequenza sincronizzazione**:
+
+- **Automatica (default)**: compressione attiva su WAN e bastione, disattivata
+  quando il NAS è raggiunto direttamente sull'indirizzo LAN. Su reti gigabit la
+  CPU del NAS è spesso il collo di bottiglia, non la banda.
+- **Sempre attiva**: utile su link lenti o a consumo.
+- **Sempre disattiva**: utile su LAN molto veloci e NAS con poca CPU.
+
+La lista `--skip-compress` interna evita comunque di comprimere formati già
+compressi (PDF, archivi, immagini, video, audio).
+
 ## 10. Frequenza di sincronizzazione
 
 - **Caricamento (push)**, se previsto dalla modalità: quasi immediato — un controllo rileva i cambiamenti
@@ -614,9 +636,17 @@ scaricamento e limitare solo il caricamento (o viceversa).
   [§2](#2-requisiti)) e invia il file al NAS dopo un breve "assestamento"
   (debounce, default 2 secondi, configurabile in `client.json` come
   `debounce_seconds`).
-- **Scaricamento (pull)**, se previsto dalla modalità: periodico, intervallo configurabile dal tab
-  Impostazioni ("Controlla il NAS per novità ogni…"), default 60 secondi. È
-  così che un client scopre cosa hanno caricato gli altri.
+- **Scaricamento (pull)**, se previsto dalla modalità: guidato dagli eventi.
+  Quando il change feed è disponibile il client resta in attesa della revisione
+  del manifest sul NAS e si sveglia appena un altro PC pubblica qualcosa; il
+  valore "Controlla il NAS per novità ogni…" resta come fallback/compatibilità.
+  La **riconciliazione completa** periodica (default 2 ore) è una rete di
+  sicurezza per modifiche fuori journal: non rallenta le modifiche normali e
+  può essere forzata con "Sincronizza tutto ora".
+- **Profilo NAS-friendly** (stesso riquadro): imposta controlli più distanziati,
+  riconciliazione completa ogni 6 ore e compressione automatica. È pensato per
+  chi vuole ridurre al minimo il lavoro di controllo sul NAS senza perdere la
+  sincronizzazione guidata dagli eventi.
 
 Quando entrambe le direzioni sono abilitate, caricamento e scaricamento girano su percorsi indipendenti: uno scaricamento
 lungo (es. il NAS ha molti file da controllare) non ritarda un caricamento

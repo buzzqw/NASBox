@@ -38,6 +38,10 @@ class MirrorsTab(QWidget):
         note = QLabel(t("mirrors.note"))
         note.setWordWrap(True)
         root.addWidget(note)
+        authority_note = QLabel(t("mirrors.authority_note"))
+        authority_note.setObjectName("mirrorAuthorityNote")
+        authority_note.setWordWrap(True)
+        root.addWidget(authority_note)
 
         self.table = QTableWidget(0, 5)
         self.table.setHorizontalHeaderLabels([

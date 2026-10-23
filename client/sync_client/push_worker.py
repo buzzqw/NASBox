@@ -126,6 +126,11 @@ class PushWorker(TransferWorker):
         self._staging_upload_paths: set[str] = set()
         self._directory_events: set[str] = set()
         self._completed_rename_paths: set[str] = set()
+        # Per-path recent conflict timestamps. A path that keeps diverging
+        # (e.g. a build tree modified by an external process) must not create a
+        # new full-size copy on every pass; after the configured limit we reuse
+        # one stable conflict name so only the latest losing version is kept.
+        self._conflict_history: dict[str, list[float]] = {}
 
     def _wake_now(self) -> None:
         self._wake.set()
@@ -951,6 +956,10 @@ class PushWorker(TransferWorker):
         remote_query_paths = set(relative_paths)
         if allow_renames:
             remote_query_paths.update(self._directory_events)
+        mirror_roots = tuple(self.cfg.mirror_owned_roots())
+
+        def _mirror_owned(path: str) -> bool:
+            return any(path == root or path.startswith(root + "/") for root in mirror_roots)
         remote_states = rsync_ops.remote_file_states(
             self.cfg, self._conn, remote_query_paths,
             compact=compact_remote_manifest, on_progress=remote_progress,
@@ -977,6 +986,49 @@ class PushWorker(TransferWorker):
                     self.cfg.local_root(), relative_path,
                 ),
             )
+            # A mirror destination is authoritative on this PC. Never turn a
+            # NAS-side edit into a conflict (or adopt it): re-assert the local
+            # version and keep the mirror's source-of-truth contract. Without
+            # this, an active build tree mirrored every few minutes produced an
+            # endless conflict storm (one copy per pass).
+            if _mirror_owned(relative_path):
+                if local_fp is not None:
+                    if decision.action in (
+                        Action.UPLOAD, Action.REMOTE_WINS,
+                        Action.CONFLICT_LOCAL_WINS, Action.CONFLICT_REMOTE_WINS,
+                    ):
+                        uploads.add(relative_path)
+                        self._causal_journal_versions[relative_path] = local_fp.causal
+                        if decision.action in (Action.REMOTE_WINS, Action.CONFLICT_LOCAL_WINS, Action.CONFLICT_REMOTE_WINS):
+                            self._log(
+                                "MIRROR_OVERWRITE", relative_path,
+                                "cartella mirror: la versione locale è autoritativa",
+                            )
+                        continue
+                elif baseline is not None and not baseline.is_tombstone and remote.kind == RemoteKind.FILE:
+                    # The mirror removed the file locally. Keep it absent on the
+                    # NAS when deletions are enabled; otherwise remember the
+                    # remote state so the same decision is not retried forever.
+                    if self.cfg.allows_remote_deletions():
+                        deletes.append((relative_path, remote.digest, remote.mtime_ns // 1_000_000_000))
+                        self._causal_journal_versions[relative_path] = self.sync_state.local_causal(
+                            self.cfg.local_root(), relative_path,
+                        )
+                        self._log(
+                            "MIRROR_DELETE", relative_path,
+                            "cartella mirror: cancellazione locale autoritativa",
+                        )
+                    else:
+                        remote_wins.add(relative_path)
+                        self._causal_journal_versions[relative_path] = remote.causal
+                    continue
+                elif remote.kind == RemoteKind.TOMBSTONE:
+                    adopted.add(relative_path)
+                    continue
+                elif remote.kind == RemoteKind.FILE:
+                    # A NAS-only file inside a mirror subtree is not something
+                    # this PC should adopt: the local source defines the tree.
+                    continue
             if decision.action == Action.UPLOAD:
                 uploads.add(relative_path)
                 self._causal_journal_versions[relative_path] = local_fp.causal if local_fp else None
@@ -993,17 +1045,22 @@ class PushWorker(TransferWorker):
             elif decision.action == Action.ADOPT:
                 adopted.add(relative_path)
             elif decision.action == Action.CONFLICT_LOCAL_WINS:
-                conflict_path = self._conflict_path(relative_path, remote.digest)
+                storm = self._conflict_storm(relative_path)
+                conflict_path = self._conflict_path(relative_path, "" if storm else remote.digest)
                 if not rsync_ops.copy_remote_file(self.cfg, self._conn, relative_path, conflict_path):
                     raise rsync_ops.RemoteLockError("impossibile conservare la versione NAS in conflitto")
                 self._conflict_journal_items.append(rsync_ops.TransferItem("upload", conflict_path))
                 self._causal_journal_versions[conflict_path] = remote.causal
                 self._causal_journal_versions[relative_path] = local_fp.causal if local_fp else None
-                self._log("CONFLICT", relative_path, f"versione NAS salvata come {conflict_path}")
+                self._log(
+                    "CONFLICT_STORM" if storm else "CONFLICT", relative_path,
+                    f"versione NAS salvata come {conflict_path}",
+                )
                 uploads.add(relative_path)
             elif decision.action == Action.CONFLICT_REMOTE_WINS:
                 if local_fp is not None:
-                    conflict_path = self._conflict_path(relative_path, local_fp.digest)
+                    storm = self._conflict_storm(relative_path)
+                    conflict_path = self._conflict_path(relative_path, "" if storm else local_fp.digest)
                     ok, detail = rsync_ops.upload_conflict_copy(
                         self.cfg, self._conn, relative_path, conflict_path,
                     )
@@ -1023,7 +1080,10 @@ class PushWorker(TransferWorker):
                     self._conflict_journal_items.append(rsync_ops.TransferItem("upload", conflict_path))
                     self._causal_journal_versions[conflict_path] = local_fp.causal
                     self._causal_journal_versions[relative_path] = remote.causal
-                    self._log("CONFLICT", relative_path, f"versione locale salvata sul NAS come {conflict_path}")
+                    self._log(
+                        "CONFLICT_STORM" if storm else "CONFLICT", relative_path,
+                        f"versione locale salvata sul NAS come {conflict_path}",
+                    )
                     remote_adoptions[relative_path] = local_fp
             elif decision.action == Action.REMOTE_WINS:
                 if local_fp is None and baseline is not None and not baseline.is_tombstone:
@@ -1219,6 +1279,24 @@ class PushWorker(TransferWorker):
         # just like the later rsync process. Otherwise a contended lock can
         # hold application shutdown until RemoteLock's timeout expires.
         self._current_proc = proc
+
+    def _conflict_storm(self, relative_path: str) -> bool:
+        """Remember recent conflicts for one path and report a storm."""
+        try:
+            limit = max(1, int(self.cfg.get("conflict_storm_limit") or 3))
+            window = max(60, int(self.cfg.get("conflict_storm_window_seconds") or 3600))
+        except (TypeError, ValueError):
+            limit, window = 3, 3600
+        now = time.time()
+        history = [stamp for stamp in self._conflict_history.get(relative_path, []) if now - stamp < window]
+        history.append(now)
+        self._conflict_history[relative_path] = history
+        # Keep the map bounded on long-running clients.
+        if len(self._conflict_history) > 4096:
+            for path in list(self._conflict_history):
+                if not self._conflict_history[path] or now - self._conflict_history[path][-1] > window:
+                    self._conflict_history.pop(path, None)
+        return len(history) > limit
 
     def _conflict_path(self, relative_path: str, digest: str = "") -> str:
         path = Path(relative_path)

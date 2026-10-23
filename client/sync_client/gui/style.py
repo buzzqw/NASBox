@@ -60,6 +60,33 @@ QLabel#statusMessage[state="active"] { color: #087443; }
 QLabel#statusMessage[state="paused"] { color: #9a6200; }
 QLabel#statusMessage[state="warning"] { color: #9a6200; }
 QLabel#statusMessage[state="error"] { color: #c12c3d; }
+QLabel#statusConflictStat {
+    background-color: #fff4e5;
+    color: #9a6200;
+    border: 1px solid #f3c98b;
+    border-radius: 7px;
+    padding: 8px 10px;
+    font-weight: 700;
+}
+QLabel#statusConflictStat:hover { background-color: #ffe9c7; }
+QLabel#conflictCount { color: #344054; font-weight: 700; }
+QLabel#conflictDetailPath { font-size: 15px; font-weight: 700; color: #101828; }
+QLabel#conflictDetailMeta { color: #667085; }
+QLabel#conflictStatus { color: #475467; }
+QLabel#mirrorAuthorityNote {
+    background-color: #eef5ff;
+    color: #175cd3;
+    border: 1px solid #bfd6ff;
+    border-radius: 7px;
+    padding: 8px 10px;
+}
+QPlainTextEdit#conflictPreview {
+    background-color: #fbfcfe;
+    border: 1px solid #e4e7ec;
+    border-radius: 6px;
+    font-family: "DejaVu Sans Mono", "Liberation Mono", monospace;
+    font-size: 12px;
+}
 QLabel#statusQueue {
     color: #667085;
     background-color: #f8fafc;

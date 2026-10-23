@@ -1,9 +1,10 @@
 """Discovery and safe resolution of NASBox conflict copies."""
 from __future__ import annotations
 
+import errno
+import os
 import re
 import shutil
-import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -16,7 +17,14 @@ CONFLICT_TAG = " (conflitto da "
 # `--delete` pass never removes a conflict copy from the mirrored folder:
 # those copies are what the Conflicts tab lists, and the mirror's source
 # folder obviously does not contain them.
-CONFLICT_GLOB = "* (conflitto da *)"
+#
+# IMPORTANT: spaces must be escaped. rsync treats unescaped whitespace inside
+# --exclude values as a rule separator, so the old "* (conflitto da *)"
+# silently matched nothing and the mirror's --delete-after removed every
+# conflict copy on its next pass. The escaped form is a single precise rule
+# (verified against real rsync); the broader "*conflitto*" also works but would
+# hide legitimate user files with "conflitto" in their name from a mirror.
+CONFLICT_GLOB = "*conflitto\\ da\\ *"
 CONFLICT_RE = re.compile(
     r"^(?P<stem>.*) \(conflitto da (?P<origin>[^ )]+) [^)]+\)(?P<suffix>\.[^/]*)?$"
 )
@@ -42,11 +50,24 @@ def scan_conflict_groups(local_root: str, sync_state: SyncStateStore | None = No
     groups: dict[Path, list[Path]] = {}
     if not root.exists():
         return []
-    for path in root.rglob("*"):
-        if not path.is_file() or any(part in INTERNAL_DIRS for part in path.relative_to(root).parts):
-            continue
-        original = _original_path(path)
-        if original is not None:
+    # os.walk (rather than rglob("*") + is_file()) lets us prune the internal
+    # directories and avoids a stat for every ordinary file. On a 100k-file
+    # tree the old form was the dominant cost of the Conflicts tab's refresh.
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = sorted(
+            name for name in dirnames if name not in INTERNAL_DIRS
+        )
+        for name in filenames:
+            match = CONFLICT_RE.match(name)
+            if match is None:
+                continue
+            path = Path(dirpath, name)
+            try:
+                if not path.is_file():
+                    continue
+            except OSError:
+                continue
+            original = path.with_name(match.group("stem") + (match.group("suffix") or ""))
             groups.setdefault(original, []).append(path)
     result: list[ConflictGroup] = []
     root = root.resolve()
@@ -95,16 +116,24 @@ def resolve_conflict(
     except ValueError:
         return False, "percorso conflitto fuori dalla cartella NASBox"
 
-    temporary: Path | None = None
     try:
         if chosen != original:
-            temporary = original.with_name(f".{original.name}.nasbox-conflict-{uuid.uuid4().hex}")
-            temporary.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(chosen, temporary)
+            # Promote the chosen copy by renaming it, not by copying it. The
+            # old implementation copied the whole file into a temporary name,
+            # which doubled disk I/O (and free space) for large conflicts and ran
+            # on the GUI thread. Move the losing original into history first, so
+            # the promotion itself stays an atomic rename on the same filesystem.
             if original.exists() and not trash.move_to_local_trash(original, str(root)):
                 return False, "impossibile conservare l'originale nello storico locale"
-            temporary.replace(original)
-            temporary = None
+            try:
+                chosen.replace(original)
+            except OSError as exc:
+                if exc.errno != errno.EXDEV:
+                    return False, str(exc)
+                # Defensive fallback: a conflict copy can only live under the
+                # NASBox root, but keep this working on exotic mount layouts.
+                shutil.copy2(chosen, original)
+                chosen.unlink(missing_ok=True)
 
         for path in sorted(candidates):
             if path.exists() and not trash.move_to_local_trash(path, str(root)):
@@ -117,9 +146,6 @@ def resolve_conflict(
         return True, ""
     except OSError as exc:
         return False, str(exc)
-    finally:
-        if temporary is not None:
-            temporary.unlink(missing_ok=True)
 
 
 def discard_conflict_copies(

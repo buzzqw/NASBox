@@ -137,15 +137,19 @@ class MainWindow(QMainWindow):
         self.browse_tab = BrowseTab(self.cfg, self.engine, self.logger, self.sync_state)
         self.mirrors_tab = MirrorsTab(self.cfg, self.mirror_manager)
 
-        tabs.addTab(self.status_tab, t("main_window.tab_status"))
-        tabs.addTab(self.metrics_tab, t("main_window.tab_metrics"))
-        tabs.addTab(self.transfers_tab, t("main_window.tab_transfers"))
-        tabs.addTab(self.history_tab, t("main_window.tab_history"))
-        tabs.addTab(self.conflicts_tab, t("main_window.tab_conflicts"))
-        tabs.addTab(self.browse_tab, t("main_window.tab_browse"))
-        tabs.addTab(self.log_tab, t("main_window.tab_log"))
-        tabs.addTab(self.mirrors_tab, t("main_window.tab_mirrors"))
-        tabs.addTab(self.settings_tab, t("main_window.tab_settings"))
+        self._tab_labels = {
+            self.status_tab: t("main_window.tab_status"),
+            self.metrics_tab: t("main_window.tab_metrics"),
+            self.transfers_tab: t("main_window.tab_transfers"),
+            self.history_tab: t("main_window.tab_history"),
+            self.conflicts_tab: t("main_window.tab_conflicts"),
+            self.browse_tab: t("main_window.tab_browse"),
+            self.log_tab: t("main_window.tab_log"),
+            self.mirrors_tab: t("main_window.tab_mirrors"),
+            self.settings_tab: t("main_window.tab_settings"),
+        }
+        for widget, label in self._tab_labels.items():
+            tabs.addTab(widget, label)
         tabs.currentChanged.connect(lambda _index: self._update_metrics_tab_active())
         tabs.setTabToolTip(0, t("main_window.tab_status_tooltip"))
         tabs.setTabToolTip(1, t("main_window.tab_metrics_tooltip"))
@@ -161,6 +165,7 @@ class MainWindow(QMainWindow):
 
         self.engine.status_changed.connect(self.status_tab.on_status_changed)
         self.status_tab.attention_action_requested.connect(self._open_status_action)
+        self.conflicts_tab.conflict_count_changed.connect(self._on_conflict_count)
         self.engine.connection_changed.connect(self.scan_worker.set_connection)
         self.engine.connection_changed.connect(self.push_worker.set_connection)
         self.engine.connection_changed.connect(self.pull_worker.set_connection)
@@ -191,6 +196,7 @@ class MainWindow(QMainWindow):
             worker.transfer_finished.connect(self.status_tab.on_transfer_finished)
             worker.log_event.connect(self.log_tab.on_log_event)
             worker.log_event.connect(self.status_tab.on_log_event)
+            worker.log_event.connect(self.conflicts_tab._on_log_event)
         self.push_worker.hash_progress.connect(self.status_tab.on_hash_progress)
         self.push_worker.hash_progress.connect(self.transfers_tab.on_preflight_progress)
         self.push_worker.batch_size_known.connect(self.transfers_tab.on_batch_size_known)
@@ -218,12 +224,25 @@ class MainWindow(QMainWindow):
         self.engine.server_update_available.connect(self._on_server_update_available)
         self.engine.server_restarted.connect(self._on_server_restarted)
         self.tray.show()
+        # The first Conflicts scan starts before the signal is connected; push
+        # its current count once so badges are right from the first paint.
+        self._on_conflict_count(self.conflicts_tab.conflict_count())
 
         self.engine.start()
         self.push_worker.start()
         self.pull_worker.start()
         self.scan_worker.start()
         self.mirror_manager.start()
+
+    def _on_conflict_count(self, count: int) -> None:
+        """Keep the Conflicts tab and tray badge honest without a extra scan."""
+        index = self.tabs.indexOf(self.conflicts_tab)
+        if index >= 0:
+            label = self._tab_labels.get(self.conflicts_tab, t("main_window.tab_conflicts"))
+            self.tabs.setTabText(index, f"{label} ({count})" if count else label)
+        self.status_tab.on_conflict_count(count)
+        if hasattr(self, "tray"):
+            self.tray.set_conflict_count(count)
 
     def _open_status_action(self, action: str) -> None:
         destination = {
@@ -308,6 +327,13 @@ class MainWindow(QMainWindow):
         tab_selected = self.tabs.currentIndex() == 1
         window_active = self.isVisible() and not self.isMinimized()
         self.metrics_tab.set_active(tab_selected and window_active)
+        # The queue preview is only worth its periodic SSH round-trips while the
+        # user is actually looking at it; idle clients fall back to the local
+        # pending summary instead of scanning the NAS every minute.
+        transfers_selected = self.tabs.currentIndex() == 2
+        scan_worker = getattr(self, "scan_worker", None)
+        if scan_worker is not None:
+            scan_worker.set_ui_active(transfers_selected and window_active)
 
     def changeEvent(self, event: QEvent) -> None:
         super().changeEvent(event)

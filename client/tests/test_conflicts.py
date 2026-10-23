@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -78,6 +79,31 @@ class DiscardConflictCopiesTests(unittest.TestCase):
         self.assertFalse(list(self.root.glob("*conflitto da*")))
 
 
+class ResolveConflictTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.environment = ClientEnvironment()
+        self.environment.__enter__()
+        self.root = Path(self.environment._temporary.name) / "root"
+        self.root.mkdir()
+        (self.root / "doc.txt").write_text("original", encoding="utf-8")
+        self.candidate = self.root / conflict_name("doc", ".txt")
+        self.candidate.write_text("nas", encoding="utf-8")
+        self.group = conflicts.scan_conflict_groups(str(self.root))[0]
+
+    def tearDown(self) -> None:
+        self.environment.__exit__(None, None, None)
+
+    def test_chosen_candidate_is_promoted_atomically(self) -> None:
+        ok, detail = conflicts.resolve_conflict(self.group, self.candidate, str(self.root))
+
+        self.assertTrue(ok, detail)
+        self.assertEqual((self.root / "doc.txt").read_text(encoding="utf-8"), "nas")
+        self.assertFalse(self.candidate.exists())
+        # The losing original is still recoverable from local history.
+        versions = trash.list_local_versions()
+        self.assertTrue(any(v.relative_path == "doc.txt" for v in versions))
+
+
 class MirrorCommandTests(unittest.TestCase):
     def test_mirror_never_deletes_conflict_copies(self) -> None:
         cfg = Config()
@@ -86,6 +112,31 @@ class MirrorCommandTests(unittest.TestCase):
         index = cmd.index(conflicts.CONFLICT_GLOB)
         self.assertEqual(cmd[index - 1], "--exclude")
         self.assertEqual(cmd[-2:], ["/source/", "/destination/"])
+
+    def test_mirror_command_really_protects_conflict_copies(self) -> None:
+        """The old assertion only checked the command string.
+
+        rsync splits --exclude values on whitespace, so "* (conflitto da *)"
+        silently matched nothing while "*conflitto*" works. Run the real
+        command against disposable directories to keep that regression away.
+        """
+        cfg = Config()
+        with tempfile.TemporaryDirectory(prefix="nasbox-mirror-test-") as temporary:
+            root = Path(temporary)
+            source = root / "source"
+            destination = root / "destination"
+            source.mkdir()
+            destination.mkdir()
+            (source / "keep.txt").write_text("source", encoding="utf-8")
+            protected = destination / conflict_name("doc", ".txt")
+            protected.write_text("nas", encoding="utf-8")
+
+            cmd = mirrors._mirror_rsync_command(cfg, str(source), str(destination))
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertTrue(protected.exists(), "mirror --delete removed the conflict copy")
+            self.assertTrue((destination / "keep.txt").exists())
 
 
 class CopyRemoteFileTests(unittest.TestCase):

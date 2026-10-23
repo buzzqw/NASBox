@@ -76,6 +76,7 @@ class StatusTab(QWidget):
         self._last_problem: tuple[float, str, str] | None = None
         self._recent_problem_events: dict[str, tuple[float, str]] = {}
         self.attention_problems: list[tuple[str, str, str]] = []
+        self._conflict_count = 0
 
         if logger is not None:
             self._load_recent_events(logger.tail(limit=RECENT_EVENT_SCAN_LIMIT))
@@ -104,6 +105,14 @@ class StatusTab(QWidget):
         self.sync_state_label = QLabel(t("status.sync_state_starting"))
         self.sync_state_label.setWordWrap(True)
         status_layout.addWidget(self.sync_state_label)
+        self.conflict_stat_label = QLabel()
+        self.conflict_stat_label.setObjectName("statusConflictStat")
+        self.conflict_stat_label.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.conflict_stat_label.hide()
+        self.conflict_stat_label.mousePressEvent = (
+            lambda _event: self.attention_action_requested.emit("conflicts")
+        )
+        status_layout.addWidget(self.conflict_stat_label)
         self.remote_lock_label = QLabel(t("status.remote_lock_free"))
         self.remote_lock_label.setWordWrap(True)
         status_layout.addWidget(self.remote_lock_label)
@@ -123,6 +132,24 @@ class StatusTab(QWidget):
         self.last_problem_label = QLabel(self._last_problem_text())
         self.last_problem_label.setWordWrap(True)
         status_layout.addWidget(self.last_problem_label)
+
+        # Technical diagnostics are useful, but they should not dominate the
+        # daily view. Keep them one click away and remember the last choice.
+        self.details_toggle = QPushButton(t("status.details_show"))
+        self.details_toggle.setObjectName("secondaryButton")
+        self.details_toggle.setCheckable(True)
+        self.details_toggle.toggled.connect(self._toggle_details)
+        status_layout.addWidget(self.details_toggle)
+        self.details_widget = QWidget()
+        details_layout = QVBoxLayout(self.details_widget)
+        details_layout.setContentsMargins(0, 0, 0, 0)
+        for technical in (
+            self.remote_lock_label, self.watcher_label, self.queue_label, self.pending_label,
+        ):
+            status_layout.removeWidget(technical)
+            details_layout.addWidget(technical)
+        self.details_widget.hide()
+        status_layout.addWidget(self.details_widget)
         # Keep the update status on the same row as the version: showing a
         # separate label here changes the card height while the check runs.
         version_row = QHBoxLayout()
@@ -259,6 +286,26 @@ class StatusTab(QWidget):
             self.engine.cancel_current_transfer()
             self.engine.wake()
             self._refresh_pause_button()
+
+    def _toggle_details(self, visible: bool) -> None:
+        self.details_widget.setVisible(visible)
+        self.details_toggle.setText(
+            t("status.details_hide") if visible else t("status.details_show")
+        )
+
+    def on_conflict_count(self, count: int) -> None:
+        try:
+            self._conflict_count = max(0, int(count))
+        except (TypeError, ValueError):
+            self._conflict_count = 0
+        if self._conflict_count:
+            self.conflict_stat_label.setText(
+                t("status.conflict_stat", count=self._conflict_count)
+            )
+            self.conflict_stat_label.show()
+        else:
+            self.conflict_stat_label.hide()
+        self._refresh_attention()
 
     def _refresh_pause_button(self) -> None:
         # The toggle reflects the *manual* pause only: a recurring schedule must
@@ -648,6 +695,12 @@ class StatusTab(QWidget):
         if not self._status_known:
             return []
         problems: list[tuple[str, str, str]] = []
+        if self._conflict_count:
+            problems.append((
+                "conflicts",
+                t("status.problem_conflicts", count=self._conflict_count),
+                "conflicts",
+            ))
         missing = []
         if not self.cfg.local_root():
             missing.append(t("status.config_local_folder"))

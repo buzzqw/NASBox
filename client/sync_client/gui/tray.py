@@ -41,6 +41,7 @@ class TrayIcon(QSystemTrayIcon):
         self._server_health = "unknown"
         self._paused = False
         self._pending_count = 0
+        self._conflict_count = 0
         self._active_transfers: set[str] = set()
         self._animation_frame = 0
         self._transfer_counts = {"upload": 0, "download": 0}
@@ -77,7 +78,18 @@ class TrayIcon(QSystemTrayIcon):
             state = "syncing_alt" if self._animation_frame else "syncing"
         self.setIcon(icons.tray_icon(state))
         suffix = t("tray.pending_suffix", count=self._pending_count) if self._pending_count else ""
-        self.setToolTip(f"NASBox — {self._status_text}{suffix}")
+        conflicts_suffix = (
+            t("tray.conflicts_suffix", count=self._conflict_count)
+            if self._conflict_count else ""
+        )
+        self.setToolTip(f"NASBox — {self._status_text}{suffix}{conflicts_suffix}")
+
+    def set_conflict_count(self, count: int) -> None:
+        try:
+            self._conflict_count = max(0, int(count))
+        except (TypeError, ValueError):
+            self._conflict_count = 0
+        self._apply_icon()
 
     def _advance_animation(self) -> None:
         self._animation_frame = (self._animation_frame + 1) % 2
@@ -149,6 +161,11 @@ class TrayIcon(QSystemTrayIcon):
         if self._pending_count:
             pending_action = menu.addAction(t("tray.pending_files", count=self._pending_count))
             pending_action.setEnabled(False)
+        if self._conflict_count:
+            conflict_action = menu.addAction(
+                t("tray.conflicts_action", count=self._conflict_count)
+            )
+            conflict_action.triggered.connect(self._show_conflicts)
         menu.addSeparator()
 
         open_action = menu.addAction(t("tray.open_folder"))
@@ -235,6 +252,13 @@ class TrayIcon(QSystemTrayIcon):
             # Explicit popup keeps the menu reachable on tray hosts that do
             # not reliably dispatch their native context-menu request.
             self._menu.popup(QCursor.pos())
+
+    def _show_conflicts(self) -> None:
+        self._show_window()
+        try:
+            self.main_window._open_status_action("conflicts")
+        except (AttributeError, TypeError):
+            pass
 
     def _show_window(self) -> None:
         self.main_window.showNormal()

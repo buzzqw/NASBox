@@ -50,7 +50,7 @@ TICK_SECONDS = 1
 # The manifest covers journalized changes, while older/manual NAS changes may
 # predate it. Keep a periodic full reconciliation as a bounded safety net rather
 # than turning every poll into a recursive remote scan.
-LEGACY_FULL_PULL_INTERVAL_SECONDS = 15 * 60
+DEFAULT_FULL_PULL_INTERVAL_SECONDS = 2 * 3600
 
 
 class _PullDeferred(Exception):
@@ -145,6 +145,20 @@ class PullWorker(TransferWorker):
         self._last_pull = 0.0
         self._wake.set()
 
+    def _full_pull_interval(self) -> float:
+        """Periodic deep reconciliation interval.
+
+        With a healthy change feed the revision already tells us whether
+        anything changed, so a full rsync scan every 15 minutes was mostly
+        wasted NAS/disk work. The default is now two hours and the manual
+        "Sincronizza tutto ora" still forces it immediately.
+        """
+        try:
+            value = float(self.cfg.get("full_pull_interval_seconds") or DEFAULT_FULL_PULL_INTERVAL_SECONDS)
+        except (TypeError, ValueError):
+            value = DEFAULT_FULL_PULL_INTERVAL_SECONDS
+        return max(300.0, value)
+
     def run(self) -> None:
         while not self._stop_flag.is_set():
             self._begin_operation_connection()
@@ -199,7 +213,7 @@ class PullWorker(TransferWorker):
                 # nothing -- was pure idle control-plane load, the most expensive
                 # part of a client that is simply sitting still. Skip it unless
                 # the periodic full reconciliation is due.
-                if now - self._last_full_pull < LEGACY_FULL_PULL_INTERVAL_SECONDS:
+                if now - self._last_full_pull < self._full_pull_interval():
                     self._last_pull = now
                     return
             if feed_result is None and now - self._last_pull < poll_interval:
@@ -266,11 +280,27 @@ class PullWorker(TransferWorker):
                     if snapshot is None:
                         raise rsync_ops.RemoteLockError("impossibile leggere la revisione del manifest NAS")
                     manifest_revision, manifest_entries = snapshot
+                    if manifest_entries is not None:
+                        # Mirror destinations are locally authoritative. Ignore
+                        # NAS-side edits there instead of downloading them and
+                        # creating a conflict fight with the mirror on every pass.
+                        mirror_roots = tuple(self.cfg.mirror_owned_roots())
+                        if mirror_roots:
+                            manifest_entries = {
+                                path: state for path, state in manifest_entries.items()
+                                if not any(
+                                    path == root or path.startswith(root + "/")
+                                    for root in mirror_roots
+                                )
+                            }
                     full_pull_required = (
                         self._last_manifest_revision < 0
-                        or now - self._last_full_pull >= LEGACY_FULL_PULL_INTERVAL_SECONDS
+                        or now - self._last_full_pull >= self._full_pull_interval()
                     )
-                    if manifest_entries is None and not full_pull_required:
+                    if (
+                        (manifest_entries is None or not manifest_entries)
+                        and not full_pull_required
+                    ):
                         # No committed NAS transaction happened since the last
                         # pull. Avoid launching rsync just to rediscover the same
                         # tree; the manifest revision is the change signal.

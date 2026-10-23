@@ -726,7 +726,33 @@ class SyncStateStore:
         repository = self._repository()
         group_id = hashlib.sha256(f"{repository}\0{original_path}".encode()).hexdigest()[:24]
         now = time.time()
+        incoming = [
+            (
+                str(member.get("path") or ""),
+                str(member.get("origin_device") or ""), str(member.get("digest") or ""),
+                int(member.get("size") or 0), int(member.get("mtime_ns") or 0),
+            )
+            for member in members
+        ]
         with self._lock, self._connection() as conn:
+            # The Conflicts tab can refresh every 30 s; rewriting every member
+            # row each time is needless SQLite churn. Only touch the database
+            # when the group is new, was resolved, or its actual contents moved.
+            current = conn.execute(
+                "SELECT status FROM conflict_group WHERE repository = ? AND group_id = ?",
+                (repository, group_id),
+            ).fetchone()
+            if current is not None and current[0] == "open":
+                rows = conn.execute(
+                    """
+                    SELECT relative_path, origin_device, digest, size, mtime_ns
+                    FROM conflict_member WHERE repository = ? AND group_id = ?
+                    ORDER BY relative_path
+                    """,
+                    (repository, group_id),
+                ).fetchall()
+                if [tuple(row) for row in rows] == sorted(incoming):
+                    return group_id
             conn.execute(
                 """
                 INSERT INTO conflict_group(
@@ -749,14 +775,7 @@ class SyncStateStore:
                     repository, group_id, relative_path, origin_device, digest, size, mtime_ns, present
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, 1)
                 """,
-                [
-                    (
-                        repository, group_id, str(member.get("path") or ""),
-                        str(member.get("origin_device") or ""), str(member.get("digest") or ""),
-                        int(member.get("size") or 0), int(member.get("mtime_ns") or 0),
-                    )
-                    for member in members
-                ],
+                [(repository, group_id, *member) for member in incoming],
             )
         return group_id
 

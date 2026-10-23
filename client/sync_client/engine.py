@@ -41,6 +41,8 @@ TICK_SECONDS = 1
 HOST_RECHECK_SECONDS = 30
 PRUNE_INTERVAL_SECONDS = 24 * 3600
 HEALTH_CHECK_INTERVAL_SECONDS = 60  # is the NAS-side server daemon actually running?
+HEALTH_CHECK_OK_INTERVAL_SECONDS = 300  # stable NAS -> much less control-plane chatter
+SERVER_UPDATE_CHECK_INTERVAL_SECONDS = 300  # versioned script discovery is not urgent
 VERSION_WARNING_REPEAT_SECONDS = 6 * 3600  # don't re-nag about an outdated server package more than this often
 PENDING_STATUS_INTERVAL_SECONDS = 5
 
@@ -76,6 +78,8 @@ class SyncEngine(QThread):
         self._last_host_check = 0.0
         self._last_prune = 0.0
         self._last_health_check = 0.0
+        self._last_update_check = 0.0
+        self._health_ok_streak = 0
         self._last_version_warning = 0.0
         self._last_pending_status = 0.0
         self._pending_summary: dict[str, object] = {}
@@ -206,7 +210,12 @@ class SyncEngine(QThread):
         if now - self._last_prune > PRUNE_INTERVAL_SECONDS:
             self.prune_now()
 
-        if now - self._last_health_check >= HEALTH_CHECK_INTERVAL_SECONDS:
+        health_interval = (
+            HEALTH_CHECK_OK_INTERVAL_SECONDS
+            if self._server_health == "ok" and self._health_ok_streak >= 2
+            else HEALTH_CHECK_INTERVAL_SECONDS
+        )
+        if now - self._last_health_check >= health_interval:
             self._check_server_health()
             self._last_health_check = time.time()
 
@@ -270,6 +279,10 @@ class SyncEngine(QThread):
     # --- NAS-side server daemon health (running? outdated?) ---
 
     def _set_server_health(self, state: str) -> None:
+        if state == "ok":
+            self._health_ok_streak += 1
+        else:
+            self._health_ok_streak = 0
         if state == self._server_health:
             return
         self._server_health = state
@@ -353,9 +366,13 @@ class SyncEngine(QThread):
             self._set_server_health("ok")
 
         remote_version = values.get("VERSION", "")
-        versioned_update = rsync_ops.discover_remote_server_update(
-            self.cfg, self._conn, self.cfg.get("remote_server_script"),
-        )
+        versioned_update = None
+        now = time.time()
+        if now - self._last_update_check >= SERVER_UPDATE_CHECK_INTERVAL_SECONDS:
+            self._last_update_check = now
+            versioned_update = rsync_ops.discover_remote_server_update(
+                self.cfg, self._conn, self.cfg.get("remote_server_script"),
+            )
         if versioned_update is not None:
             versioned_path, versioned_version = versioned_update
             if (

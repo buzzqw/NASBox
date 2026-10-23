@@ -31,6 +31,7 @@ from .sync_state import SyncStateStore
 from .watcher import WatcherHandle
 
 FALLBACK_INTERVAL_SECONDS = 60
+INACTIVE_INTERVAL_SECONDS = 300
 # The scheduler-backed SSH lock needs one round-trip even when it is free.
 # Zero makes RemoteLock time out before the NAS can answer, forcing the
 # timestamp-based rsync dry-run fallback and producing false queue entries.
@@ -65,6 +66,7 @@ class ScanWorker(QThread):
         self.push_requested = push_requested
         self._manifest_revision = -1
         self._manifest_entries: dict[str, rsync_ops.RemoteState] | None = None
+        self._ui_active = True
 
     def stop(self) -> None:
         self._stop_flag.set()
@@ -91,6 +93,20 @@ class ScanWorker(QThread):
         """Ask for a rescan now instead of waiting for the fallback timer."""
         self._wake.set()
 
+    def set_ui_active(self, active: bool) -> None:
+        """Preview refresh cadence: fast while the Transfers tab is visible,
+        slow while the window is hidden. The status tab still gets the durable
+        pending summary from SyncEngine, so nothing important goes stale."""
+        active = bool(active)
+        if active == self._ui_active:
+            return
+        self._ui_active = active
+        if active:
+            self.wake()
+
+    def _scan_interval(self) -> int:
+        return FALLBACK_INTERVAL_SECONDS if self._ui_active else INACTIVE_INTERVAL_SECONDS
+
     def set_connection(self, conn) -> None:
         """Slot for SyncEngine.connection_changed."""
         with self._connection_lock:
@@ -116,7 +132,7 @@ class ScanWorker(QThread):
                         f.write(f"[SCAN ERROR] {exc}\n{detail}\n")
                 except OSError:
                     pass
-            self._wake.wait(FALLBACK_INTERVAL_SECONDS)
+            self._wake.wait(self._scan_interval())
             self._wake.clear()
 
     def _scan_once(self) -> None:
@@ -222,12 +238,20 @@ class ScanWorker(QThread):
 
         baseline = self.sync_state.all_entries()
         manifest = self._manifest_entries
+        mirror_roots = tuple(self.cfg.mirror_owned_roots())
+
+        def _mirror_owned(path: str) -> bool:
+            return any(path == root or path.startswith(root + "/") for root in mirror_roots)
+
         candidates = {
             path for path, remote in manifest.items()
-            if remote.kind == RemoteKind.TOMBSTONE
-            or path not in baseline
-            or baseline[path].is_tombstone
-            or baseline[path].digest != remote.digest
+            if (
+                remote.kind == RemoteKind.TOMBSTONE
+                or path not in baseline
+                or baseline[path].is_tombstone
+                or baseline[path].digest != remote.digest
+            )
+            and not _mirror_owned(path)
         }
         # The manifest is a journal-backed change set, not a complete filesystem
         # inventory: older files may predate journal support. Do not interpret a

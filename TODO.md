@@ -1,6 +1,24 @@
 # NASBox backlog
 
-Aggiornato il 2026-08-30 dopo la release client 1.23.1 e server 3.17.0.
+Aggiornato il 2026-10-23 dopo la release client 1.24.0 e server 3.22.0.
+
+## Completato in 1.24.0
+
+- [x] Pattern mirror per le copie di conflitto corretto (`*conflitto\ da\ *`)
+  con test che esegue davvero `rsync --delete-after`.
+- [x] Conflict Center 2.0: metadati, filtro, diff, versione consigliata,
+  selezione multipla, badge e risoluzione in background.
+- [x] Risoluzione atomica senza doppia copia e pulizia NAS in un solo lease.
+- [x] Guardia anti conflict-storm con nome stabile dopo la soglia.
+- [x] Cartelle mirror autoritative: pull e conflict planning ignorano le
+  modifiche NAS nella destinazione mirror.
+- [x] Manifest export/get read-only sul server, compattazione su soglia e
+  watermark giornaliero per i tombstone.
+- [x] Health check adattivo, preview on demand, full pull ogni 2 ore
+  configurabile, metriche a 30 s, profilo NAS-friendly.
+- [x] Compressione rsync automatica in LAN e profili di esclusione rapidi.
+- [x] Stato semplificato con dettagli tecnici richiudibili e conflitti come
+  problema azionabile.
 Le voci sotto descrivono il lavoro ancora utile senza confondere le funzioni
 gia' implementate con quelle solo da verificare in laboratorio.
 

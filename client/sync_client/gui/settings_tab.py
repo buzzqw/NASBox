@@ -30,6 +30,35 @@ TRAY_CLICK_OPTIONS = [
     ("window", "settings.tray_click_window"),
 ]
 
+COMPRESSION_OPTIONS = [
+    ("auto", "settings.compression_auto"),
+    ("on", "settings.compression_on"),
+    ("off", "settings.compression_off"),
+]
+
+# One-click bundles for the churn NASBox sees most often. These are ordinary
+# exclude patterns: adding a profile is visible in the list, removable, and
+# saved exactly like a manually typed one.
+EXCLUSION_PROFILES = [
+    ("latex", "settings.profile_latex", [
+        "*.aux", "*.log", "*.idx", "*.ind", "*.ilg", "*.toc", "*.out",
+        "*.fls", "*.fdb_latexmk", "*.synctex.gz", "*.lot", "*.lof",
+        "*.bbl", "*.blg", "*.xdv", "*.nav", "*.snm", "*.vrb", "*.bcf",
+        "*.run.xml",
+    ]),
+    ("dev", "settings.profile_dev", [
+        ".git/", "node_modules/", ".venv/", "venv/", "__pycache__/",
+        "build/", "dist/", "target/", ".gradle/", ".idea/", ".vscode/",
+        ".next/", ".cache/", "*.pyc", "*.class", "*.o", "*.obj",
+    ]),
+    ("office", "settings.profile_office", [
+        ".~lock.*", "~$*", "*.tmp.*", "*.part", "*.crdownload",
+    ]),
+    ("os", "settings.profile_os", [
+        ".DS_Store", "Thumbs.db", "desktop.ini", "@eaDir/",
+    ]),
+]
+
 
 class SettingsTab(QWidget):
     """Everything you set up once and rarely touch again: how to reach the
@@ -204,6 +233,25 @@ class SettingsTab(QWidget):
         self.metrics_refresh_spin.setValue(int(cfg.get("metrics_refresh_seconds") or 15))
         self.metrics_refresh_spin.setToolTip(t("settings.metrics_refresh_note"))
         cadence_form.addRow(t("settings.metrics_refresh_label"), self.metrics_refresh_spin)
+        self.compression_combo = QComboBox()
+        current_compression = str(cfg.get("compression_mode") or "auto")
+        for index, (value, label_key) in enumerate(COMPRESSION_OPTIONS):
+            self.compression_combo.addItem(t(label_key), userData=value)
+            if value == current_compression:
+                self.compression_combo.setCurrentIndex(index)
+        self.compression_combo.setToolTip(t("settings.compression_tooltip"))
+        cadence_form.addRow(t("settings.compression_label"), self.compression_combo)
+        self.full_pull_spin = QSpinBox()
+        self.full_pull_spin.setRange(300, 86400)
+        self.full_pull_spin.setSingleStep(900)
+        self.full_pull_spin.setSuffix(" s")
+        self.full_pull_spin.setValue(int(cfg.get("full_pull_interval_seconds") or 7200))
+        self.full_pull_spin.setToolTip(t("settings.full_pull_note"))
+        cadence_form.addRow(t("settings.full_pull_label"), self.full_pull_spin)
+        self.nas_friendly_btn = QPushButton(t("settings.nas_friendly_btn"))
+        self.nas_friendly_btn.setToolTip(t("settings.nas_friendly_tooltip"))
+        self.nas_friendly_btn.clicked.connect(self._apply_nas_friendly_profile)
+        cadence_form.addRow(self.nas_friendly_btn)
         self.multiplexing_checkbox = QCheckBox(t("settings.multiplexing_checkbox"))
         self.multiplexing_checkbox.setChecked(bool(cfg.get("ssh_multiplexing", True)))
         self.multiplexing_checkbox.setToolTip(t("settings.multiplexing_tooltip"))
@@ -338,6 +386,18 @@ class SettingsTab(QWidget):
         self.exclude_list.setToolTip(t("settings.exclude_note"))
         self.exclude_list.addItems(cfg.exclude_patterns())
         exclude_layout.addWidget(self.exclude_list)
+        profile_row = QHBoxLayout()
+        profile_row.addWidget(QLabel(t("settings.exclude_profile_label")))
+        self.exclusion_profile_combo = QComboBox()
+        for key, label_key, patterns in EXCLUSION_PROFILES:
+            self.exclusion_profile_combo.addItem(t(label_key), userData=list(patterns))
+        self.exclusion_profile_combo.setToolTip(t("settings.exclude_profile_tooltip"))
+        profile_row.addWidget(self.exclusion_profile_combo, 1)
+        add_profile_btn = QPushButton(t("settings.exclude_profile_add"))
+        add_profile_btn.setToolTip(t("settings.exclude_profile_tooltip"))
+        add_profile_btn.clicked.connect(self._add_exclusion_profile)
+        profile_row.addWidget(add_profile_btn)
+        exclude_layout.addLayout(profile_row)
         exclude_add_row = QHBoxLayout()
         self.exclude_input = QLineEdit()
         self.exclude_input.setPlaceholderText(t("settings.exclude_hint"))
@@ -408,7 +468,7 @@ class SettingsTab(QWidget):
         for spin in (
             self.ssh_port, self.jump_port, self.max_delete_spin,
             self.bw_upload_spin, self.bw_download_spin, self.poll_spin,
-            self.metrics_refresh_spin,
+            self.metrics_refresh_spin, self.full_pull_spin,
         ):
             spin.valueChanged.connect(self._mark_dirty)
         for checkbox in (
@@ -418,6 +478,7 @@ class SettingsTab(QWidget):
             checkbox.toggled.connect(self._mark_dirty)
         self.language_combo.currentIndexChanged.connect(self._mark_dirty)
         self.tray_click_combo.currentIndexChanged.connect(self._mark_dirty)
+        self.compression_combo.currentIndexChanged.connect(self._mark_dirty)
         self.sync_mode_combo.currentIndexChanged.connect(self._mark_dirty)
         self.exclude_list.itemSelectionChanged.connect(
             lambda: self.remove_exclude_btn.setEnabled(self.exclude_list.currentRow() >= 0)
@@ -434,9 +495,42 @@ class SettingsTab(QWidget):
 
     def _apply_poll_interval(self) -> None:
         self.cfg.set("poll_interval", self.poll_spin.value(), persist=False)
+        self.cfg.set("full_pull_interval_seconds", self.full_pull_spin.value(), persist=False)
 
     def _apply_metrics_refresh_interval(self) -> None:
         self.cfg.set("metrics_refresh_seconds", self.metrics_refresh_spin.value(), persist=False)
+
+    def _apply_nas_friendly_profile(self) -> None:
+        """One click for a quiet NAS without giving up event-driven sync.
+
+        The change feed still wakes the pull immediately when the NAS revision
+        changes; these values only reduce idle checks and expensive full scans.
+        """
+        self.poll_spin.setValue(300)
+        self.metrics_refresh_spin.setValue(60)
+        self.full_pull_spin.setValue(21600)
+        index = self.compression_combo.findData("auto")
+        if index >= 0:
+            self.compression_combo.setCurrentIndex(index)
+        self._mark_dirty()
+        self.save_feedback.setText(t("settings.nas_friendly_applied"))
+
+    def _add_exclusion_profile(self) -> None:
+        patterns = self.exclusion_profile_combo.currentData()
+        if not isinstance(patterns, list) or not patterns:
+            return
+        existing = {self.exclude_list.item(i).text() for i in range(self.exclude_list.count())}
+        added = 0
+        for pattern in patterns:
+            if pattern in existing:
+                continue
+            self.exclude_list.addItem(pattern)
+            existing.add(pattern)
+            added += 1
+        if added:
+            self._mark_dirty()
+            self.save_feedback.setText(t("settings.profile_added", count=added))
+        self.exclude_list.setCurrentRow(self.exclude_list.count() - 1)
 
     def _add_exclude(self) -> None:
         pattern = self.exclude_input.text().strip()
@@ -546,6 +640,7 @@ class SettingsTab(QWidget):
         self.cfg.set("notify_sync_completion", self.notify_sync_checkbox.isChecked(), persist=False)
         self.cfg.set("animate_sync_icon", self.animate_sync_checkbox.isChecked(), persist=False)
         self.cfg.set("ssh_multiplexing", self.multiplexing_checkbox.isChecked(), persist=False)
+        self.cfg.set("compression_mode", self.compression_combo.currentData() or "auto", persist=False)
         self.cfg.set("tray_single_click", self.tray_click_combo.currentData() or "menu", persist=False)
         code = self.language_combo.currentData()
         if code:

@@ -234,6 +234,31 @@ class ServerProtocolInvariantTests(unittest.TestCase):
         self.assertIn(encoded + b"\t" + digest.encode(), exported.stdout)
         self.assertIn(b"MANIFEST_HIT\t" + encoded, looked_up.stdout)
 
+    def test_manifest_export_is_read_only(self) -> None:
+        with ServerSandbox() as sandbox:
+            repository_id = sandbox.init_repository()
+            digest = hashlib.sha256(b"payload").hexdigest()
+            payload = b"\0".join([
+                b"JOURNAL_V2", repository_id.encode(), b"tx-read-only", b"device-a",
+                b"1700000000", b"1", b"PUT", b"read-only.txt", digest.encode(),
+                b"7", b"1700000000000000000",
+            ]) + b"\0"
+            appended = sandbox.run_with_lease("--journal-append", input=payload)
+            self.assertEqual(appended.returncode, 0, appended.stderr.decode())
+            manifest_path = sandbox.state / "manifest.tsv"
+            journal_path = sandbox.state / "transfer-journal.tsv"
+            before_manifest = manifest_path.read_bytes()
+            before_journal = journal_path.read_bytes()
+
+            first = sandbox.run("--manifest-export")
+            second = sandbox.run("--manifest-export")
+
+            self.assertEqual(first.returncode, 0, first.stderr.decode())
+            self.assertEqual(second.returncode, 0, second.stderr.decode())
+            self.assertIn(b"read-only.txt\t" + digest.encode(), first.stdout)
+            self.assertEqual(manifest_path.read_bytes(), before_manifest)
+            self.assertEqual(journal_path.read_bytes(), before_journal)
+
     def test_checked_delete_records_tombstone_only_after_move(self) -> None:
         with ServerSandbox() as sandbox:
             repository_id = sandbox.init_repository()

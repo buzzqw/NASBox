@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import Any
 
 
-PRIORITY = {"push": 0, "pull": 1, "mirror": 2, "preview": 3}
+PRIORITY = {"push": 0, "pull": 1, "conflict": 1, "mirror": 2, "preview": 3}
 
 
 @dataclass

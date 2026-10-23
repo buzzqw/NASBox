@@ -92,7 +92,11 @@ class ConfigScheduleTests(unittest.TestCase):
         self.assertFalse(self.cfg.is_paused())
 
     def test_is_paused_follows_the_schedule(self) -> None:
-        self.cfg.set("pause_schedule", [{"days": [3], "start": "09:00", "end": "18:00"}], persist=False)
+        # is_paused() intentionally uses "now", unlike schedule_active_at(when):
+        # make the window cover today without depending on the day/time the
+        # suite happens to run.
+        today = datetime.now().weekday()
+        self.cfg.set("pause_schedule", [{"days": [today], "start": "00:00", "end": "23:59"}], persist=False)
         self.cfg.set("pause_schedule_enabled", True, persist=False)
         self.assertTrue(self.cfg.is_paused())
         # The manual toggle must not claim the user paused it.

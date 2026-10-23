@@ -11,6 +11,7 @@ from sync_client.config import (
     SYNC_MODE_PULL_ONLY,
     SYNC_MODE_PUSH_ONLY,
 )
+from sync_client import rsync_ops
 from sync_client.engine import SyncEngine
 from sync_client.pull_worker import PullWorker
 from sync_client.push_worker import PushWorker
@@ -49,6 +50,19 @@ class SyncModeTests(unittest.TestCase):
             with self.subTest(mode=mode):
                 self.cfg.set("sync_mode", mode, persist=False)
                 self.assertEqual((self.cfg.allows_push(), self.cfg.allows_pull()), (push, pull))
+
+    def test_mirror_destinations_are_locally_authoritative(self) -> None:
+        self.cfg.set("mirrors", [
+            {"source": "/home/me/SADE", "dest": "SADE", "enabled": True},
+            {"source": "/home/me/off", "dest": "off", "enabled": False},
+        ], persist=False)
+
+        self.assertEqual(self.cfg.mirror_owned_roots(), ["SADE"])
+        self.assertTrue(rsync_ops.path_is_mirror_owned(self.cfg, "SADE/notes.tex"))
+        self.assertTrue(rsync_ops.path_is_mirror_owned(self.cfg, "SADE"))
+        self.assertFalse(rsync_ops.path_is_mirror_owned(self.cfg, "SADE2/notes.tex"))
+        self.assertFalse(rsync_ops.path_is_mirror_owned(self.cfg, "other/SADE/notes.tex"))
+        self.assertFalse(rsync_ops.path_is_mirror_owned(self.cfg, "off/notes.tex"))
 
     def test_archive_never_allows_remote_deletions(self) -> None:
         self.cfg.set("delete_enabled", True, persist=False)

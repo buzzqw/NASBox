@@ -159,9 +159,13 @@ DEFAULTS: dict[str, Any] = {
     "change_feed_wait_seconds": 55,  # maximum read-only wait for a new NAS manifest revision
     "remote_change_feed_available": False,  # learned from the NAS server's capability dump
     "remote_causal_versions_available": False,  # optional JOURNAL_V3/manifest metadata
-    "metrics_refresh_seconds": 15,  # seconds between read-only NAS load samples
+    "metrics_refresh_seconds": 30,  # seconds between read-only NAS load samples
     "debounce_seconds": 2,     # seconds of local quiet before pushing a change
     "file_stability_seconds": 0.75,  # one local stat interval before a queued file is eligible
+    "conflict_storm_limit": 3,    # after N conflicts for one path inside the window, reuse one copy
+    "conflict_storm_window_seconds": 3600,
+    "compression_mode": "auto",   # auto (off on LAN), on, off -- rsync -z policy
+    "full_pull_interval_seconds": 7200,  # periodic full reconciliation when the change feed is healthy
     "notify_sync_completion": False,  # show a tray notification after completed file transfers
     "animate_sync_icon": False,  # animate the tray icon while files are transferred
     "tray_single_click": "menu",  # "menu" (compatibility default) or "window"
@@ -225,6 +229,7 @@ DEFAULTS: dict[str, Any] = {
 class Config:
     def __init__(self) -> None:
         self._lock = threading.RLock()
+        self._mirror_roots_cache: tuple[str, ...] | None = None
         self._data: dict[str, Any] = json.loads(json.dumps(DEFAULTS))
         self.load()
 
@@ -232,6 +237,7 @@ class Config:
 
     def load(self) -> None:
         with self._lock:
+            self._mirror_roots_cache = None
             path = paths.config_file()
             if path.exists():
                 try:
@@ -265,6 +271,8 @@ class Config:
     def set(self, key: str, value: Any, persist: bool = True) -> None:
         with self._lock:
             self._data[key] = value
+            if key == "mirrors":
+                self._mirror_roots_cache = None
             if persist:
                 self.save()
 
@@ -330,6 +338,29 @@ class Config:
             if entry.get("source") == source:
                 return entry
         return None
+
+    def mirror_owned_roots(self) -> list[str]:
+        """Relative subtrees owned by a one-way mirror.
+
+        The local source folder is authoritative for these paths. Pulling a
+        NAS-side edit back into them would fight with the mirror (the classic
+        cause of endless conflict copies for build trees), so pull and preview
+        skip them and push simply re-asserts the local version.
+        """
+        with self._lock:
+            if self._mirror_roots_cache is not None:
+                return list(self._mirror_roots_cache)
+            roots: list[str] = []
+            for entry in self._data.get("mirrors", []) or []:
+                if not isinstance(entry, dict) or not entry.get("enabled", True):
+                    continue
+                dest = str(entry.get("dest") or "").strip().strip("/")
+                if not dest or dest in (".", "..") or "/../" in f"/{dest}/":
+                    continue
+                if dest not in roots:
+                    roots.append(dest)
+            self._mirror_roots_cache = tuple(roots)
+            return roots
 
     def update_mirror(self, source: str, **updates: Any) -> None:
         """Merge updates into the mirror entry identified by its source path.
