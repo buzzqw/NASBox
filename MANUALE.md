@@ -854,7 +854,8 @@ Dalla cartella del pacchetto sul NAS:
 `state/`:
 
 - **journal** (`transfer-journal.tsv`): compattato quando supera
-  `JOURNAL_MAX_BYTES` (default 10 MB). La compattazione unisce journal e
+  `JOURNAL_MAX_BYTES` (default 10 MB) o `JOURNAL_MAX_LINES` (default 50.000
+  righe). La compattazione unisce journal e
   manifest in un nuovo snapshot e azzera il journal. È lo stesso meccanismo
   che scatta durante un push, ma ora è garantito anche se il NAS resta senza
   push per molto tempo.

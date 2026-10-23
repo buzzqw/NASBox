@@ -39,4 +39,5 @@ LOG_MAX_BYTES=5242880       # rotate server.log past this size (bytes)
 LOG_RETENTION_DAYS=30       # delete server.log.1/events.jsonl.1 after N days (0 = keep)
 EVENTS_MAX_BYTES=5242880    # rotate events.jsonl past this size (bytes)
 JOURNAL_MAX_BYTES=10485760  # compact the transfer journal past this size (bytes)
+JOURNAL_MAX_LINES=50000     # ...or past this many lines
 STATE_TEMP_MAX_AGE_HOURS=24 # remove stale temporary files after N hours (0 = keep)

@@ -157,6 +157,7 @@ load_config() {
     PRUNE_MAX_STAGING_PER_PASS=20
     LOG_MAX_BYTES=5242880
     JOURNAL_MAX_BYTES=10485760
+    JOURNAL_MAX_LINES=50000
     LOG_RETENTION_DAYS=30
     EVENTS_MAX_BYTES=5242880
     STATE_TEMP_MAX_AGE_HOURS=24
@@ -182,6 +183,10 @@ load_config() {
             JOURNAL_MAX_BYTES)
                 JOURNAL_MAX_BYTES="${value%%#*}"
                 JOURNAL_MAX_BYTES="${JOURNAL_MAX_BYTES//[[:space:]]/}"
+                ;;
+            JOURNAL_MAX_LINES)
+                JOURNAL_MAX_LINES="${value%%#*}"
+                JOURNAL_MAX_LINES="${JOURNAL_MAX_LINES//[[:space:]]/}"
                 ;;
             LOG_RETENTION_DAYS)
                 LOG_RETENTION_DAYS="${value%%#*}"
@@ -209,6 +214,7 @@ load_config() {
     [[ "$PRUNE_MAX_STAGING_PER_PASS" =~ ^[1-9][0-9]*$ ]] || { log ERROR "PRUNE_MAX_STAGING_PER_PASS deve essere un intero >= 1"; exit 1; }
     [[ "$LOG_MAX_BYTES" =~ ^[1-9][0-9]*$ ]] || { log ERROR "LOG_MAX_BYTES deve essere un intero >= 1"; exit 1; }
     [[ "$JOURNAL_MAX_BYTES" =~ ^[1-9][0-9]*$ ]] || { log ERROR "JOURNAL_MAX_BYTES deve essere un intero >= 1"; exit 1; }
+    [[ "$JOURNAL_MAX_LINES" =~ ^[1-9][0-9]*$ ]] || { log ERROR "JOURNAL_MAX_LINES deve essere un intero >= 1"; exit 1; }
     [[ "$LOG_RETENTION_DAYS" =~ ^[0-9]+$ ]] || { log ERROR "LOG_RETENTION_DAYS deve essere un intero >= 0"; exit 1; }
     [[ "$EVENTS_MAX_BYTES" =~ ^[1-9][0-9]*$ ]] || { log ERROR "EVENTS_MAX_BYTES deve essere un intero >= 1"; exit 1; }
     [[ "$STATE_TEMP_MAX_AGE_HOURS" =~ ^[0-9]+$ ]] || { log ERROR "STATE_TEMP_MAX_AGE_HOURS deve essere un intero >= 0"; exit 1; }
@@ -2072,11 +2078,13 @@ prune_staging_candidates() {
 maintain_state_files() {
     # Small, bounded housekeeping that runs with the daemon's normal hourly
     # pass. It never walks SHARE_ROOT: only the tiny state directory.
-    local journal_bytes events_bytes
+    local journal_bytes journal_lines events_bytes
     journal_bytes=$(wc -c < "$JOURNAL_FILE" 2>/dev/null || echo 0)
-    if [[ "$journal_bytes" =~ ^[0-9]+$ ]] && (( journal_bytes > JOURNAL_MAX_BYTES )); then
+    journal_lines=$(wc -l < "$JOURNAL_FILE" 2>/dev/null || echo 0)
+    if [[ "$journal_bytes" =~ ^[0-9]+$ && "$journal_lines" =~ ^[0-9]+$ ]] \
+            && (( journal_bytes > JOURNAL_MAX_BYTES || journal_lines > JOURNAL_MAX_LINES )); then
         if cmd_journal_compact >/dev/null 2>&1; then
-            log INFO "Manutenzione: journal compattato (${journal_bytes} byte)."
+            log INFO "Manutenzione: journal compattato (${journal_bytes} byte, ${journal_lines} righe)."
         else
             log WARN "Manutenzione: compattazione journal fallita; riprovo al prossimo pass."
         fi
@@ -2541,6 +2549,7 @@ cmd_print_config() {
     echo "CHECK_INTERVAL_MINUTES=$CHECK_INTERVAL_MINUTES"
     echo "PRUNE_MAX_FILES_PER_PASS=$PRUNE_MAX_FILES_PER_PASS"
     echo "JOURNAL_MAX_BYTES=$JOURNAL_MAX_BYTES"
+    echo "JOURNAL_MAX_LINES=$JOURNAL_MAX_LINES"
     echo "LOG_MAX_BYTES=$LOG_MAX_BYTES"
     echo "LOG_RETENTION_DAYS=$LOG_RETENTION_DAYS"
     echo "EVENTS_MAX_BYTES=$EVENTS_MAX_BYTES"
@@ -2628,6 +2637,7 @@ cmd_diagnostics() {
     echo "SERVER_LOG_BYTES=$(wc -c < "$LOG_FILE" 2>/dev/null || echo 0)"
     echo "EVENTS_BYTES=$(wc -c < "$EVENTS_FILE" 2>/dev/null || echo 0)"
     echo "JOURNAL_MAX_BYTES=$JOURNAL_MAX_BYTES"
+    echo "JOURNAL_MAX_LINES=$JOURNAL_MAX_LINES"
     echo "LOG_MAX_BYTES=$LOG_MAX_BYTES"
     echo "EVENTS_MAX_BYTES=$EVENTS_MAX_BYTES"
     if [[ -w "$STATE_DIR" ]]; then echo "STATE_WRITABLE=true"; else echo "STATE_WRITABLE=false"; fi
