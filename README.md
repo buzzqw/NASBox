@@ -6,7 +6,7 @@ NASBox synchronizes one folder between multiple PCs through a NAS using SSH
 and rsync. The PyQt6 client manages uploads, downloads, queues, history and
 trash; the small NAS daemon applies remote history retention.
 
-Current protocol versions: client `1.24.0`, NAS server `3.22.0`.
+Current protocol versions: client `1.24.1`, NAS server `3.23.0`.
 
 ### What NASBox Is
 
@@ -73,6 +73,10 @@ NASBox is a synchronization tool, not a backup by itself.
 - Read-only manifest export and journal-aware views: readers no longer rewrite
   the full manifest just to look at it; compaction follows the journal threshold
   and tombstone cleanup has a daily watermark.
+- Bounded server-state housekeeping during the daemon pass: journal compaction,
+  `events.jsonl`/`server.log` rotation and retention, and stale temporary-file
+  cleanup (all configurable). `manifest.tsv` remains a compact snapshot, not a
+  rotating log.
 - Optional rsync compression policy (automatic on LAN, always on/off) and quick
   exclusion profiles for LaTeX, development/build, Office and system files.
 - Conservative local file and non-empty directory renames use one journaled NAS
@@ -223,7 +227,7 @@ NASBox sincronizza una cartella tra piu PC tramite un NAS, usando SSH e rsync.
 Il client grafico PyQt6 gestisce caricamenti, scaricamenti, coda, storico e
 cestino; il piccolo demone sul NAS applica la retention dello storico remoto.
 
-Versioni correnti del protocollo: client `1.24.0`, server NAS `3.22.0`.
+Versioni correnti del protocollo: client `1.24.1`, server NAS `3.23.0`.
 
 ### Che cos'e NASBox
 

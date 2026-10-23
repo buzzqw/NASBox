@@ -33,7 +33,7 @@
 #
 set -uo pipefail
 
-VERSION="3.22.0"
+VERSION="3.23.0"
 SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -157,6 +157,9 @@ load_config() {
     PRUNE_MAX_STAGING_PER_PASS=20
     LOG_MAX_BYTES=5242880
     JOURNAL_MAX_BYTES=10485760
+    LOG_RETENTION_DAYS=30
+    EVENTS_MAX_BYTES=5242880
+    STATE_TEMP_MAX_AGE_HOURS=24
     local key value
     while IFS='=' read -r key value || [[ -n "$key" ]]; do
         case "$key" in
@@ -180,6 +183,18 @@ load_config() {
                 JOURNAL_MAX_BYTES="${value%%#*}"
                 JOURNAL_MAX_BYTES="${JOURNAL_MAX_BYTES//[[:space:]]/}"
                 ;;
+            LOG_RETENTION_DAYS)
+                LOG_RETENTION_DAYS="${value%%#*}"
+                LOG_RETENTION_DAYS="${LOG_RETENTION_DAYS//[[:space:]]/}"
+                ;;
+            EVENTS_MAX_BYTES)
+                EVENTS_MAX_BYTES="${value%%#*}"
+                EVENTS_MAX_BYTES="${EVENTS_MAX_BYTES//[[:space:]]/}"
+                ;;
+            STATE_TEMP_MAX_AGE_HOURS)
+                STATE_TEMP_MAX_AGE_HOURS="${value%%#*}"
+                STATE_TEMP_MAX_AGE_HOURS="${STATE_TEMP_MAX_AGE_HOURS//[[:space:]]/}"
+                ;;
             *) log ERROR "Chiave non supportata in $CONFIG_FILE: $key"; exit 1 ;;
         esac
     done < "$CONFIG_FILE"
@@ -194,6 +209,9 @@ load_config() {
     [[ "$PRUNE_MAX_STAGING_PER_PASS" =~ ^[1-9][0-9]*$ ]] || { log ERROR "PRUNE_MAX_STAGING_PER_PASS deve essere un intero >= 1"; exit 1; }
     [[ "$LOG_MAX_BYTES" =~ ^[1-9][0-9]*$ ]] || { log ERROR "LOG_MAX_BYTES deve essere un intero >= 1"; exit 1; }
     [[ "$JOURNAL_MAX_BYTES" =~ ^[1-9][0-9]*$ ]] || { log ERROR "JOURNAL_MAX_BYTES deve essere un intero >= 1"; exit 1; }
+    [[ "$LOG_RETENTION_DAYS" =~ ^[0-9]+$ ]] || { log ERROR "LOG_RETENTION_DAYS deve essere un intero >= 0"; exit 1; }
+    [[ "$EVENTS_MAX_BYTES" =~ ^[1-9][0-9]*$ ]] || { log ERROR "EVENTS_MAX_BYTES deve essere un intero >= 1"; exit 1; }
+    [[ "$STATE_TEMP_MAX_AGE_HOURS" =~ ^[0-9]+$ ]] || { log ERROR "STATE_TEMP_MAX_AGE_HOURS deve essere un intero >= 0"; exit 1; }
 
     if [[ ! -d "$SHARE_ROOT" ]]; then
         log ERROR "SHARE_ROOT non esiste: $SHARE_ROOT"
@@ -2051,12 +2069,58 @@ prune_staging_candidates() {
     (( removed > 0 )) && log INFO "Staging abbandonate rimosse: $removed"
 }
 
+maintain_state_files() {
+    # Small, bounded housekeeping that runs with the daemon's normal hourly
+    # pass. It never walks SHARE_ROOT: only the tiny state directory.
+    local journal_bytes events_bytes
+    journal_bytes=$(wc -c < "$JOURNAL_FILE" 2>/dev/null || echo 0)
+    if [[ "$journal_bytes" =~ ^[0-9]+$ ]] && (( journal_bytes > JOURNAL_MAX_BYTES )); then
+        if cmd_journal_compact >/dev/null 2>&1; then
+            log INFO "Manutenzione: journal compattato (${journal_bytes} byte)."
+        else
+            log WARN "Manutenzione: compattazione journal fallita; riprovo al prossimo pass."
+        fi
+    fi
+
+    if [[ -f "$EVENTS_FILE" ]]; then
+        events_bytes=$(wc -c < "$EVENTS_FILE" 2>/dev/null || echo 0)
+        if [[ "$events_bytes" =~ ^[0-9]+$ ]] && (( events_bytes > EVENTS_MAX_BYTES )); then
+            # Single previous generation, same convention as server.log.
+            mv -f "$EVENTS_FILE" "${EVENTS_FILE}.1" 2>/dev/null || true
+            log INFO "Manutenzione: events.jsonl ruotato (${events_bytes} byte)."
+        fi
+    fi
+
+    if (( LOG_RETENTION_DAYS > 0 )); then
+        find "$STATE_DIR" -maxdepth 1 -type f \
+            \( -name 'server.log.1' -o -name 'events.jsonl.1' \) \
+            -mmin "+$(( LOG_RETENTION_DAYS * 1440 ))" \
+            -exec rm -f -- {} + 2>/dev/null || true
+    fi
+
+    if (( STATE_TEMP_MAX_AGE_HOURS > 0 )); then
+        # Leftovers from an interrupted command. Only well-known temporary
+        # names are touched and only after a full day, so an in-flight command
+        # can never lose its files.
+        find "$STATE_DIR" -maxdepth 1 -type f \
+            \( -name 'prune-files.*' -o -name 'prune-dirs.*' -o -name 'prune-staging.*' \
+               -o -name 'fs-want.*' -o -name 'fs-match.*' \
+               -o -name 'manifest.tsv.tmp.*' -o -name 'manifest.tsv.sweep.*' \
+               -o -name 'transfer-journal.tsv.tmp' -o -name 'transfer-journal.tsv.append.*' \
+               -o -name 'transfer-journal.tsv.delete.*' -o -name 'transfer-journal.tsv.rollback.*' \
+               -o -name '*.rollback.*' \) \
+            -mmin "+$(( STATE_TEMP_MAX_AGE_HOURS * 60 ))" \
+            -exec rm -f -- {} + 2>/dev/null || true
+    fi
+}
+
 run_once_pass() {
     command -v flock >/dev/null 2>&1 || {
         log ERROR "Impossibile eseguire il pruning: flock non disponibile."
         return 1
     }
     log INFO "sync-daemon-server v$VERSION: avvio pass di pruning (SHARE_ROOT=$SHARE_ROOT, retention=${RETENTION_DAYS}gg, dry-run=$DRY_RUN)"
+    maintain_state_files
     local trash file_candidates dir_candidates staging_candidates
     local removed=0
     trash="$(trash_dir)"
@@ -2421,6 +2485,8 @@ cmd_status() {
     printf '%-18s %s\n' "Storico (spazio):" "$size"
     printf '%-18s %s\n' "Journal (spazio):" "$(wc -c < "$JOURNAL_FILE" 2>/dev/null || echo 0) byte"
     printf '%-18s %s\n' "Manifest (spazio):" "$(wc -c < "$MANIFEST_FILE" 2>/dev/null || echo 0) byte"
+    printf '%-18s %s\n' "Log server (spazio):" "$(wc -c < "$LOG_FILE" 2>/dev/null || echo 0) byte"
+    printf '%-18s %s\n' "Eventi (spazio):" "$(wc -c < "$EVENTS_FILE" 2>/dev/null || echo 0) byte"
     read_sync_lock_diagnostics
     if [[ "$SYNC_LOCK_HELD" == "true" ]]; then
         printf '%-18s occupato (host %s, device %s, PID %s, età %s secondi, fase %s %s/%s)\n' \
@@ -2467,6 +2533,10 @@ cmd_print_config() {
     echo "CHECK_INTERVAL_MINUTES=$CHECK_INTERVAL_MINUTES"
     echo "PRUNE_MAX_FILES_PER_PASS=$PRUNE_MAX_FILES_PER_PASS"
     echo "JOURNAL_MAX_BYTES=$JOURNAL_MAX_BYTES"
+    echo "LOG_MAX_BYTES=$LOG_MAX_BYTES"
+    echo "LOG_RETENTION_DAYS=$LOG_RETENTION_DAYS"
+    echo "EVENTS_MAX_BYTES=$EVENTS_MAX_BYTES"
+    echo "STATE_TEMP_MAX_AGE_HOURS=$STATE_TEMP_MAX_AGE_HOURS"
     echo "CHANGE_FEED_AVAILABLE=true"
     echo "CAUSAL_VERSIONS_AVAILABLE=true"
     if [[ -f "$JOURNAL_FILE" ]]; then echo "JOURNAL_READY=true"; else echo "JOURNAL_READY=false"; fi
@@ -2547,7 +2617,11 @@ cmd_diagnostics() {
     echo "LAST_RUN_EPOCH=$last_run"
     echo "JOURNAL_BYTES=$(wc -c < "$JOURNAL_FILE" 2>/dev/null || echo 0)"
     echo "MANIFEST_BYTES=$(wc -c < "$MANIFEST_FILE" 2>/dev/null || echo 0)"
+    echo "SERVER_LOG_BYTES=$(wc -c < "$LOG_FILE" 2>/dev/null || echo 0)"
+    echo "EVENTS_BYTES=$(wc -c < "$EVENTS_FILE" 2>/dev/null || echo 0)"
     echo "JOURNAL_MAX_BYTES=$JOURNAL_MAX_BYTES"
+    echo "LOG_MAX_BYTES=$LOG_MAX_BYTES"
+    echo "EVENTS_MAX_BYTES=$EVENTS_MAX_BYTES"
     if [[ -w "$STATE_DIR" ]]; then echo "STATE_WRITABLE=true"; else echo "STATE_WRITABLE=false"; fi
 }
 

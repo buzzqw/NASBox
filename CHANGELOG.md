@@ -4,6 +4,27 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 1.24.1 - 2026-10-23
+
+Manutenzione automatica lato NAS (server 3.23.0).
+
+- Il pass orario del demone ora esegue anche `maintain_state_files`:
+  compatta il journal quando supera `JOURNAL_MAX_BYTES` (default 10 MB)
+  invece di aspettare solo un push o un export; ruota `events.jsonl` quando
+  supera `EVENTS_MAX_BYTES` (default 5 MB); elimina `server.log.1` e
+  `events.jsonl.1` più vecchi di `LOG_RETENTION_DAYS` (default 30 giorni).
+- Pulizia dei file temporanei rimasti da un comando interrotto
+  (`prune-*`, `fs-want.*`, `fs-match.*`, `manifest.tsv.tmp.*`,
+  `transfer-journal.tsv.*`): solo dopo `STATE_TEMP_MAX_AGE_HOURS`
+  (default 24 ore), quindi un comando in corso non viene mai toccato.
+- `--status`, `--diagnostics` e `--print-config` espongono dimensioni e
+  soglie di journal, log ed eventi; `server.conf.example` documenta le nuove
+  chiavi.
+- Nota: `manifest.tsv` non è un log e non va cancellato/ruotato: è lo
+  snapshot compatto del repository (circa 8 MB nel repository attuale). Il
+  journal è `transfer-journal.tsv`, normalmente pochi byte dopo la
+  compattazione.
+
 ## 1.24.0 - 2026-10-23
 
 Questa release rende visibile e gestibile ciò che prima era nascosto, e toglie

@@ -6,7 +6,7 @@ cartella NASBox** — con il NAS; il NAS gira un demone leggero che applica la
 retention dello storico. Tutti i PC collegati vedono, con un ritardo di al
 più qualche decina di secondi, i file che gli altri ci mettono dentro.
 
-Versione documentata: client `1.24.0`, server NAS `3.22.0`.
+Versione documentata: client `1.24.1`, server NAS `3.23.0`.
 
 Il modello è deliberatamente quello di Dropbox: **una** cartella per PC,
 niente elenchi di condivisioni da aggiungere/modificare/rimuovere a mano.
@@ -825,6 +825,9 @@ numero limitato di giorni su un piano gratuito.
 | `~/.local/state/sync-daemon/sync-state.sqlite3` | Baseline, pending, versioni causali e coda scheduler persistente |
 | `<pacchetto_server>/server.conf` | Configurazione demone NAS (fonte di verità) |
 | `<pacchetto_server>/state/server.log` | Log del demone NAS |
+| `<pacchetto_server>/state/events.jsonl` | Eventi strutturati del demone (pruning, staging) |
+| `<pacchetto_server>/state/transfer-journal.tsv` | Journal delle transazioni; compattato automaticamente |
+| `<pacchetto_server>/state/manifest.tsv` | Snapshot compatto del repository (non è un log: non va cancellato) |
 | `<pacchetto_server>/state/daemon.pid` | PID del demone NAS (se in esecuzione) |
 
 `client.json` è JSON semplice: si può anche editare a mano (app chiusa) se
@@ -846,9 +849,37 @@ Dalla cartella del pacchetto sul NAS:
 ./sync-daemon-server.sh --run-foreground     # esegue il loop nel terminale corrente (debug)
 ```
 
+**Manutenzione automatica dei log (server 3.23.0+):** ogni pass del demone
+(default ogni 60 minuti) esegue anche una piccola manutenzione della cartella
+`state/`:
+
+- **journal** (`transfer-journal.tsv`): compattato quando supera
+  `JOURNAL_MAX_BYTES` (default 10 MB). La compattazione unisce journal e
+  manifest in un nuovo snapshot e azzera il journal. È lo stesso meccanismo
+  che scatta durante un push, ma ora è garantito anche se il NAS resta senza
+  push per molto tempo.
+- **eventi** (`events.jsonl`): ruotato in `events.jsonl.1` quando supera
+  `EVENTS_MAX_BYTES` (default 5 MB). Una sola generazione precedente.
+- **log del demone** (`server.log`): ruotato in `server.log.1` quando supera
+  `LOG_MAX_BYTES` (default 5 MB); entrambe le generazioni precedenti vengono
+  eliminate dopo `LOG_RETENTION_DAYS` (default 30 giorni, `0` = conserva).
+- **temporanei**: file rimasti da un comando interrotto (`prune-*`,
+  `fs-want.*`, `manifest.tsv.tmp.*`, `transfer-journal.tsv.*`, …) vengono
+  rimossi solo dopo `STATE_TEMP_MAX_AGE_HOURS` (default 24 ore), quindi un
+  comando in corso non viene mai toccato.
+- **`manifest.tsv` non è un log**: è lo snapshot compatto del repository
+  (circa 8 MB con 67.000 file). Non va cancellato né ruotato; cresce solo se
+  cresce il numero di file/tombstone. La sua pulizia è gestita da
+  `TOMBSTONE_TTL_DAYS` e dalla compattazione.
+
+Le soglie sono modificabili in `server.conf` e visibili con
+`--print-config` / `--diagnostics`; `--status` mostra anche le dimensioni di
+journal, manifest, log ed eventi.
+
 **Controllo automatico del demone:** ogni client, se ha "Script server sul
-NAS" configurato, ricontrolla da solo **ogni 15 minuti** (oltre che ad ogni
-"Rileva dal NAS" manuale) lo stato del demone via `--print-config`:
+NAS" configurato, ricontrolla da solo lo stato del demone via
+`--print-config`: ogni 60 secondi se c'è un problema, fino a ogni 5 minuti
+quando il NAS è stabile (oltre che ad ogni "Rileva dal NAS" manuale):
 
 - **È attivo?** Se lo trova fermo, prova a riavviarlo automaticamente
   (`--start`, che non fa nulla se in realtà era già attivo) e te lo segnala —

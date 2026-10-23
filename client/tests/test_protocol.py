@@ -234,6 +234,41 @@ class ServerProtocolInvariantTests(unittest.TestCase):
         self.assertIn(encoded + b"\t" + digest.encode(), exported.stdout)
         self.assertIn(b"MANIFEST_HIT\t" + encoded, looked_up.stdout)
 
+    def test_run_once_compacts_journal_and_rotates_event_log(self) -> None:
+        with ServerSandbox(
+            JOURNAL_MAX_BYTES="100",
+            EVENTS_MAX_BYTES="20",
+            LOG_RETENTION_DAYS="0",
+            STATE_TEMP_MAX_AGE_HOURS="1",
+        ) as sandbox:
+            repository_id = sandbox.init_repository()
+            sandbox.state.mkdir(parents=True, exist_ok=True)
+            digest = hashlib.sha256(b"payload").hexdigest()
+            payload = b"\0".join([
+                b"JOURNAL_V2", repository_id.encode(), b"tx-maint", b"device-a",
+                b"1700000000", b"1", b"PUT", b"maint.txt", digest.encode(),
+                b"7", b"1700000000000000000",
+            ]) + b"\0"
+            appended = sandbox.run_with_lease("--journal-append", input=payload)
+            self.assertEqual(appended.returncode, 0, appended.stderr.decode())
+
+            events = sandbox.state / "events.jsonl"
+            events.write_text("x" * 100 + "\n", encoding="utf-8")
+            stale = sandbox.state / "prune-files.stale"
+            stale.write_text("old", encoding="utf-8")
+            old = 1_700_000_000
+            os.utime(stale, (old, old))
+
+            result = sandbox.run("--run-once")
+
+            self.assertEqual(result.returncode, 0, result.stderr.decode())
+            self.assertTrue((sandbox.state / "events.jsonl.1").exists())
+            self.assertGreater((sandbox.state / "transfer-journal.tsv").stat().st_size, 0)
+            self.assertLess((sandbox.state / "transfer-journal.tsv").stat().st_size, 100)
+            self.assertFalse(stale.exists())
+            manifest = sandbox.run("--manifest-export")
+            self.assertIn(b"maint.txt\t" + digest.encode(), manifest.stdout)
+
     def test_manifest_export_is_read_only(self) -> None:
         with ServerSandbox() as sandbox:
             repository_id = sandbox.init_repository()
