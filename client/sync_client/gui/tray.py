@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import time
 
-from PyQt6.QtCore import QTimer, QUrl, pyqtSlot
+from PyQt6.QtCore import QTimer, QUrl, pyqtSignal, pyqtSlot
 from PyQt6.QtGui import QCursor, QDesktopServices
 from PyQt6.QtWidgets import QMenu, QSystemTrayIcon
 
@@ -24,6 +24,8 @@ RECENT_ICONS = {
 
 
 class TrayIcon(QSystemTrayIcon):
+    update_requested = pyqtSignal()
+
     def __init__(self, cfg: Config, engine: SyncEngine, logger: EventLogger, main_window, parent=None) -> None:
         super().__init__(icons.tray_icon("unconfigured"), parent)
         self.cfg = cfg
@@ -43,6 +45,7 @@ class TrayIcon(QSystemTrayIcon):
         self._paused = False
         self._pending_count = 0
         self._conflict_count = 0
+        self._update_version = ""
         self._active_transfers: set[str] = set()
         self._animation_frame = 0
         self._transfer_counts = {"upload": 0, "download": 0}
@@ -95,6 +98,10 @@ class TrayIcon(QSystemTrayIcon):
             pct = f" ({self._current_percent}%)" if self._current_percent > 0 else ""
             active_info = f"\n{dir_sym} {fname}{pct}{speed}"
         self.setToolTip(f"NASBox — {self._status_text}{suffix}{conflicts_suffix}{active_info}")
+
+    def set_update_available(self, version: str) -> None:
+        """Offer "Aggiorna a <versione>" in the tray menu (empty = no update)."""
+        self._update_version = (version or "").strip()
 
     def set_conflict_count(self, count: int) -> None:
         try:
@@ -197,6 +204,9 @@ class TrayIcon(QSystemTrayIcon):
         if self._pending_count:
             pending_action = menu.addAction(t("tray.pending_files", count=self._pending_count))
             pending_action.setEnabled(False)
+        if self._update_version:
+            update_action = menu.addAction(t("tray.update_action", version=self._update_version))
+            update_action.triggered.connect(self.update_requested.emit)
         if self._conflict_count:
             conflict_action = menu.addAction(
                 t("tray.conflicts_action", count=self._conflict_count)

@@ -27,7 +27,14 @@ integrità e senza rete di sicurezza).
 - **Controllo periodico, non solo all'avvio.** Un client lasciato aperto per
   giorni non vedeva mai una release nuova: ora controlla ogni 6 ore (e un
   minuto dopo l'avvio) e avvisa con una notifica della tray, senza dialoghi
-  modali. L'aggiornamento interattivo resta sulla versione nella scheda Stato.
+  modali. La voce **Aggiorna a <versione>…** compare nel menu della tray (oltre
+  alla versione cliccabile nella scheda Stato) e apre lo stesso flusso di
+  aggiornamento.
+- **La cartella degli aggiornamenti non entra più nella sincronizzazione.**
+  `.nasbox-client-update` sta dentro `remote_prefix`, quindi senza esclusione
+  l'archivio pubblicato sarebbe finito scaricato nella cartella NASBox di ogni
+  client e ricaricato a ogni release (con le copie di conflitto che ne
+  derivano).
 - **Niente più update sopra il repository di sviluppo.** Se la cartella in uso è
   un checkout git, l'aggiornamento automatico si disattiva (sovrascriverebbe il
   repository e il lavoro non committato); `NASBOX_UPDATE_FORCE=1` o

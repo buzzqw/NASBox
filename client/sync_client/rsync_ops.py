@@ -50,8 +50,14 @@ PARTIAL_DIRNAME = ".sync-partial"
 # the repository, and .git/index changes on every single git command -- exactly
 # the churn that produces conflict storms on a multi-client setup.
 VCS_DIRNAMES = [".git", ".hg", ".svn"]
+# Published client updates live inside the synced tree (remote_prefix +
+# client_update_remote_path, see updater.DEFAULT_REMOTE_UPDATE_PATH). They are
+# client software, not user content: without this the bundle would be pulled
+# into every client's NASBox folder and pushed back on every release.
+CLIENT_UPDATE_DIRNAME = ".nasbox-client-update"
 EXCLUDE_DIRNAMES = [
-    TRASH_DIRNAME, SYNOLOGY_EADIR, PARTIAL_DIRNAME, STAGING_DIRNAME, *VCS_DIRNAMES,
+    TRASH_DIRNAME, SYNOLOGY_EADIR, PARTIAL_DIRNAME, STAGING_DIRNAME,
+    CLIENT_UPDATE_DIRNAME, *VCS_DIRNAMES,
 ]
 RSYNC_SKIP_COMPRESS_SUFFIXES = (
     "gz/zip/z/rpm/deb/iso/bz2/tbz/7z/xz/zst/tgz/rar/"

@@ -51,6 +51,22 @@ def test_default_system_excludes_in_path_is_excluded(tmp_path):
         assert not rsync_ops.path_is_excluded(cfg, "SADE/SADE.pdf")
 
 
+def test_published_client_bundle_never_enters_synchronization(tmp_path):
+    """The update folder lives under remote_prefix: it is software, not content.
+
+    Without this exclusion every client would pull the .tar.gz into its own
+    NASBox folder on the release after the one that introduced it.
+    """
+    with ClientEnvironment():
+        cfg = Config()
+        cfg.set("local_path", str(tmp_path / "sync"))
+
+        assert rsync_ops.path_is_excluded(cfg, ".nasbox-client-update/manifest.json")
+        assert rsync_ops.path_is_excluded(cfg, "sub/.nasbox-client-update/client-1.26.9.tar.gz")
+        args = rsync_ops._exclude_args(cfg)
+        assert rsync_ops.CLIENT_UPDATE_DIRNAME in [args[i + 1] for i, val in enumerate(args) if val == "--exclude"]
+
+
 def test_exclude_args_contains_default_excludes(tmp_path):
     with ClientEnvironment():
         cfg = Config()

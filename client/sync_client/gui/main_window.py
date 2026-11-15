@@ -214,6 +214,7 @@ class MainWindow(QMainWindow):
         self.mirror_manager.log_event.connect(self.status_tab.on_log_event)
 
         self.tray = TrayIcon(self.cfg, self.engine, self.logger, self)
+        self.tray.update_requested.connect(self._check_for_client_update)
         for direction, worker in (("upload", self.push_worker), ("download", self.pull_worker)):
             worker.log_event.connect(self.tray.on_log_event)
             worker.transfer_preparing.connect(self.tray.on_transfer_preparing)
@@ -407,6 +408,7 @@ class MainWindow(QMainWindow):
             return  # once per version, not every interval
         self._last_notified_version = candidate.version
         candidate.cleanup()
+        self.tray.set_update_available(candidate.version)
         self.tray.showMessage(
             APP_NAME,
             t("main_window.update_notice", version=candidate.version),
