@@ -147,6 +147,15 @@ def _manifest(version: str, archive: Path, channel: str, notes: str) -> updater.
     )
 
 
+def _publish_local(directory: Path, destination: Path) -> None:
+    """Copy the built files into a local update folder (e.g. on the NAS itself)."""
+    destination.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(directory / updater.MANIFEST_NAME, destination / updater.MANIFEST_NAME)
+    for archive in directory.glob("client-*.tar.gz"):
+        shutil.copy2(archive, destination / archive.name)
+    print(f"✓ pubblicato in {destination}")
+
+
 def _upload(directory: Path, cfg) -> None:
     connection = rsync_ops.resolve_connection(cfg)
     user = cfg.get("nas_user")
@@ -179,7 +188,11 @@ def main() -> int:
     parser.add_argument("--out", default=str(REPO_ROOT / "dist-client-update"), help="cartella di output")
     parser.add_argument("--channel", default="stable", help="canale pubblicato nel manifest")
     parser.add_argument("--notes", default="", help="note di rilascio mostrate nel manifest")
-    parser.add_argument("--upload", action="store_true", help="carica il risultato sul NAS")
+    parser.add_argument("--upload", action="store_true", help="carica il risultato sul NAS via SSH")
+    parser.add_argument(
+        "--dest-dir", default="",
+        help="copia il risultato in questa cartella locale (es. quando si pubblica dal NAS stesso)",
+    )
     parser.add_argument("--keep", action="store_true", help="tieni le versioni precedenti (default: rimuove gli archivi vecchi)")
     args = parser.parse_args()
 
@@ -203,16 +216,17 @@ def main() -> int:
     print(f"server     : {manifest.requires_server or 'n/d'}")
     print(f"cartella   : {destination}")
 
-    if args.upload:
+    if args.dest_dir:
+        _publish_local(destination, Path(args.dest_dir).expanduser())
+    elif args.upload:
         from sync_client import config as config_module
 
         cfg = config_module.shared()
         if not (cfg.get("nas_user") and (cfg.get("nas_lan") or cfg.get("nas_wan"))):
             raise SystemExit("configurazione NAS assente: imposta nas_user e nas_lan/nas_wan nel client")
         _upload(destination, cfg)
-        print("✓ pubblicato sul NAS")
     else:
-        print("(solo build: usa --upload per pubblicare sul NAS)")
+        print("(solo build: usa --upload o --dest-dir per pubblicare)")
     return 0
 
 
