@@ -9,7 +9,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from PyQt6.QtCore import QLibraryInfo, QLocale, QTranslator
+from PyQt6.QtCore import QLibraryInfo, QLocale, QTimer, QTranslator
 from PyQt6.QtWidgets import QApplication, QMessageBox
 
 from sync_client import config as config_module, i18n, instance_lock, logger as logger_module, paths, updater
@@ -95,9 +95,21 @@ def _offer_update(cfg: config_module.Config, current_root: Path) -> bool:
 
 def main() -> int:
     paths.ensure_dirs()
+    current_root = Path(__file__).resolve().parent
+    # Only the instance that actually runs counts as a start attempt: a second
+    # launch refused by the lock must not push a healthy install towards rollback.
     if not instance_lock.acquire():
         print("NASBox è già in esecuzione per questo utente.", file=sys.stderr)
         return 0
+    # A previous update may have installed a build that never managed to run:
+    # put the working one back before anything else touches the GUI.
+    restored = updater.rollback_if_needed(current_root)
+    if restored:
+        logger_module.shared().log(
+            "ERROR", "-",
+            f"aggiornamento client non riuscito: ripristinata la versione {restored}",
+        )
+    updater.mark_start_attempt(current_root)
 
     # Language must be resolved before any widget is built -- they read
     # translated strings once, at construction time (see i18n.py).
@@ -111,12 +123,20 @@ def main() -> int:
     app.setApplicationName(APP_NAME)
     app.setApplicationVersion(APP_VERSION)
     _load_qt_base_translations(app, i18n.current_language())
-    if service_mode:
-        candidate = updater.find_update(cfg, Path(__file__).resolve().parent, sys.argv[0])
+
+    update_allowed = updater.auto_update_allowed(cfg, current_root)
+    if not update_allowed:
+        logger_module.shared().log(
+            "INFO", "-",
+            "aggiornamento automatico disattivato: questa cartella è un checkout git "
+            "(usa NASBOX_UPDATE_FORCE=1 per forzarlo)",
+        )
+    if update_allowed and service_mode:
+        candidate = updater.find_update(cfg, current_root, sys.argv[0])
         if candidate is not None:
             try:
                 source_root = candidate.materialize()
-                updater.install_update(source_root, Path(__file__).resolve().parent)
+                updater.install_update(source_root, current_root)
                 candidate.cleanup()
                 # Let systemd start a fresh process instead of exec'ing while
                 # the Qt application and its worker threads are still alive.
@@ -126,7 +146,7 @@ def main() -> int:
                 logger_module.shared().log(
                     "ERROR", "-", f"aggiornamento automatico client fallito: {exc}",
                 )
-    elif _offer_update(cfg, Path(__file__).resolve().parent):
+    elif update_allowed and _offer_update(cfg, current_root):
         return 0
 
     from sync_client.gui import icons
@@ -147,6 +167,10 @@ def main() -> int:
         window.hide()
     else:
         window.show()
+
+    # The update is confirmed only once the window is actually up: if this build
+    # crashes during startup, the marker stays and the next start rolls back.
+    QTimer.singleShot(15_000, lambda: updater.confirm_started_ok(current_root))
 
     return app.exec()
 

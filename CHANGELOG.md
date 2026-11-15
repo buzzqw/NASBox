@@ -4,6 +4,38 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 1.26.9 - 2026-11-15
+
+Aggiornamento del client ripensato per essere verificabile, periodico e con
+rollback (il vecchio meccanismo aggiornava solo all'avvio, senza controlli di
+integrità e senza rete di sicurezza).
+
+- **Manifest + archivio unico.** Sul NAS si pubblica `manifest.json` accanto a
+  `client-<versione>.tar.gz`. Il client legge il manifest con **un solo comando
+  SSH** (prima interrogava un `version.py` remoto) e scarica l'archivio solo se
+  la versione è più nuova. Il vecchio layout a cartella resta supportato, così
+  un publisher esistente continua a funzionare.
+- **Verifica di integrità.** SHA-256 e dimensione dell'archivio sono confrontati
+  prima di estrarre: un download troncato o un file manomesso vengono rifiutati
+  invece di essere installati. L'estrazione rifiuta percorsi assoluti, `..`,
+  symlink e device file.
+- **Rollback automatico.** La versione precedente non viene più cancellata
+  subito: resta come backup finché la nuova non conferma l'avvio (finestra
+  visibile da 15 s). Se non ci riesce, al secondo tentativo fallito il client
+  ripristina da solo la versione funzionante. È la protezione che mancava
+  quando un self-update lasciava l'app "sparita" con "già in esecuzione".
+- **Controllo periodico, non solo all'avvio.** Un client lasciato aperto per
+  giorni non vedeva mai una release nuova: ora controlla ogni 6 ore (e un
+  minuto dopo l'avvio) e avvisa con una notifica della tray, senza dialoghi
+  modali. L'aggiornamento interattivo resta sulla versione nella scheda Stato.
+- **Niente più update sopra il repository di sviluppo.** Se la cartella in uso è
+  un checkout git, l'aggiornamento automatico si disattiva (sovrascriverebbe il
+  repository e il lavoro non committato); `NASBOX_UPDATE_FORCE=1` o
+  `client_update_allow_dev_tree` lo forzano.
+- **`tools/publish_client.py`.** Prepara archivio e manifest in un comando,
+  verifica il bundle estratto (versione inclusa) prima di pubblicarlo e con
+  `--upload` lo copia sul NAS.
+
 ## 1.26.8 - 2026-11-15
 
 - **Finestra bloccata con un core al 100% durante i trasferimenti.**

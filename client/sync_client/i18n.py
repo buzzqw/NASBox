@@ -1415,6 +1415,14 @@ STRINGS: dict[str, dict[str, str]] = {
     "main_window.update_none": {"it": "Nessun aggiornamento disponibile: questa è già la versione più recente.", "en": "No update available: this is already the latest version."},
     "main_window.update_available_title": {"it": "Aggiornamento disponibile", "en": "Update available"},
     "main_window.update_available_body": {"it": "La versione {version} è disponibile ({origin}).\n\nInstallarla e riavviare?", "en": "Version {version} is available ({origin}).\n\nInstall and restart?"},
+    "main_window.update_notice": {
+        "it": "Versione {version} disponibile sul NAS — clicca la versione nella scheda Stato per aggiornare.",
+        "en": "Version {version} is available on the NAS — click the version in the Status tab to update.",
+    },
+    "main_window.update_dev_checkout": {
+        "it": "Questa installazione è un checkout git ({path}): un aggiornamento automatico sovrascriverebbe il repository. Aggiorna con git pull, oppure imposta NASBOX_UPDATE_FORCE=1 per forzare.",
+        "en": "This installation is a git checkout ({path}): an automatic update would overwrite the repository. Update with git pull, or set NASBOX_UPDATE_FORCE=1 to force it.",
+    },
     "main_window.update_restart_title": {"it": "Aggiornamento completato", "en": "Update complete"},
     "main_window.update_restart_body": {"it": "NASBox verrà riavviato con la nuova versione.", "en": "NASBox will restart with the new version."},
     "main_window.update_failed_title": {"it": "Aggiornamento fallito", "en": "Update failed"},

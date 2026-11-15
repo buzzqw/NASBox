@@ -16,6 +16,12 @@ from .. import updater
 from ..engine import SyncEngine
 from ..mirrors import MirrorManager
 from ..version import APP_NAME, APP_VERSION
+
+#: How often a running client looks for a newer release on the NAS. Without
+#: this, a client left open for days never noticed an update at all.
+UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000
+#: Let the first scan/sync settle before the first silent check.
+UPDATE_NOTICE_DELAY_MS = 60 * 1000
 from ..pull_worker import PullWorker
 from ..push_worker import PushWorker
 from ..scan_worker import ScanWorker
@@ -237,6 +243,16 @@ class MainWindow(QMainWindow):
         self.scan_worker.start()
         self.mirror_manager.start()
 
+        # Updates are no longer only discovered at startup: a client that stays
+        # open for days used to never hear about a new release. The periodic
+        # check is silent (tray notice) and never interrupts with a modal.
+        self._last_notified_version = ""
+        QTimer.singleShot(UPDATE_NOTICE_DELAY_MS, self._check_for_client_update_quietly)
+        self._update_check_timer = QTimer(self)
+        self._update_check_timer.setInterval(UPDATE_CHECK_INTERVAL_MS)
+        self._update_check_timer.timeout.connect(self._check_for_client_update_quietly)
+        self._update_check_timer.start()
+
     def _on_conflict_count(self, count: int) -> None:
         """Keep the Conflicts tab and tray badge honest without a extra scan."""
         index = self.tabs.indexOf(self.conflicts_tab)
@@ -364,11 +380,45 @@ class MainWindow(QMainWindow):
 
     _update_check_busy = False
 
+    @staticmethod
+    def _current_root() -> Path:
+        return Path(__file__).resolve().parents[2]
+
+    def _check_for_client_update_quietly(self) -> None:
+        """Periodic check: notify in the tray, never block the user with a dialog."""
+        if self._update_check_busy or not updater.auto_update_allowed(self.cfg, self._current_root()):
+            return
+        self._update_check_busy = True
+        current_root = self._current_root()
+        run_in_background(
+            self, "_update_check",
+            lambda: {"candidate": updater.find_update(self.cfg, current_root, str(current_root / "main.py"))},
+            self._on_quiet_update_done,
+        )
+
+    def _on_quiet_update_done(self, result, exc: Exception | None) -> None:
+        self._update_check_busy = False
+        if exc is not None:
+            return  # a periodic check must never report transient SSH failures
+        candidate = result.get("candidate") if result else None
+        if candidate is None:
+            return
+        if candidate.version == self._last_notified_version:
+            return  # once per version, not every interval
+        self._last_notified_version = candidate.version
+        candidate.cleanup()
+        self.tray.showMessage(
+            APP_NAME,
+            t("main_window.update_notice", version=candidate.version),
+            QSystemTrayIcon.MessageIcon.Information,
+            15_000,
+        )
+
     def _check_for_client_update(self) -> None:
         if self._update_check_busy:
             return
         self._update_check_busy = True
-        current_root = Path(__file__).resolve().parents[2]
+        current_root = self._current_root()
         run_in_background(
             self, "_update_check",
             lambda: {"candidate": updater.find_update(self.cfg, current_root, str(current_root / "main.py"))},
@@ -394,9 +444,17 @@ class MainWindow(QMainWindow):
         if answer != QMessageBox.StandardButton.Yes:
             candidate.cleanup()
             return
+        current_root = self._current_root()
+        if not updater.auto_update_allowed(self.cfg, current_root):
+            candidate.cleanup()
+            QMessageBox.information(
+                self,
+                t("main_window.update_check_title"),
+                t("main_window.update_dev_checkout", path=str(current_root)),
+            )
+            return
         try:
             source_root = candidate.materialize()
-            current_root = Path(__file__).resolve().parents[2]
             updater.install_update(source_root, current_root)
             candidate.cleanup()
             QMessageBox.information(self, t("main_window.update_restart_title"), t("main_window.update_restart_body"))
