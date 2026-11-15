@@ -29,6 +29,7 @@ from PyQt6.QtCore import QThread, pyqtSignal
 
 from .config import Config
 from .conflicts import CONFLICT_GLOB
+from .i18n import t
 from .logger import EventLogger
 from . import paths, rsync_ops
 from .watcher import FolderWatcher

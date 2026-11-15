@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import threading
+from datetime import datetime
 from typing import Any, Optional
 
 from . import paths
@@ -105,7 +106,7 @@ def normalize_schedule(windows: Any) -> list[dict]:
 
 
 def schedule_window_state(
-    window: dict, when: "datetime", *, want_remaining: bool = False,
+    window: dict, when: datetime, *, want_remaining: bool = False,
 ) -> tuple[bool, int | None]:
     """Is this window active at `when`, and (optionally) seconds until it ends."""
     start = _hhmm_to_minutes(window.get("start"))
@@ -139,12 +140,10 @@ def schedule_window_state(
 
 
 def schedule_state(
-    windows: Any, when: "datetime | None" = None, *, want_remaining: bool = False,
+    windows: Any, when: datetime | None = None, *, want_remaining: bool = False,
 ) -> tuple[bool, int | None]:
     """Whether any schedule window is active now, and the wait until the soonest end."""
-    from datetime import datetime as _datetime
-
-    moment = when or _datetime.now()
+    moment = when or datetime.now()
     active = False
     soonest: int | None = None
     for window in normalize_schedule(windows):

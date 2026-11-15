@@ -9,6 +9,7 @@ import csv
 import os
 import re
 import shutil
+import signal
 import subprocess
 import threading
 import time
@@ -21,6 +22,39 @@ POLL_FALLBACK_SECONDS = 2
 UNKNOWN_PATH = ""  # sentinel for a dirty mark whose specific relative path couldn't be resolved
 INTERNAL_PATH_PARTS = {".sync-partial", ".sync-trash", ".nasbox-root", ".~tmp~"}
 RSYNC_TEMP_FILE_RE = re.compile(r"^\..+\.[A-Za-z0-9]{6}$")
+
+
+def _load_prctl():
+    """libc's prctl, or None where it isn't available (non-Linux)."""
+    try:
+        import ctypes
+
+        return ctypes.CDLL(None, use_errno=True).prctl
+    except (OSError, ImportError):
+        return None
+
+
+_PRCTL = _load_prctl()
+PR_SET_PDEATHSIG = 1
+
+
+def _die_with_parent() -> None:
+    """preexec hook: have the kernel signal inotifywait when this process dies.
+
+    stop() terminates the child, but a client that is killed (crash, SIGKILL,
+    logout) never gets to call it: the orphan keeps every inotify watch on the
+    synced tree and keeps consuming events forever. Two such leftovers were
+    found still running long after their client had exited.
+    """
+    if _PRCTL is None:
+        return
+    try:
+        _PRCTL(PR_SET_PDEATHSIG, signal.SIGTERM)
+    except Exception:
+        return
+    if os.getppid() == 1:  # parent already gone before the prctl took effect
+        os._exit(1)
+
 
 
 def has_inotify() -> bool:
@@ -155,6 +189,7 @@ class FolderWatcher:
                     "--csv", self.path,
                 ],
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                preexec_fn=_die_with_parent,
             )
         except OSError:
             self._set_mode("polling", "inotifywait non disponibile; uso il controllo periodico")

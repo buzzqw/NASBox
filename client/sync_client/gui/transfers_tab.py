@@ -84,6 +84,14 @@ class TransfersTab(QWidget):
         # the table only ever shows a subset of this, so a search doesn't lose data
         # and gets reapplied whenever a fresh scan or a completion comes in.
         self._all_items: list[TransferItem] = []
+        # O(1) membership test for per-file events. Rebuilding
+        # {(item.direction, item.path) for item in self._all_items} inside every
+        # on_item_started() call put the GUI thread at 100% (and froze the
+        # window) on a 30k-file transfer. None means stale: rebuilt on next use.
+        self._queue_keys: set[tuple[str, str]] | None = None
+        # A burst of newly started files must not re-render the table once per
+        # file either; _flush() applies one coalesced rebuild per interval.
+        self._filter_pending = False
         self._queue_sequence: dict[tuple[str, str], int] = {}
         self._next_queue_sequence = 1
         self._active_transfers: set[str] = set()
@@ -136,6 +144,7 @@ class TransfersTab(QWidget):
                 if (item.direction, item.path) not in incoming_keys
             )
         self._all_items = incoming
+        self._queue_keys = None
         for item in sorted(incoming, key=self._queue_sort_key):
             self._ensure_queue_sequence((item.direction, item.path))
         self._recently_completed.clear()
@@ -156,10 +165,23 @@ class TransfersTab(QWidget):
             self._recently_completed.discard(key)
             if key not in existing:
                 self._all_items.append(item)
+                if self._queue_keys is not None:
+                    self._queue_keys.add(key)
                 existing.add(key)
             self._ensure_queue_sequence(key)
         self._refresh_queue_total_from_items()
         self._apply_filter()
+
+    def _known_keys(self) -> set[tuple[str, str]]:
+        """Cached set of queued (direction, path) keys -- rebuilt only when the
+        item list was replaced, never once per started file."""
+        if self._queue_keys is None:
+            self._queue_keys = {(item.direction, item.path) for item in self._all_items}
+        return self._queue_keys
+
+    def _schedule_filter_update(self) -> None:
+        """Coalesce a burst of new queue items into the next _flush() rebuild."""
+        self._filter_pending = True
 
     def _apply_filter(self) -> None:
         needle = self.search_edit.text().strip().lower()
@@ -306,18 +328,18 @@ class TransfersTab(QWidget):
         if previous_path and previous_path != path:
             self._remove_visible_progress_cell((direction, previous_path))
         self._recently_completed.discard(key)
-        known = key in {(item.direction, item.path) for item in self._all_items}
+        known = key in self._known_keys()
         if not known:
             self._all_items.append(TransferItem(direction, path, size))
+            self._known_keys().add(key)
         self._ensure_queue_sequence(key)
-        self._refresh_queue_total_from_items()
         self._active_items.add((direction, path))
         self._current_files[direction] = path
         self._item_progress[key] = 0
         if known:
             self._mark_visible_item_active(direction, path)
         else:
-            self._apply_filter()
+            self._schedule_filter_update()
         self._refresh_activity()
 
     def on_item_progress(self, direction: str, path: str, percent: int) -> None:
@@ -386,6 +408,7 @@ class TransfersTab(QWidget):
                 item for item in self._all_items
                 if (item.direction, item.path) not in self._completed_items
             ]
+            self._queue_keys = None
             self._active_items.difference_update(
                 {key for key in self._active_items if key[0] == direction}
             )
@@ -455,8 +478,17 @@ class TransfersTab(QWidget):
                 item for item in self._all_items
                 if (item.direction, item.path) not in pending
             ]
+            self._queue_keys = None
+            self._filter_pending = False
             self._apply_filter()
             self._refresh_activity()
+
+        if self._filter_pending:
+            # Coalesced rebuild from a burst of on_item_started() calls: one
+            # sort + row refresh per flush interval instead of one per file.
+            self._filter_pending = False
+            self._refresh_queue_total_from_items()
+            self._apply_filter()
 
         if self._active_transfers or self._preflight_progress is not None or self._queue_scan_running:
             self._refresh_activity()

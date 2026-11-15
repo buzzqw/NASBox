@@ -4,6 +4,38 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 1.26.8 - 2026-11-15
+
+- **Finestra bloccata con un core al 100% durante i trasferimenti.**
+  `on_item_started()` ricostruiva l'insieme dei percorsi in coda (30.000
+  elementi) e riordinava l'intera lista per **ogni singolo file** avviato:
+  38 ms per file, cioè 26 file/s al massimo contro i ~100 di un trasferimento
+  reale. Il thread grafico non riusciva a stare dietro alla coda di eventi, la
+  finestra smetteva di rispondere e restava con un core al 100% fino alla fine
+  del trasferimento. Ora il set dei percorsi è in cache (invalidato solo quando
+  la lista viene sostituita) e la tabella viene ridisegnata al massimo ogni
+  250 ms, riusando il timer di flush già esistente: **0,7 ms per file**,
+  ~1500 file/s. Il blocco si presentava anche a finestra già chiusa nella
+  tray, perché era il thread grafico a restare indietro.
+- **Anteprima della coda sempre in errore.** Mancava `import stat` in
+  `scan_worker.py`: `_manifest_preview()` sollevava `NameError` a ogni passata
+  (una per aggiornamento mirror, 40 occorrenze nel log di una sola giornata) e
+  la coda ricadeva sempre sul dry-run rsync completo, più lento e più pesante
+  sul NAS.
+- **Watcher `inotifywait` orfani.** Se il client veniva terminato senza un
+  arresto ordinato (crash, SIGKILL, logout, chiusura della sessione) i watcher
+  restavano vivi per ore con parent 1, continuando a tenere i watch inotify
+  dell'intero albero e a consumare eventi. Ora il figlio riceve
+  `PR_SET_PDEATHSIG` e muore insieme al padre; il caso "padre già sparito
+  prima del prctl" viene chiuso subito.
+- **Errori di trasferimento inutilizzabili.** Il dettaglio accumulava anche il
+  chatter di rsync (`100 files...`, `receiving file list ...`, riepiloghi
+  `sent ... bytes`) e veniva troncato **dall'inizio**: su un albero grande le
+  righe informative esaurivano il budget di 64 KB e l'errore vero — che rsync
+  stampa alla fine — veniva buttato via. Ogni trasferimento fallito riportava
+  soltanto `[ERROR] - receiving file list ...`, senza alcuna indicazione utile.
+  Ora il chatter è filtrato e il budget conserva la coda.
+
 ## 1.26.7 - 2026-11-15
 
 - **Cliccare le schede non porta più la CPU al 100%.** `path_is_excluded`

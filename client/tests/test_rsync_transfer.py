@@ -166,6 +166,30 @@ class RsyncTransferTests(unittest.TestCase):
         self.assertFalse(result.ok)
         self.assertLessEqual(len(result.raw_error.encode()), rsync_ops.MAX_TRANSFER_ERROR_BYTES)
 
+    def test_error_detail_keeps_the_real_failure_and_drops_rsync_chatter(self) -> None:
+        output = (
+            "receiving file list ...\n"
+            "100 files...\n"
+            "1,000 files to consider\n"
+            "rsync: [receiver] write failed on \"/volume1/NASBox/x.bin\": No space left on device (28)\n"
+            "rsync error: error in file IO (code 11) at receiver.c(380) [receiver=3.2.7]\n"
+        )
+        result, _command = self._run_with_process(_FakeProcess(output, returncode=11), rsync_ops.pull)
+
+        self.assertFalse(result.ok)
+        self.assertIn("No space left on device", result.raw_error)
+        self.assertNotIn("receiving file list", result.raw_error)
+        self.assertNotIn("files to consider", result.raw_error)
+
+    def test_error_detail_keeps_the_tail_when_noise_fills_the_budget(self) -> None:
+        filler = "".join(f"link_stat \"/volume1/NASBox/{index}.bin\" failed\n" for index in range(5000))
+        failure = "rsync error: some real failure (code 12)\n"
+        result, _command = self._run_with_process(_FakeProcess(filler + failure, returncode=12), rsync_ops.pull)
+
+        self.assertFalse(result.ok)
+        self.assertLessEqual(len(result.raw_error.encode()), rsync_ops.MAX_TRANSFER_ERROR_BYTES)
+        self.assertIn("some real failure", result.raw_error)
+
     def test_staging_transaction_id_changes_when_source_fingerprint_changes(self) -> None:
         worker = PushWorker.__new__(PushWorker)
         first = Fingerprint("a" * 64, 10, 20)

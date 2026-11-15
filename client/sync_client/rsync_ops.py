@@ -35,7 +35,7 @@ from typing import Callable, Optional
 from .config import Config
 from .reconcile import RemoteKind, RemoteState
 from .repository_safety import RepositorySafetyError, validate_local_root
-from .sync_state import CausalVersion
+from .sync_state import CausalVersion, Fingerprint
 
 TRASH_DIRNAME = ".sync-trash"
 REPOSITORY_MARKER_NAME = ".nasbox-root"
@@ -1015,7 +1015,7 @@ def cleanup_remote_staging(cfg: Config, conn: NasConnection, staging_dir: str) -
 
 def publish_staging(
     cfg: Config, conn: NasConnection, staging_dir: str, transaction_id: str,
-    device_id: str, fingerprints: dict[str, "Fingerprint"],
+    device_id: str, fingerprints: dict[str, Fingerprint],
     causal_versions: dict[str, CausalVersion | None] | None = None,
 ) -> tuple[bool, str]:
     """Atomically publish new staged files while the caller owns the NAS lease."""
@@ -1833,6 +1833,27 @@ def _parse_itemize(output: str, direction: str) -> list[TransferItem]:
 # predictable (locale-dependent thousands/decimal separators otherwise break
 # this -- e.g. Italian locale prints "20.971.520" and "554,69MB/s").
 _PROGRESS_RE = re.compile(r"^\s*[\d,]+\s+(\d+)%\s+([\d.]+)(B|kB|MB|GB|TB)/s")
+# rsync's own informational chatter (it shares stdout with the diagnostics
+# because stderr is merged into it). Kept out of the error detail: on a large
+# tree these lines alone fill the diagnostic budget and the real failure -- which
+# rsync prints last -- used to get truncated away, leaving the user with
+# "[ERROR] - receiving file list ..." as the only explanation.
+_RSYNC_CHATTER_RE = re.compile(
+    r"^(?:"
+    r"[\d,]+ files?(?: to consider)?\.{0,3}"
+    r"|(?:sending|receiving|building)(?: incremental)? file list.*"
+    r"|sent [\d,]+ bytes\s+received [\d,]+ bytes.*"
+    r"|total size is [\d,]+.*"
+    r"|created directory .*"
+    r"|delta-transmission .*"
+    r"|opening connection using:.*"
+    r")$"
+)
+
+
+def _is_rsync_chatter(line: str) -> bool:
+    return bool(_RSYNC_CHATTER_RE.match(line.strip()))
+
 _UNIT_BYTES = {"B": 1, "kB": 1024, "MB": 1024**2, "GB": 1024**3, "TB": 1024**4}
 
 # rsync appends "(xfr#N, to-chk=X/Y)" to the progress line for the instant a file's
@@ -2183,7 +2204,7 @@ def _run_transfer(
         on_start(proc)
 
     items: list[TransferItem] = []
-    other_lines: list[str] = []
+    other_lines: list[tuple[str, int]] = []
     other_bytes = 0
     diagnostics_truncated = False
     # Files rsync has announced (itemize line seen) but not yet actually finished
@@ -2203,16 +2224,21 @@ def _run_transfer(
 
     def remember_diagnostic(line: str) -> None:
         nonlocal other_bytes, diagnostics_truncated
-        if other_bytes >= MAX_TRANSFER_ERROR_BYTES:
-            diagnostics_truncated = True
+        if _is_rsync_chatter(line):
             return
         encoded = line.encode(errors="replace")
-        remaining = MAX_TRANSFER_ERROR_BYTES - other_bytes
-        if len(encoded) > remaining:
-            encoded = encoded[:remaining]
+        if len(encoded) > MAX_TRANSFER_ERROR_BYTES:
+            encoded = encoded[:MAX_TRANSFER_ERROR_BYTES]
             diagnostics_truncated = True
-        other_lines.append(encoded.decode(errors="replace"))
+        other_lines.append((encoded.decode(errors="replace"), len(encoded)))
         other_bytes += len(encoded)
+        # Keep the tail, not the head: rsync prints the actual failure last, so
+        # dropping from the front is what makes the error still readable on a
+        # tree whose informational lines alone exceed the budget.
+        while other_bytes > MAX_TRANSFER_ERROR_BYTES and len(other_lines) > 1:
+            _dropped_text, dropped_bytes = other_lines.pop(0)
+            other_bytes -= dropped_bytes
+            diagnostics_truncated = True
 
     assert proc.stdout is not None
     try:
@@ -2301,9 +2327,10 @@ def _run_transfer(
         remember_diagnostic("output rsync non compatibile: coda completioni oltre il limite")
     if diagnostics_truncated:
         remember_diagnostic("diagnostica rsync troncata")
-    raw_error = "" if ok else _clean_ssh_stderr("\n".join(other_lines))
+    raw_error = "" if ok else _clean_ssh_stderr("\n".join(text for text, _size in other_lines))
     if len(raw_error.encode()) > MAX_TRANSFER_ERROR_BYTES:
-        raw_error = raw_error.encode()[:MAX_TRANSFER_ERROR_BYTES].decode(errors="replace")
+        # Keep the tail: the actual failure is the last thing rsync prints.
+        raw_error = raw_error.encode()[-MAX_TRANSFER_ERROR_BYTES:].decode(errors="replace")
     if direction == "download" and paths is not None and ok:
         cleanup_local_partial(cfg, paths)
     return TransferResult(

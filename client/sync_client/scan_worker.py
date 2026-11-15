@@ -17,6 +17,7 @@ threads independently opening probe sockets to the same host.
 """
 from __future__ import annotations
 
+import stat
 import subprocess
 import threading
 from pathlib import Path
