@@ -1,0 +1,76 @@
+# NASBox — note operative (repo, release, client)
+
+Scritte il 2026-11-15 da un agente, dopo aver verificato ogni comando su questa macchina.
+Se qualcosa non torna, valgono i comandi in fondo.
+
+## Dove vive cosa
+
+| Cosa | Percorso |
+|---|---|
+| Repo ufficiale (unica copia di lavoro) | `/volume1/Varie/sync-daemon` — clone di `git@github.com:buzzqw/NASBox.git` |
+| Remoto | GitHub `buzzqw/NASBox`, branch `master` |
+| Server usato dai client | `/volume1/Varie/sync-daemon/server/sync-daemon-server.sh` (demone: PID in `server/state/daemon.pid`) |
+| Release per i client | `/volume1/NASBox/.nasbox-client-update/` → `manifest.json` + `client-<versione>.tar.gz` |
+| Client (nessun repo, solo build) | questo PC e 134/hw2304847: `~/.local/share/nasbox/client`, servizio utente `sync-daemon-client` |
+
+I client **non** hanno una copia del repo: non cercare il codice su un client.
+
+## Pubblicare una release (tutto da qui)
+
+```bash
+cd /volume1/Varie/sync-daemon
+
+# 1. modifiche + test (pytest NON è installato su questo NAS: i test si lanciano
+#    su un client, oppure `pip install pytest` in un venv)
+
+# 2. versione e changelog
+#    client/sync_client/version.py  ->  APP_VERSION = "x.y.z"
+#    CHANGELOG.md                   ->  voce "## x.y.z - AAAA-MM-GG"
+
+# 3. commit e push
+git add -A
+git commit -m "fix(client): <cosa> (x.y.z)"
+git push origin master
+
+# 4. pubblica per i client (scrive direttamente nella share)
+python3 tools/publish_client.py --notes "<riassunto>" \
+        --dest-dir /volume1/NASBox/.nasbox-client-update
+```
+
+`--upload` esiste, ma richiede la configurazione di un client (SSH verso il NAS):
+dal NAS usa `--dest-dir`. Il publisher verifica da solo il bundle estratto
+(versione + struttura) prima di pubblicarlo, e sostituisce la release precedente
+(tiene solo l'ultima).
+
+## Come arrivano gli aggiornamenti ai client
+
+- controllo all'avvio e ogni 6 ore, notifica in tray, voce "⬆️ Aggiorna a x.y.z"
+- l'archivio è verificato con SHA-256 prima dell'estrazione; percorsi assoluti,
+  `..`, symlink e device file vengono rifiutati
+- se la nuova versione non completa l'avvio due volte, il client ripristina da solo
+  la versione precedente (log: `~/.local/state/sync-daemon/client.log`)
+
+## Verifiche rapide
+
+```bash
+# coerenza manifest/archivio (deve stampare True)
+python3 -c "import json,hashlib;m=json.load(open('/volume1/NASBox/.nasbox-client-update/manifest.json'));print(m['sha256']==hashlib.sha256(open('/volume1/NASBox/.nasbox-client-update/'+m['artifact'],'rb').read()).hexdigest())"
+
+# stato del server
+/volume1/Varie/sync-daemon/server/sync-daemon-server.sh --status
+
+# stato di un client (da eseguire sul client)
+systemctl --user status sync-daemon-client.service
+```
+
+## Trappole già prese (non ripeterle)
+
+- `scp` verso il NAS **non** funziona: il subsystem SFTP è disabilitato
+  ("subsystem request failed on channel 0"). Usa `rsync` o `ssh ... 'cat file' > file`.
+- Il client non va più lanciato dal repo: gira da `~/.local/share/nasbox/client`
+  come servizio utente (`NASBOX_SERVICE=1`, finestra in tray).
+- `sync-daemon` è escluso dalla sincronizzazione: non finisce nella share.
+- Lo sha256 dell'archivio dipende dal Python che lo costruisce (3.8 qui, 3.14 sui
+  client): è riproducibile sulla stessa macchina, non tra macchine diverse.
+  Per questo la release si pubblica **solo da qui**, così manifest e archivio
+  vengono generati insieme e restano coerenti.
