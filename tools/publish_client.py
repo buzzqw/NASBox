@@ -27,6 +27,7 @@ import argparse
 import gzip
 import hashlib
 import json
+import os
 import shlex
 import shutil
 import subprocess
@@ -38,6 +39,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CLIENT_DIR = REPO_ROOT / "client"
 SERVER_SCRIPT = REPO_ROOT / "server" / "sync-daemon-server.sh"
+SKIP_DIRS = {"__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache"}
 
 sys.path.insert(0, str(CLIENT_DIR))
 
@@ -64,23 +66,30 @@ def _server_version() -> str:
 
 def _build_archive(destination: Path) -> Path:
     archive = destination / f"client-{_client_version()}.tar.gz"
-    # mtime=0 in the gzip header: identical content -> identical sha256. With the
-    # default header every build produced a different digest, so a rebuild could
-    # never be checked against what was published.
+    # mtime=0 in the gzip header and a fixed tar format/sort order: identical
+    # content -> identical sha256, no matter which machine (and which Python
+    # version) builds it. Without the explicit ordering the members followed the
+    # filesystem order, so two checkouts of the same commit produced different
+    # archives (verified on the NAS vs this PC).
     with open(archive, "wb") as raw:
         with gzip.GzipFile(filename="", mode="wb", fileobj=raw, mtime=0) as compressed:
-            # GNU_FORMAT explicitly: the default changed between the Python
-            # versions the NAS (3.8) and the clients run, which made the same
-            # content produce different bytes (and therefore a different sha256).
             with tarfile.open(fileobj=compressed, mode="w", format=tarfile.GNU_FORMAT) as tar:
-                tar.add(CLIENT_DIR, arcname="client", filter=_skip_junk)
+                for dirpath, dirnames, filenames in os.walk(CLIENT_DIR):
+                    dirnames[:] = sorted(name for name in dirnames if name not in SKIP_DIRS)
+                    relative = os.path.relpath(dirpath, CLIENT_DIR)
+                    base = "client" if relative == "." else os.path.join("client", relative)
+                    tar.add(dirpath, arcname=base, recursive=False, filter=_normalise_member)
+                    for name in sorted(filenames):
+                        tar.add(
+                            os.path.join(dirpath, name),
+                            arcname=os.path.join(base, name),
+                            recursive=False,
+                            filter=_normalise_member,
+                        )
     return archive
 
 
-def _skip_junk(info: tarfile.TarInfo) -> tarfile.TarInfo | None:
-    parts = Path(info.name).parts
-    if any(part in {"__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache"} for part in parts):
-        return None
+def _normalise_member(info: tarfile.TarInfo) -> tarfile.TarInfo | None:
     if info.name.endswith((".pyc", ".pyo")):
         return None
     # Normalise ownership and timestamps: without this the digest depended on
