@@ -4,6 +4,21 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 1.26.7 - 2026-11-15
+
+- **Cliccare le schede non porta più la CPU al 100%.** `path_is_excluded`
+  confrontava ogni percorso con ~60 pattern glob, sul percorso completo e su
+  ognuno dei suoi componenti: su una cartella reale erano ~60 milioni di
+  `fnmatch` a ogni passata — 22 s di CPU su 100 GB / 63k file, per restituire
+  "niente da fare". Era il costo nascosto dietro l'apertura della scheda
+  **Trasferimenti** (che ricalcola l'anteprima a partire dal manifest) e dietro
+  ogni sweep completo (avvio, "Sincronizza ora", retry dopo un errore).
+  I pattern sono ora compilati una volta per insieme in due alternazioni regex
+  (una per i nomi, una per i percorsi): stesse regole, **~23x più veloce**
+  (22,3 s → 1,5 s sull'albero reale; 111k percorsi valutati in 0,9 s).
+  Un test compara la nuova implementazione con quella precedente su 40 percorsi
+  × 3 insiemi di pattern.
+
 ## 1.26.6 - 2026-11-15
 
 - **Upload in staging ora visibili nel log e nello storico.** Il percorso veloce

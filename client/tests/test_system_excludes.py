@@ -60,3 +60,96 @@ def test_exclude_args_contains_default_excludes(tmp_path):
             assert "--exclude" in args
             # Every item in DEFAULT_SYSTEM_EXCLUDES must appear after an --exclude flag
             assert item in [args[i + 1] for i, val in enumerate(args) if val == "--exclude"]
+
+
+def _legacy_path_is_excluded(cfg, relative_path: str) -> bool:
+    """The pre-1.26.7 implementation, kept verbatim as the reference.
+
+    ``path_is_excluded`` now compiles the globs into alternations instead of
+    running one ``fnmatch`` per pattern per path component: ~60 million calls
+    per full sweep (22s of CPU on a 100 GB folder, returning "nothing
+    changed"). These tests pin that the rewrite is behaviour-identical.
+    ``server_package_excluded_path``/``_server_state_exclude_arg`` are unset in
+    this fixture, and the selective list is empty, so the pattern rules below
+    are the only ones in play.
+    """
+    import fnmatch
+
+    parts = [part for part in relative_path.replace("\\", "/").split("/") if part]
+    if any(part in rsync_ops.EXCLUDE_DIRNAMES or part == rsync_ops.REPOSITORY_MARKER_NAME for part in parts):
+        return True
+    if any(
+        fnmatch.fnmatch(relative_path, pat) or any(fnmatch.fnmatch(part, pat) for part in parts)
+        for pat in rsync_ops.DEFAULT_SYSTEM_EXCLUDES
+    ):
+        return True
+    for raw_pattern in cfg.exclude_patterns():
+        pattern = raw_pattern.strip().replace("\\", "/")
+        if not pattern:
+            continue
+        directory_pattern = pattern.rstrip("/")
+        if pattern.endswith("/") and any(fnmatch.fnmatch(part, directory_pattern) for part in parts):
+            return True
+        if fnmatch.fnmatch(relative_path, pattern) or any(fnmatch.fnmatch(part, pattern) for part in parts):
+            return True
+    return False
+
+
+_PATHS = [
+    ".DS_Store",
+    "docs/.DS_Store",
+    "module.pyc",
+    "pkg/__pycache__/module.cpython-314.pyc",
+    "web/node_modules/pkg/index.js",
+    "node_modules/index.js",
+    "build/out.bin",
+    "a/b/build/out.bin",
+    "dist/app.tar.gz",
+    "repo/.git/refs/heads/master",
+    ".git/config",
+    "repo/.hg/store/data/file.i",
+    "SADE/SADE.aux",
+    "SADE/SADE.pdf",
+    "Report.docx",
+    "work/~$Report.docx",
+    ".~lock.document.odt#",
+    "archive.crdownload",
+    "file.tmp.12345",
+    "sync-daemon/client/sync_client/engine.py",
+    "sync-daemon/client-update/sync_client/version.py",
+    ".nasbox-client-update/sync_client/version.py",
+    "nasbox-client-update-1.26.6.tar.gz",
+    "aX/b",
+    "abc/def",
+    "x.tar.gz",
+    "dir/x.tar.gz",
+    "notes with space.md",
+    "cartella con spazi/file con spazi.txt",
+    "ünïcode/ñame.txt",
+    "deep/a/b/c/d/e/f/g.txt",
+    "project/.pytest_cache/v/cache/lastfailed",
+    "htmlcov/index.html",
+    "pkg.egg-info/PKG-INFO",
+    ".coverage",
+    "target/debug/app",
+    ".idea/workspace.xml",
+    ".vscode/settings.json",
+    ".next/static/chunk.js",
+    ".cache/thing",
+]
+
+_PATTERN_SETS = [
+    None,  # defaults shipped with the client
+    ["build/", "dist/", "*.bak", "node_modules/", "tmp"],
+    ["*.log", "vendor/*", "vendor", "Photos/2024", "*.ISO", "venv"],
+]
+
+
+@pytest.mark.parametrize("patterns", _PATTERN_SETS)
+def test_compiled_excludes_match_the_legacy_semantics(patterns):
+    with ClientEnvironment():
+        cfg = Config()
+        if patterns is not None:
+            cfg.set("exclude_patterns", patterns, persist=False)
+        for path in _PATHS:
+            assert rsync_ops.path_is_excluded(cfg, path) == _legacy_path_is_excluded(cfg, path), path
