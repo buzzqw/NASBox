@@ -24,6 +24,7 @@ Examples:
 from __future__ import annotations
 
 import argparse
+import gzip
 import hashlib
 import json
 import shlex
@@ -63,8 +64,13 @@ def _server_version() -> str:
 
 def _build_archive(destination: Path) -> Path:
     archive = destination / f"client-{_client_version()}.tar.gz"
-    with tarfile.open(archive, "w:gz") as tar:
-        tar.add(CLIENT_DIR, arcname="client", filter=_skip_junk)
+    # mtime=0 in the gzip header: identical content -> identical sha256. With the
+    # default header every build produced a different digest, so a rebuild could
+    # never be checked against what was published.
+    with open(archive, "wb") as raw:
+        with gzip.GzipFile(filename="", mode="wb", fileobj=raw, mtime=0) as compressed:
+            with tarfile.open(fileobj=compressed, mode="w") as tar:
+                tar.add(CLIENT_DIR, arcname="client", filter=_skip_junk)
     return archive
 
 
