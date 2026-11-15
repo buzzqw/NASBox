@@ -11,7 +11,7 @@ from PyQt6.QtWidgets import (
 from pathlib import Path
 
 from .. import paths, rsync_ops, trash
-from ..config import Config, SYNC_MODE_OPTIONS, normalize_schedule
+from ..config import Config, CONFLICT_POLICY_OPTIONS, SYNC_MODE_OPTIONS, normalize_schedule
 from ..engine import SyncEngine
 from ..i18n import t
 from ..version import APP_NAME, APP_VERSION
@@ -197,6 +197,18 @@ class SettingsTab(QWidget):
         self.max_delete_spin.setValue(int(cfg.get("max_delete_files") or 1000))
         self.max_delete_spin.setToolTip(t("settings.max_delete_tooltip"))
         nas_form.addRow(t("settings.max_delete_label"), self.max_delete_spin)
+
+        self.conflict_policy_combo = QComboBox()
+        current_policy = cfg.conflict_policy()
+        for index, (value, label_key) in enumerate(CONFLICT_POLICY_OPTIONS):
+            self.conflict_policy_combo.addItem(t(label_key), userData=value)
+            if value == current_policy:
+                self.conflict_policy_combo.setCurrentIndex(index)
+        self.conflict_policy_combo.setToolTip(t("settings.conflict_policy_tooltip"))
+        nas_form.addRow(t("settings.conflict_policy_label"), self.conflict_policy_combo)
+        conflict_policy_note = QLabel(t("settings.conflict_policy_tooltip"))
+        conflict_policy_note.setWordWrap(True)
+        nas_form.addRow(conflict_policy_note)
         left_col.addWidget(nas_box)
 
         # --- bandwidth ---
@@ -480,6 +492,7 @@ class SettingsTab(QWidget):
         self.tray_click_combo.currentIndexChanged.connect(self._mark_dirty)
         self.compression_combo.currentIndexChanged.connect(self._mark_dirty)
         self.sync_mode_combo.currentIndexChanged.connect(self._mark_dirty)
+        self.conflict_policy_combo.currentIndexChanged.connect(self._mark_dirty)
         self.exclude_list.itemSelectionChanged.connect(
             lambda: self.remove_exclude_btn.setEnabled(self.exclude_list.currentRow() >= 0)
         )
@@ -634,6 +647,11 @@ class SettingsTab(QWidget):
         self.cfg.set("sync_mode", self.sync_mode_combo.currentData(), persist=False)
         self.cfg.set("delete_enabled", self.delete_enabled.isChecked(), persist=False)
         self.cfg.set("max_delete_files", self.max_delete_spin.value(), persist=False)
+        self.cfg.set(
+            "conflict_policy",
+            self.conflict_policy_combo.currentData() or "newest",
+            persist=False,
+        )
         self._apply_bandwidth()
         self._apply_poll_interval()
         self._apply_metrics_refresh_interval()

@@ -4,6 +4,19 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 1.26.5 - 2026-11-15
+
+- **Impostazioni: scelta della gestione dei conflitti.** La policy introdotta in
+  1.26.0 (`conflict_policy`) era raggiungibile solo modificando `client.json` a
+  mano. Ora **Impostazioni → Conflitti tra due modifiche** offre *Vince la
+  versione più recente (automatico)* e *Chiedi sempre (crea la copia di
+  conflitto)*, con la stessa nota esplicativa della scheda Conflitti. Un valore
+  non riconosciuto in un file di configurazione ricade sul default sicuro
+  `"manual"` invece di scegliere un vincitore in silenzio.
+- **MANUALE:** la sezione "Conflitti con cancellazioni" descrive il confronto tra
+  data della tombstone NAS e modifica locale (vince la più recente) e rimanda
+  alla nuova opzione invece di far modificare il JSON a mano.
+
 ## 1.26.4 - 2026-11-15
 
 - **Conflitti: la cancellazione NAS non cancella più modifiche locali più

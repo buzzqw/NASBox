@@ -476,6 +476,25 @@ STRINGS: dict[str, dict[str, str]] = {
         "en": "If off, deleting a file on one PC does NOT delete it on the NAS or other PCs (it stays there). If on, deletions propagate -- still protected by the trash/history.",
     },
     "settings.save_all_btn": {"it": "Salva impostazioni", "en": "Save settings"},
+    "settings.conflict_policy_label": {"it": "Conflitti tra due modifiche", "en": "Conflicts between two edits"},
+    "settings.conflict_policy_newest": {
+        "it": "Vince la versione più recente (automatico)",
+        "en": "Newest version wins (automatic)",
+    },
+    "settings.conflict_policy_manual": {
+        "it": "Chiedi sempre (crea la copia di conflitto)",
+        "en": "Always ask (create a conflict copy)",
+    },
+    "settings.conflict_policy_tooltip": {
+        "it": "'Vince la versione più recente' tiene la versione più nuova al percorso originale e "
+              "sposta quella perdente nello storico -- nessuna copia '(conflitto da …)' da risolvere a "
+              "mano. 'Chiedi sempre' crea la copia di conflitto e lascia decidere a te dal tab Conflitti. "
+              "In entrambi i casi la versione perdente resta recuperabile dallo storico.",
+        "en": "'Newest version wins' keeps the newest version at the original path and moves the losing "
+              "one into history -- no '(conflitto da …)' copy to resolve by hand. 'Always ask' creates "
+              "the conflict copy and lets you decide from the Conflicts tab. Either way the losing "
+              "version stays recoverable from history.",
+    },
     "settings.save_all_tooltip": {
         "it": "Salva insieme connessione, modalita', banda, frequenza, feedback, tray, lingua, esclusioni e cancellazioni.",
         "en": "Saves connection, sync mode, bandwidth, cadence, feedback, tray, language, exclusions, and deletion settings together.",

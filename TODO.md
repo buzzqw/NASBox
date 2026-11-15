@@ -1,6 +1,20 @@
 # NASBox backlog
 
-Aggiornato il 2026-10-23 dopo la release client 1.24.0 e server 3.22.0.
+Aggiornato il 2026-11-15 dopo le release client 1.26.5 e server 3.23.0.
+
+## Completato in 1.26.x
+
+- [x] Centro conflitti: risoluzione automatica "vince la versione più recente"
+  (`conflict_policy`, selezionabile in Impostazioni), storico per-file con
+  ripristino, "Risolvi tutto", copie di conflitto cancellabili.
+- [x] Fine del ciclo di adozione dei conflitti: un percorso assente sul NAS non
+  è più "non regolare" (faceva fallire l'intero batch a ogni passata), la
+  cancellazione NAS viene confrontata per data con la modifica locale, retry con
+  backoff dopo un errore.
+- [x] Primo rilascio pubblico (v1.26.4 / v1.26.5) con AppImage, pacchetto `.deb`
+  e bundle di aggiornamento generati dal workflow di packaging.
+- [x] `.git`, `.hg` e `.svn` esclusi in modo permanente, non solo via pattern
+  rimovibile.
 
 ## Completato in 1.24.0
 
@@ -96,10 +110,13 @@ gia' implementate con quelle solo da verificare in laboratorio.
 
 - [x] Aggiungere modalita' per cartella: bidirezionale, solo locale, solo NAS e
   archivio senza propagazione delle cancellazioni.
-- [ ] Definire chiaramente ereditarieta' delle esclusioni e comportamento dei
-  cambi di modalita' su dati gia' presenti.
-- [ ] Mantenere sempre una copia recuperabile per conflitti, delete e cambio
-  modalita'.
+- [x] Definire chiaramente ereditarieta' delle esclusioni e comportamento dei
+  cambi di modalita' su dati gia' presenti. Documentato in MANUALE §8
+  "Esclusioni": tre livelli, ereditarieta' sui discendenti, nessuna
+  cancellazione dei dati esistenti.
+- [x] Mantenere sempre una copia recuperabile per conflitti, delete e cambio
+  modalita': conflitti -> copia/storico, delete -> cestino locale e
+  `.sync-trash` NAS, cambio modalita' -> nessuna cancellazione.
 
 ## Da verificare, non da riscrivere
 

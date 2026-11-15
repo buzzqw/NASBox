@@ -34,6 +34,12 @@ def normalize_sync_mode(value: Any) -> str:
 
 CONFLICT_POLICIES = ("newest", "manual")
 
+#: Value + i18n key for the Settings tab selector, newest first (the default).
+CONFLICT_POLICY_OPTIONS = (
+    ("newest", "settings.conflict_policy_newest"),
+    ("manual", "settings.conflict_policy_manual"),
+)
+
 
 def normalize_conflict_policy(value: Any) -> str:
     """Keep old or manually edited configurations on the safe default.

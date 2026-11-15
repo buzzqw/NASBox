@@ -27,6 +27,7 @@ problema semplicemente non può più presentarsi.
 7. [Il caso del bastione (NAS non raggiungibile da fuori)](#7-il-caso-del-bastione-nas-non-raggiungibile-da-fuori)
 8. [La cartella NASBox](#8-la-cartella-nasbox)
    - [Cartelle esterne (mirror)](#cartelle-esterne-mirror)
+   - [Esclusioni](#esclusioni)
 9. [Limite di banda](#9-limite-di-banda)
 10. [Frequenza di sincronizzazione](#10-frequenza-di-sincronizzazione)
 11. [Pausa e pausa a tempo](#11-pausa-e-pausa-a-tempo)
@@ -517,6 +518,60 @@ normale ciclo di sincronizzazione.
 - Le cancellazioni della copia seguono l'impostazione globale **Propaga le
   cancellazioni** della cartella NASBox.
 
+### Esclusioni
+
+Un percorso può essere escluso dalla sincronizzazione su tre livelli, valutati
+nello stesso ordine sia in invio sia in ricezione:
+
+1. **Esclusioni di sistema, non rimovibili.** Cartelle interne di NASBox
+   (`.sync-trash`, `.sync-partial`, `.nasbox-staging`), marker del repository
+   (`.nasbox-root`), metadati Synology (`@eaDir`) e — sempre — le directory di
+   controllo versione (`.git`, `.hg`, `.svn`). Insieme a questi: file di servizio
+   del sistema (`.DS_Store`, `Thumbs.db`, `desktop.ini`), lock di LibreOffice
+   (`.~lock.*`, `~$*`), parziali di download (`*.part`, `*.crdownload`,
+   `*.tmp.*`), cache di test/lint (`__pycache__`, `.pytest_cache`, `.mypy_cache`,
+   `.ruff_cache`, `*.pyc`) e intermedi LaTeX (`*.aux`, `*.synctex.gz`, …). Non
+   compaiono nell'elenco delle esclusioni utente e non si possono togliere:
+   sono le cartelle che gli strumenti riscrivono da soli a ogni esecuzione.
+2. **Pattern utente** (Impostazioni → Esclusioni, con i profili rapidi
+   LaTeX/sviluppo/ufficio/sistema operativo). Un pattern che termina con `/`
+   (per esempio `build/`) esclude **qualsiasi** cartella con quel nome a
+   qualunque profondità; un pattern che contiene `/` (per esempio
+   `progetti/tmp`) si riferisce a quel percorso relativo alla radice della
+   cartella NASBox; gli altri pattern valgono sia sul percorso completo sia su
+   un singolo componente (`*.bak`, `node_modules`).
+3. **Selezione delle cartelle** (`selective_sync_excludes`): sottocartelle della
+   NASBox escluse per intero. Il confronto è sul prefisso ancorato alla radice,
+   quindi escludere `RPG/Old` esclude tutto il sottoalbero.
+
+Regole di ereditarietà:
+
+- un'esclusione su una cartella vale per **tutti i discendenti**, in entrambe le
+  direzioni: non serve ripetere i pattern dei figli;
+- i pattern si valutano sul percorso *relativo* alla cartella NASBox, non sui
+  percorsi assoluti: cambiare `local_root` non cambia il loro significato;
+- le esclusioni valgono anche per le copie mirror (vedi sopra);
+- un pattern impossibile da togliere (per esempio `.git`) resta escluso anche se
+  lo si aggiunge a mano all'elenco: i due livelli si sommano.
+
+Cosa succede ai dati già presenti quando si aggiunge un'esclusione:
+
+- **non viene cancellato nulla**, né in locale né sul NAS: i file già
+  sincronizzati restano dove sono, il client semplicemente smette di
+  considerarle;
+- le eventuali tombstone già registrate per quei percorsi restano nel journal e
+  vengono filtrate, quindi non generano conflitti;
+- per rimuoverle davvero dal NAS serve un'azione esplicita (tab **Browse** o
+  **Storico**), con il client fermo o in pausa;
+- togliere un'esclusione non riscarica nulla di per sé: alla passata successiva
+  il percorso torna a essere confrontato con la baseline e, se è cambiato da una
+  parte sola, viene allineato; se è cambiato da entrambe, nasce un conflitto
+  gestito come descritto sotto.
+
+Il cambio di modalità di sincronizzazione (bidirezionale, solo locale, solo NAS,
+archivio) non cancella nulla e non riscrive lo storico: le esclusioni restano
+identiche in tutte le modalità.
+
 ### Marker del repository e volume locale
 
 Il server crea nella radice di `SHARE_ROOT` il file nascosto `.nasbox-root`.
@@ -569,25 +624,35 @@ Lo stato locale conserva anche un tombstone per un file cancellato. Questo
 permette di distinguere un file mai visto da un file cancellato dopo una
 sincronizzazione precedente.
 
-Se un PC modifica un file mentre un altro lo cancella, la versione modificata
-locale non viene trattata come un file qualsiasi: il client registra
-`CONFLICT_REMOTE_DELETE` e mantiene la versione locale invece di perderla
-silenziosamente. La versione NAS viene preservata come copia di conflitto
-quando entrambe le parti hanno modificato lo stesso file.
+Se un PC modifica un file mentre un altro lo cancella, nessuna delle due
+versioni va persa: il client registra il conflitto e confronta la data della
+tombstone NAS con quella della modifica locale.
+
+- Se la **modifica locale è più recente** della cancellazione, vince quella
+  locale: il file resta (o torna) sul percorso originale e viene ricaricato sul
+  NAS.
+- Se la **cancellazione è più recente** (o contemporanea), vince il NAS: la
+  copia locale viene spostata nello storico del client, quindi resta
+  recuperabile.
+
+Con `conflict_policy = "manual"` il perdente resta invece come copia di
+conflitto visibile nel tab **Conflitti**.
 
 ### Risoluzione di un conflitto tra due modifiche
 
 Quando entrambe le parti hanno modificato lo stesso file, con la policy
-predefinita `conflict_policy = "newest"` NASBox **tiene la versione più recente
+predefinita `conflict_policy = "newest"` (*Vince la versione più recente* in
+Impostazioni) NASBox **tiene la versione più recente
 al percorso originale** e non crea una copia visibile: il perdente resta nello
 storico (`--backup` / `.sync-trash`, retention 30 giorni) e può essere
 recuperato dal tab **Storico**. L'ordine è: clock causale per percorso, poi
 mtime (i nanosecondi solo se entrambi i lati li espongono), infine un tie-break
 deterministico sul digest, così due client scelgono lo stesso vincitore.
 
-Impostando `conflict_policy = "manual"` nel file `client.json` si torna al
-comportamento precedente: la versione che perde viene conservata sotto un nome
-del tipo:
+Impostando in **Impostazioni → Conflitti tra due modifiche** la voce *Chiedi
+sempre* (chiave `conflict_policy = "manual"` in `client.json`, se preferisci
+modificarlo a mano) si torna al comportamento precedente: la versione che perde
+viene conservata sotto un nome del tipo:
 
 ```text
 nome (conflitto da <device> <codice>).estensione
