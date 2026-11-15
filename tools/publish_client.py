@@ -26,6 +26,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import shlex
 import shutil
 import subprocess
 import sys
@@ -128,6 +129,15 @@ def _upload(directory: Path, cfg) -> None:
         "-e", rsync_ops._ssh_e_arg(cfg, connection),
         str(directory) + "/", f"{user}@{connection.host}:{remote_root.rstrip('/')}/",
     ]
+    # rsync won't create a missing directory chain on the destination: make the
+    # update folder first, so the very first publish works too.
+    mkdir = subprocess.run(
+        ["ssh", *rsync_ops.ssh_opts(cfg, connection), f"{user}@{connection.host}",
+         f"mkdir -p {shlex.quote(remote_root.rstrip('/'))}"],
+        capture_output=True, text=True, timeout=30,
+    )
+    if mkdir.returncode != 0:
+        raise SystemExit(f"impossibile creare {remote_root}: {mkdir.stderr.strip() or mkdir.returncode}")
     print(f"→ carico su {user}@{connection.host}:{remote_root}")
     result = subprocess.run(command, capture_output=True, text=True, timeout=600)
     if result.returncode != 0:
