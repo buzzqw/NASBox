@@ -96,8 +96,10 @@ def _verify(archive: Path, expected_version: str) -> None:
     temporary = tempfile.TemporaryDirectory(prefix="nasbox-publish-check-")
     try:
         root = Path(temporary.name)
-        with tarfile.open(archive) as tar:
-            tar.extractall(root, filter="data")
+        # Same hardened extraction the client uses (rejects absolute paths, `..`,
+        # links and device files) and it works on Python < 3.12 too, which is
+        # what the NAS itself runs.
+        updater._safe_extract(archive, root)
         bundle = updater._bundle_root(root)
         if bundle is None:
             raise SystemExit("verifica fallita: l'archivio non contiene un client valido")
