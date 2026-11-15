@@ -732,6 +732,16 @@ class PushWorker(TransferWorker):
                 {path: self._causal_journal_versions.get(path) for path in staged_fingerprints},
             )
             self.sync_state.clear_pending(set(staged_fingerprints))
+            # A staged publish is a real upload: report it exactly like the
+            # direct rsync path does (log tab, event log, transfers list).
+            # Without this the fastest path -- a pure batch of new files -- was
+            # silently invisible: the files appeared on the NAS but nowhere in
+            # the client's history, so "Log fermo" looked like "niente da fare"
+            # while a 44-file batch had just been published.
+            for path in sorted(staged_fingerprints):
+                item = rsync_ops.TransferItem("upload", path, staged_fingerprints[path].size)
+                self.transfer_item_started.emit(item.direction, item.path, item.size)
+                self._on_item_complete(item)
         rsync_ops.cleanup_remote_staging(self.cfg, self._conn, staging_dir)
         return True, 0, False
 

@@ -4,6 +4,16 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 1.26.6 - 2026-11-15
+
+- **Upload in staging ora visibili nel log e nello storico.** Il percorso veloce
+  per un lotto di soli file nuovi (upload in una staging privata + publish
+  atomico) non emetteva alcun evento per file: i file arrivavano sul NAS ma non
+  comparivano in `client.log`, in `events.jsonl`, nella scheda **Log** né nella
+  lista dei trasferimenti. Il client sembrava inattivo subito dopo aver
+  pubblicato decine di file. Ora ogni file pubblicato viene registrato come un
+  normale `UPLOAD`, con dimensione e segnale `transfer_item_done`.
+
 ## 1.26.5 - 2026-11-15
 
 - **Impostazioni: scelta della gestione dei conflitti.** La policy introdotta in
