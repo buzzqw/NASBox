@@ -69,7 +69,10 @@ def _build_archive(destination: Path) -> Path:
     # never be checked against what was published.
     with open(archive, "wb") as raw:
         with gzip.GzipFile(filename="", mode="wb", fileobj=raw, mtime=0) as compressed:
-            with tarfile.open(fileobj=compressed, mode="w") as tar:
+            # GNU_FORMAT explicitly: the default changed between the Python
+            # versions the NAS (3.8) and the clients run, which made the same
+            # content produce different bytes (and therefore a different sha256).
+            with tarfile.open(fileobj=compressed, mode="w", format=tarfile.GNU_FORMAT) as tar:
                 tar.add(CLIENT_DIR, arcname="client", filter=_skip_junk)
     return archive
 
@@ -88,6 +91,8 @@ def _skip_junk(info: tarfile.TarInfo) -> tarfile.TarInfo | None:
     info.uname = ""
     info.gname = ""
     info.mtime = 0
+    # Only the exec bit is meaningful content-wise; the rest comes from umask.
+    info.mode = 0o755 if info.mode & 0o100 else 0o644
     return info
 
 
