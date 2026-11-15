@@ -80,6 +80,14 @@ def _skip_junk(info: tarfile.TarInfo) -> tarfile.TarInfo | None:
         return None
     if info.name.endswith((".pyc", ".pyo")):
         return None
+    # Normalise ownership and timestamps: without this the digest depended on
+    # each file's mtime, so two checkouts of the same commit produced different
+    # archives (verified: same commit on two machines -> different sha256).
+    info.uid = 0
+    info.gid = 0
+    info.uname = ""
+    info.gname = ""
+    info.mtime = 0
     return info
 
 
