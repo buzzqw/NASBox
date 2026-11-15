@@ -32,6 +32,18 @@ def normalize_sync_mode(value: Any) -> str:
     return value if isinstance(value, str) and value in SYNC_MODES else SYNC_MODE_BIDIRECTIONAL
 
 
+CONFLICT_POLICIES = ("newest", "manual")
+
+
+def normalize_conflict_policy(value: Any) -> str:
+    """Keep old or manually edited configurations on the safe default.
+
+    "manual" is the safe one: both versions are kept and the user decides.
+    """
+    policy = str(value or "").strip().lower()
+    return policy if policy in CONFLICT_POLICIES else "manual"
+
+
 # --- scheduled pause ------------------------------------------------------
 #
 # A schedule is a list of windows, each {"days": [0..6], "start": "HH:MM",
@@ -164,6 +176,11 @@ DEFAULTS: dict[str, Any] = {
     "file_stability_seconds": 0.75,  # one local stat interval before a queued file is eligible
     "conflict_storm_limit": 3,    # after N conflicts for one path inside the window, reuse one copy
     "conflict_storm_window_seconds": 3600,
+    # "newest": keep the most recent version at the canonical path and let the
+    # normal rsync --backup history retain the losing bytes; no visible
+    # conflict copy is created. "manual": keep both versions as a conflict
+    # copy and wait for the user (the pre-1.26 behaviour).
+    "conflict_policy": "newest",
     "compression_mode": "auto",   # auto (off on LAN), on, off -- rsync -z policy
     "full_pull_interval_seconds": 7200,  # periodic full reconciliation when the change feed is healthy
     "notify_sync_completion": False,  # show a tray notification after completed file transfers
@@ -306,6 +323,9 @@ class Config:
 
     def allows_remote_deletions(self) -> bool:
         return bool(self.get("delete_enabled")) and self.sync_mode() != SYNC_MODE_ARCHIVE
+
+    def conflict_policy(self) -> str:
+        return normalize_conflict_policy(self.get("conflict_policy"))
 
     def exclude_patterns(self) -> list[str]:
         with self._lock:

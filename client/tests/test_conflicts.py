@@ -183,5 +183,33 @@ class CopyRemoteFileTests(unittest.TestCase):
         self.assertFalse((self.root / self.relative).exists())
 
 
+class KeepBothConflictTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.environment = ClientEnvironment()
+        self.environment.__enter__()
+        self.root = Path(self.environment._temporary.name) / "root"
+        self.root.mkdir()
+
+    def tearDown(self) -> None:
+        self.environment.__exit__(None, None, None)
+
+    def test_keep_both_renames_conflict_copy(self) -> None:
+        original = self.root / "doc.txt"
+        original.write_text("orig")
+        candidate = self.root / conflict_name("doc", ".txt", origin="dev1")
+        candidate.write_text("alt")
+        group = conflicts.ConflictGroup(original, (candidate,))
+
+        ok, new_rel = conflicts.keep_both(group, candidate, str(self.root))
+        self.assertTrue(ok)
+        self.assertTrue(original.exists())
+        self.assertEqual(original.read_text(), "orig")
+        self.assertFalse(candidate.exists())
+        archived = self.root / new_rel
+        self.assertTrue(archived.exists())
+        self.assertEqual(archived.read_text(), "alt")
+        self.assertIn("copia archiviata dev1", archived.name)
+
+
 if __name__ == "__main__":
     unittest.main()

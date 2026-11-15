@@ -1507,8 +1507,38 @@ STRINGS: dict[str, dict[str, str]] = {
         "it": "Risolvere {count} conflitti mantenendo l'originale? Le alternative finiranno nello storico locale e in quello del NAS.",
         "en": "Resolve {count} conflicts keeping the original? Alternatives will move to local and NAS history.",
     },
+    "conflicts.resolve_everything_btn": {
+        "it": "Risolvi tutto", "en": "Resolve all",
+    },
+    "conflicts.resolve_everything_tooltip": {
+        "it": "Risolve tutti i conflitti visibili, rispettando il filtro di ricerca: mantiene l'originale (o la versione più recente se manca) e archivia le alternative.",
+        "en": "Resolve every visible conflict, respecting the search filter: keeps the original (or the newest version if it is missing) and archives the alternatives.",
+    },
+    "conflicts.resolve_everything_confirm_title": {
+        "it": "Risolvi tutti i conflitti", "en": "Resolve all conflicts",
+    },
+    "conflicts.resolve_everything_confirm_body": {
+        "it": "Risolvere tutti i {count} conflitti visibili mantenendo l'originale (o la versione più recente se manca)? Le alternative finiranno nello storico locale e in quello del NAS.",
+        "en": "Resolve all {count} visible conflicts keeping the original (or the newest version if it is missing)? Alternatives will move to local and NAS history.",
+    },
     "conflicts.resolving": {
         "it": "Risoluzione in corso…", "en": "Resolving…",
+    },
+    "conflicts.progress_waiting": {
+        "it": "In attesa del trasferimento in corso…",
+        "en": "Waiting for the current transfer…",
+    },
+    "conflicts.progress_resolving": {
+        "it": "Risoluzione {done} di {total}…",
+        "en": "Resolving {done} of {total}…",
+    },
+    "conflicts.progress_cleaning": {
+        "it": "Pulizia sul NAS {done} di {total}…",
+        "en": "NAS cleanup {done} of {total}…",
+    },
+    "conflicts.progress_done": {
+        "it": "Completato {done} di {total}",
+        "en": "Completed {done} of {total}",
     },
     "conflicts.resolve_failed_detail": {
         "it": "Risoluzione non riuscita: {detail}", "en": "Resolution failed: {detail}",

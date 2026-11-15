@@ -217,6 +217,9 @@ class MainWindow(QMainWindow):
                 else self.tray.on_download_item_done
             )
             worker.transfer_item_done.connect(item_done_slot)
+            worker.transfer_item_started.connect(self.tray.on_item_started)
+            worker.transfer_speed.connect(self.tray.on_speed_update)
+            worker.transfer_speed.connect(self.status_tab.on_transfer_speed)
         self.engine.status_changed.connect(self.tray.on_status_changed)
         self.engine.server_health_changed.connect(self.tray.on_server_health_changed)
         self.scan_worker.queue_updated.connect(self.tray.on_queue_updated)
@@ -392,13 +395,12 @@ class MainWindow(QMainWindow):
             candidate.cleanup()
             return
         try:
-            import os, sys
             source_root = candidate.materialize()
             current_root = Path(__file__).resolve().parents[2]
             updater.install_update(source_root, current_root)
             candidate.cleanup()
             QMessageBox.information(self, t("main_window.update_restart_title"), t("main_window.update_restart_body"))
-            os.execv(sys.executable, [sys.executable, str(current_root / "main.py"), *sys.argv[1:]])
+            updater.restart(current_root)
         except Exception as exc:
             candidate.cleanup()
             QMessageBox.warning(self, t("main_window.update_failed_title"), str(exc))

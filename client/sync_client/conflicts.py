@@ -177,3 +177,51 @@ def discard_conflict_copies(
     if sync_state is not None and group.group_id:
         sync_state.mark_conflict_resolved(group.group_id, str(original.relative_to(root)))
     return True, ""
+
+
+def keep_both(
+    group: ConflictGroup, candidate: Path, local_root: str,
+    sync_state: SyncStateStore | None = None,
+) -> tuple[bool, str]:
+    """Resolve a conflict by renaming the alternative copy to a permanent, non-conflict file."""
+    root = Path(local_root).resolve()
+    candidate = candidate.resolve()
+    if not candidate.exists():
+        return False, "la copia di conflitto non esiste più"
+    try:
+        candidate.relative_to(root)
+    except ValueError:
+        return False, "percorso conflitto fuori dalla cartella NASBox"
+
+    match = CONFLICT_RE.match(candidate.name)
+    if match:
+        base_stem = match.group("stem")
+        suffix = match.group("suffix") or ""
+        origin = match.group("origin") or "copia"
+    else:
+        base_stem = candidate.stem
+        suffix = candidate.suffix
+        origin = "copia"
+
+    new_name = f"{base_stem} (copia archiviata {origin}){suffix}"
+    new_path = candidate.with_name(new_name)
+    counter = 1
+    while new_path.exists():
+        counter += 1
+        new_name = f"{base_stem} (copia archiviata {origin} {counter}){suffix}"
+        new_path = candidate.with_name(new_name)
+
+    try:
+        candidate.replace(new_path)
+    except OSError as exc:
+        return False, f"impossibile rinominare la copia: {exc}"
+
+    if sync_state is not None and group.group_id:
+        try:
+            rel_new = str(new_path.relative_to(root))
+            sync_state.mark_conflict_resolved(group.group_id, rel_new)
+            sync_state.mark_pending({rel_new})
+        except Exception:
+            pass
+
+    return True, str(new_path.relative_to(root))

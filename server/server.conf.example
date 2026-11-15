@@ -22,7 +22,9 @@ RETENTION_DAYS=90
 # --- How often the daemon itself wakes up to check/prune, in minutes ---
 # The daemon is a single always-running process with its own internal timer --
 # no cron/Task Scheduler involved. This just controls that internal sleep.
-CHECK_INTERVAL_MINUTES=60
+# Recommended: 720 (12 hours) or 1440 (24 hours) to allow HDD disk spindown / hibernation
+# on low-power NAS devices without unnecessary disk spin-ups every hour.
+CHECK_INTERVAL_MINUTES=720
 
 # --- Limit each pruning pass so a large history does not monopolize sync ---
 # Older versions continue at the next CHECK_INTERVAL_MINUTES pass.

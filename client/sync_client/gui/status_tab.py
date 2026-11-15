@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 from PyQt6.QtCore import Qt, QTimer, QUrl, pyqtSignal
 from PyQt6.QtGui import QDesktopServices
 from PyQt6.QtWidgets import (
-    QGroupBox, QHBoxLayout, QLabel, QMessageBox, QPushButton, QSizePolicy,
+    QGroupBox, QHBoxLayout, QLabel, QMessageBox, QProgressBar, QPushButton, QSizePolicy,
     QScrollArea, QVBoxLayout, QWidget,
 )
 
@@ -72,6 +72,11 @@ class StatusTab(QWidget):
         self._scheduler_status: dict[str, object] = {}
         self._transfer_phases: dict[str, str] = {}
         self._current_paths: dict[str, str] = {}
+        self._current_speed: float = 0.0
+        self._current_percent: int = 0
+        self._remote_lock_held: bool = False
+        self._remote_lock_owner: str = ""
+        self._remote_lock_age: str = ""
         self._last_success: tuple[float, str] | None = None
         self._last_problem: tuple[float, str, str] | None = None
         self._recent_problem_events: dict[str, tuple[float, str]] = {}
@@ -105,6 +110,11 @@ class StatusTab(QWidget):
         self.sync_state_label = QLabel(t("status.sync_state_starting"))
         self.sync_state_label.setWordWrap(True)
         status_layout.addWidget(self.sync_state_label)
+        self.sync_progress_bar = QProgressBar()
+        self.sync_progress_bar.setRange(0, 100)
+        self.sync_progress_bar.setTextVisible(True)
+        self.sync_progress_bar.hide()
+        status_layout.addWidget(self.sync_progress_bar)
         self.conflict_stat_label = QLabel()
         self.conflict_stat_label.setObjectName("statusConflictStat")
         self.conflict_stat_label.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -213,6 +223,31 @@ class StatusTab(QWidget):
         self.sync_feedback_label.hide()
         status_layout.addWidget(self.sync_feedback_label)
         root.addWidget(status_box)
+
+        # --- NAS status & overview ---
+        nas_box = QGroupBox("Stato e Risorse del NAS")
+        nas_box.setObjectName("nasStatusBox")
+        nas_layout = QVBoxLayout(nas_box)
+
+        self.nas_host_label = QLabel("Connessione NAS: In attesa di verifica...")
+        self.nas_host_label.setWordWrap(True)
+        nas_layout.addWidget(self.nas_host_label)
+
+        self.nas_activity_label = QLabel("Attività NAS: A riposo")
+        self.nas_activity_label.setWordWrap(True)
+        nas_layout.addWidget(self.nas_activity_label)
+
+        self.nas_storage_label = QLabel("Spazio disco NAS: Calcolo in corso...")
+        self.nas_storage_label.setWordWrap(True)
+        nas_layout.addWidget(self.nas_storage_label)
+
+        self.nas_storage_bar = QProgressBar()
+        self.nas_storage_bar.setRange(0, 100)
+        self.nas_storage_bar.setTextVisible(True)
+        self.nas_storage_bar.setValue(0)
+        nas_layout.addWidget(self.nas_storage_bar)
+
+        root.addWidget(nas_box)
 
         # Hidden when healthy: day-to-day users only see this card when there is
         # a concrete problem and every row points at the existing place to fix it.
@@ -371,24 +406,30 @@ class StatusTab(QWidget):
         if not connection_configured:
             text = t("status.not_configured_msg")
             state = "warning"
+            self.nas_host_label.setText("⚠️ Connessione NAS: Non configurata")
         elif not connected:
             text = t("status.nas_unreachable_msg")
             state = "error"
+            self.nas_host_label.setText(f"❌ Connessione NAS: Non raggiungibile ({where})")
         elif manual_paused and remaining:
             mins = int(remaining // 60)
             secs = int(remaining % 60)
             text = t("status.paused_countdown_msg", mins=f"{mins:02d}", secs=f"{secs:02d}", where=where)
             state = "paused"
+            self.nas_host_label.setText(f"⏸️ Connessione NAS: Collegato a {where} (Pausa: {mins:02d}:{secs:02d})")
         elif manual_paused:
             text = t("status.paused_msg", where=where)
             state = "paused"
+            self.nas_host_label.setText(f"⏸️ Connessione NAS: Collegato a {where} (In pausa)")
         elif schedule_active:
             until = _clock_after(schedule_remaining)
             text = t("status.scheduled_pause_msg", until=until, where=where)
             state = "paused"
+            self.nas_host_label.setText(f"⏸️ Connessione NAS: Collegato a {where} (Pausa fino alle {until})")
         else:
             text = t("status.connected_msg", where=where)
             state = "active"
+            self.nas_host_label.setText(f"🖥️ Connessione NAS: Connesso a {where} (LAN/SSH attivo)")
 
         self.status_label.setText(text)
         if self.status_label.property("state") != state:
@@ -419,8 +460,13 @@ class StatusTab(QWidget):
 
     def _refresh_remote_lock(self, status: dict) -> None:
         if not status.get("connected") or not status.get("server_lock_held"):
+            self._remote_lock_held = False
+            self._remote_lock_owner = ""
+            self._remote_lock_age = ""
             self.remote_lock_label.setText(t("status.remote_lock_free"))
+            self._refresh_nas_activity()
             return
+        self._remote_lock_held = True
         try:
             age_seconds = max(0, int(status.get("server_lock_age_seconds") or 0))
         except (TypeError, ValueError):
@@ -433,7 +479,30 @@ class StatusTab(QWidget):
         owner = owner_host or owner_id or owner_pid or "sconosciuto"
         if owner_host and owner_id:
             owner = f"{owner_host} / {owner_id}"
+        self._remote_lock_owner = owner
+        self._remote_lock_age = age
         self.remote_lock_label.setText(t("status.remote_lock_held", age=age, owner=owner))
+        self._refresh_nas_activity()
+
+    def _refresh_nas_activity(self) -> None:
+        if not self._connected:
+            self.nas_activity_label.setText("⚠️ Attività NAS: Disconnesso")
+            return
+        if self._remote_lock_held:
+            self.nas_activity_label.setText(f"🔒 Attività NAS: Sync in corso da altro client ({self._remote_lock_owner}, da {self._remote_lock_age})")
+        elif self._transfer_phases:
+            direction = next(iter(self._transfer_phases))
+            dir_str = "Upload verso NAS" if direction == "upload" else "Download dal NAS"
+            path = self._current_paths.get(direction, "")
+            fname = os.path.basename(path) if path else ""
+            speed_str = f" • {human_size(self._current_speed)}/s" if self._current_speed > 0 else ""
+            pct_str = f" ({self._current_percent}%)" if self._current_percent > 0 else ""
+            item_str = f": {fname}" if fname else ""
+            self.nas_activity_label.setText(f"⚡ Attività NAS: {dir_str}{item_str}{pct_str}{speed_str}")
+        elif self._queue_items:
+            self.nas_activity_label.setText(f"⏳ Attività NAS: {len(self._queue_items)} file in coda")
+        else:
+            self.nas_activity_label.setText("💤 Attività NAS: A riposo (nessun trasferimento in corso)")
 
     def _refresh_pending_summary(self, status: dict) -> None:
         summary = status.get("pending_summary") or {}
@@ -533,7 +602,19 @@ class StatusTab(QWidget):
         ]
         self._refresh_queue_label()
 
+    def on_transfer_speed(self, direction: str, bytes_per_sec: float, percent: int) -> None:
+        self._current_speed = bytes_per_sec
+        self._current_percent = percent
+        if percent > 0:
+            self.sync_progress_bar.setValue(percent)
+            self.sync_progress_bar.show()
+        self._refresh_sync_state()
+
     def on_transfer_finished(self, direction: str, ok: bool) -> None:
+        self._current_speed = 0.0
+        self._current_percent = 0
+        self.sync_progress_bar.setValue(0)
+        self.sync_progress_bar.hide()
         self._transfer_phases.pop(direction, None)
         self._current_paths.pop(direction, None)
         if ok:
@@ -573,15 +654,20 @@ class StatusTab(QWidget):
             phase = self._transfer_phases[direction]
             direction_text = t(f"status.direction_{direction}")
             path = self._current_paths.get(direction, "")
+            speed_str = f" • {human_size(self._current_speed)}/s" if self._current_speed > 0 else ""
+            pct_str = f" ({self._current_percent}%)" if self._current_percent > 0 else ""
+            sym = "⬆️" if direction == "upload" else "⬇️"
             if path:
-                text = t("status.sync_state_file", direction=direction_text, path=path)
+                fname = os.path.basename(path) or path
+                text = f"{sym} {direction_text}: {fname}{pct_str}{speed_str}"
             else:
-                text = t(f"status.sync_state_{phase}", direction=direction_text)
+                text = f"{sym} " + t(f"status.sync_state_{phase}", direction=direction_text) + speed_str
         elif self._queue_items:
             text = t("status.sync_state_pending", count=len(self._queue_items))
         else:
             text = t("status.sync_state_ready")
         self.sync_state_label.setText(text)
+        self._refresh_nas_activity()
 
     def on_transfer_lock_unavailable(self, direction: str, detail: str) -> None:
         self._transfer_phases.pop(direction, None)
@@ -783,25 +869,46 @@ class StatusTab(QWidget):
         self._nas_available_bytes = None
         if exc is not None:
             self.diagnostics_label.setText(t("status.diagnostics_failed", detail=str(exc)))
+            self.nas_storage_label.setText(f"Spazio disco NAS: Errore lettura ({exc})")
+            self.nas_storage_bar.hide()
             self._refresh_attention()
             return
         ok, values, detail = result
         if not ok:
             self.diagnostics_label.setText(t("status.diagnostics_failed", detail=detail))
+            self.nas_storage_label.setText(f"Spazio disco NAS: Errore ({detail})")
+            self.nas_storage_bar.hide()
             self._refresh_attention()
             return
         try:
             available_bytes = int(values.get("SHARE_AVAILABLE_BYTES", "0"))
+            total_bytes = int(values.get("SHARE_TOTAL_BYTES", "0"))
             free = human_size(available_bytes)
             trash_size = human_size(int(values.get("TRASH_DISK_BYTES", "0")))
             count = int(values.get("TRASH_FILE_COUNT", "0"))
         except (TypeError, ValueError):
             self.diagnostics_label.setText(t("status.diagnostics_failed", detail=t("status.diagnostics_invalid")))
+            self.nas_storage_label.setText("Spazio disco NAS: Dati non validi")
+            self.nas_storage_bar.hide()
             self._refresh_attention()
             return
         self._diagnostics_available = True
         self._nas_available_bytes = available_bytes
         self.diagnostics_label.setText(t("status.diagnostics_summary", free=free, trash=trash_size, count=count))
+        if total_bytes > 0:
+            total_str = human_size(total_bytes)
+            pct = max(0, min(100, int((total_bytes - available_bytes) / total_bytes * 100)))
+            self.nas_storage_label.setText(
+                f"Spazio disco NAS: {free} liberi su {total_str} ({pct}% occupato) • Cestino: {trash_size} ({count} file)"
+            )
+            self.nas_storage_bar.setValue(pct)
+            self.nas_storage_bar.setFormat(f"%p% occupato ({free} liberi)")
+            self.nas_storage_bar.show()
+        else:
+            self.nas_storage_label.setText(
+                f"Spazio disco NAS: {free} liberi • Cestino: {trash_size} ({count} file)"
+            )
+            self.nas_storage_bar.hide()
         self._refresh_attention()
 
     def _check_integrity(self) -> None:
@@ -874,13 +981,12 @@ class StatusTab(QWidget):
             return
         try:
             from pathlib import Path
-            import os, sys
             source_root = candidate.materialize()
             current_root = Path(os.path.abspath(__file__)).resolve().parents[2]
             updater.install_update(source_root, current_root)
             candidate.cleanup()
             QMessageBox.information(self, t("status.update_restart_title"), t("status.update_restart_body"))
-            os.execv(sys.executable, [sys.executable, str(current_root / "main.py"), *sys.argv[1:]])
+            updater.restart(current_root)
         except Exception as exc:
             candidate.cleanup()
             QMessageBox.warning(self, t("status.update_failed_title"), str(exc))

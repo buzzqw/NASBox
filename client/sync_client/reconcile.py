@@ -49,15 +49,34 @@ def _same_file(left: Fingerprint | None, right: RemoteState) -> bool:
     return left is not None and not left.is_tombstone and right.is_file and left.digest == right.digest
 
 
-def _event_is_newer(local: Fingerprint, remote: RemoteState) -> bool:
-    """mtime is only a tie-breaker for concurrent/unknown histories.
+def _event_is_newer(
+    local: Fingerprint, remote: RemoteState, conflict_policy: str = "manual",
+) -> bool:
+    """Return True when the local live version should win a concurrent change.
 
-    Comparing whole seconds matches the portable precision exposed by stat on
-    both BusyBox-based NAS appliances and GNU/Linux. Equal timestamps are
-    deliberately resolved in favour of the NAS while preserving the local
-    version as a conflict, so clock ambiguity can never destroy data.
+    Whole seconds match the portable precision exposed by stat on both
+    BusyBox-based NAS appliances and GNU/Linux. Sub-second precision is trusted
+    only when *both* sides expose it: comparing a nanosecond timestamp with a
+    filesystem truncated to whole seconds would otherwise make the precise side
+    look newer by up to one second even when it is actually older.
+
+    With ``conflict_policy="newest"`` an exact tie is broken deterministically
+    from the content digest. Two clients seeing the same pair of versions then
+    choose the same winner instead of each keeping its own copy.
     """
-    return local.mtime_ns // 1_000_000_000 > remote.mtime_ns // 1_000_000_000
+    local_seconds = local.mtime_ns // 1_000_000_000
+    remote_seconds = remote.mtime_ns // 1_000_000_000
+    if local_seconds != remote_seconds:
+        return local_seconds > remote_seconds
+    local_precise = local.mtime_ns % 1_000_000_000 != 0
+    remote_precise = remote.mtime_ns % 1_000_000_000 != 0
+    if local_precise and remote_precise and local.mtime_ns != remote.mtime_ns:
+        return local.mtime_ns > remote.mtime_ns
+    if conflict_policy == "newest":
+        return local.digest > remote.digest
+    # Manual policy keeps the historical safe default: the NAS version wins a
+    # timestamp tie and the local one is preserved as a conflict copy.
+    return False
 
 
 def _causal_winner(
@@ -80,6 +99,7 @@ def plan_path(
     *,
     delete_enabled: bool,
     local_causal: CausalVersion | None = None,
+    conflict_policy: str = "manual",
 ) -> Decision:
     """Choose one convergent action from the common base and both live states."""
     if remote.kind == RemoteKind.OTHER:
@@ -111,7 +131,7 @@ def plan_path(
             return Decision(Action.CONFLICT_LOCAL_WINS, "versione locale causalmente successiva")
         if _causal_winner(local, remote, local_causal) == "remote":
             return Decision(Action.CONFLICT_REMOTE_WINS, "versione NAS causalmente successiva")
-        if _event_is_newer(local, remote):
+        if _event_is_newer(local, remote, conflict_policy):
             return Decision(Action.CONFLICT_LOCAL_WINS, "file locale piu' recente")
         return Decision(Action.CONFLICT_REMOTE_WINS, "file NAS piu' recente o contemporaneo")
 
@@ -132,7 +152,7 @@ def plan_path(
             return Decision(Action.CONFLICT_LOCAL_WINS, "versione locale causalmente successiva")
         if _causal_winner(local, remote, local_causal) == "remote":
             return Decision(Action.CONFLICT_REMOTE_WINS, "versione NAS causalmente successiva")
-        if _event_is_newer(local, remote):
+        if _event_is_newer(local, remote, conflict_policy):
             return Decision(Action.CONFLICT_LOCAL_WINS, "ricreazione locale piu' recente")
         return Decision(Action.CONFLICT_REMOTE_WINS, "versione NAS piu' recente o contemporanea")
 
@@ -164,6 +184,17 @@ def plan_path(
             return Decision(Action.UPLOAD, "modifica locale causalmente successiva alla cancellazione NAS")
         if causal_winner == "remote":
             return Decision(Action.CONFLICT_REMOTE_WINS, "cancellazione NAS causalmente successiva")
+        # A NAS-side deletion is only "newer" for as long as it is newer. A file
+        # the user edited *after* it was deleted on the NAS (and after the
+        # baseline was recorded) must not be erased just because the other side
+        # deleted it: the local edit is the more recent intent, and letting the
+        # deletion always win made the newest local changes disappear into the
+        # history. The tombstone carries the deletion timestamp, so the same
+        # comparison used for two live files applies here too; an ABSENT path
+        # carries no timestamp at all, so "nothing" can never be newer than an
+        # existing, modified local file.
+        if remote.kind == RemoteKind.ABSENT or _event_is_newer(local, remote, conflict_policy):
+            return Decision(Action.CONFLICT_LOCAL_WINS, "modifica locale piu' recente della cancellazione NAS")
         return Decision(Action.CONFLICT_REMOTE_WINS, "modifica locale concorrente con cancellazione NAS")
 
     if _same_file(local, remote):
@@ -181,6 +212,6 @@ def plan_path(
         return Decision(Action.CONFLICT_LOCAL_WINS, "modifiche: versione locale causalmente successiva")
     if causal_winner == "remote":
         return Decision(Action.CONFLICT_REMOTE_WINS, "modifiche: versione NAS causalmente successiva")
-    if _event_is_newer(local, remote):
+    if _event_is_newer(local, remote, conflict_policy):
         return Decision(Action.CONFLICT_LOCAL_WINS, "modifiche concorrenti: file locale piu' recente")
     return Decision(Action.CONFLICT_REMOTE_WINS, "modifiche concorrenti: file NAS piu' recente o contemporaneo")

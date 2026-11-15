@@ -73,6 +73,39 @@ class ReconcileTests(unittest.TestCase):
         decision = plan_path(fp("base"), fp("local"), remote(RemoteKind.TOMBSTONE), delete_enabled=True)
         self.assertEqual(decision.action, Action.CONFLICT_REMOTE_WINS)
 
+    def test_local_edit_newer_than_the_remote_deletion_keeps_the_local_version(self) -> None:
+        # Field case: the NAS deleted the file weeks ago, the user edited it
+        # today. Erasing the edit because "the other side deleted it" silently
+        # lost the newest work, and (with automatic conflict resolution) did so
+        # without asking.
+        decision = plan_path(
+            fp("base", 9_000_000_000), fp("local", 30_000_000_000),
+            remote(RemoteKind.TOMBSTONE, mtime=10_000_000_000), delete_enabled=False,
+        )
+        self.assertEqual(decision.action, Action.CONFLICT_LOCAL_WINS)
+        self.assertIn("piu' recente", decision.detail)
+
+    def test_local_edit_older_than_the_remote_deletion_still_loses(self) -> None:
+        decision = plan_path(
+            fp("base", 9_000_000_000), fp("local", 10_000_000_000),
+            remote(RemoteKind.TOMBSTONE, mtime=20_000_000_000), delete_enabled=True,
+        )
+        self.assertEqual(decision.action, Action.CONFLICT_REMOTE_WINS)
+
+    def test_absent_remote_path_never_beats_a_local_file(self) -> None:
+        # RemoteKind.ABSENT carries no timestamp: "nothing" cannot be newer
+        # than an existing, modified local file.
+        decision = plan_path(
+            fp("base"), fp("local"), remote(RemoteKind.ABSENT), delete_enabled=True,
+        )
+        self.assertEqual(decision.action, Action.CONFLICT_LOCAL_WINS)
+
+    def test_absent_remote_path_with_unchanged_local_file_is_adopted(self) -> None:
+        decision = plan_path(
+            fp("base"), fp("base"), remote(RemoteKind.ABSENT), delete_enabled=True,
+        )
+        self.assertEqual(decision.action, Action.REMOTE_WINS)
+
     def test_known_tombstone_allows_local_recreation_to_upload(self) -> None:
         decision = plan_path(
             fp("", 0), fp("recreated"), remote(RemoteKind.TOMBSTONE), delete_enabled=True,
@@ -108,6 +141,44 @@ class ReconcileTests(unittest.TestCase):
         )
         self.assertEqual(decision.action, Action.CONFLICT_REMOTE_WINS)
         self.assertIn("causalmente", decision.detail)
+
+    def test_newest_policy_uses_subsecond_only_when_both_sides_are_precise(self) -> None:
+        decision = plan_path(
+            None,
+            fp("local", 20_900_000_000),
+            remote(RemoteKind.FILE, "remote", 20_100_000_000),
+            delete_enabled=True, conflict_policy="newest",
+        )
+        self.assertEqual(decision.action, Action.CONFLICT_LOCAL_WINS)
+
+        # A filesystem truncated to whole seconds must not look older merely
+        # because the other side exposes nanoseconds.
+        decision = plan_path(
+            None,
+            fp("local", 20_900_000_000),
+            remote(RemoteKind.FILE, "remote", 21_000_000_000),
+            delete_enabled=True, conflict_policy="newest",
+        )
+        self.assertEqual(decision.action, Action.CONFLICT_REMOTE_WINS)
+
+    def test_newest_policy_breaks_exact_ties_deterministically(self) -> None:
+        local_wins = plan_path(
+            None, fp("bbb", 20_000_000_000), remote(RemoteKind.FILE, "aaa", 20_000_000_000),
+            delete_enabled=True, conflict_policy="newest",
+        )
+        remote_wins = plan_path(
+            None, fp("aaa", 20_000_000_000), remote(RemoteKind.FILE, "bbb", 20_000_000_000),
+            delete_enabled=True, conflict_policy="newest",
+        )
+        self.assertEqual(local_wins.action, Action.CONFLICT_LOCAL_WINS)
+        self.assertEqual(remote_wins.action, Action.CONFLICT_REMOTE_WINS)
+
+    def test_manual_policy_keeps_remote_on_exact_tie(self) -> None:
+        decision = plan_path(
+            None, fp("bbb", 20_000_000_000), remote(RemoteKind.FILE, "aaa", 20_000_000_000),
+            delete_enabled=True, conflict_policy="manual",
+        )
+        self.assertEqual(decision.action, Action.CONFLICT_REMOTE_WINS)
 
     def test_concurrent_vectors_still_use_timestamp_fallback(self) -> None:
         decision = plan_path(

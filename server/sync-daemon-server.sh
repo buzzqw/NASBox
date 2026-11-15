@@ -2615,7 +2615,7 @@ cmd_history_list() {
 cmd_diagnostics() {
     # Kept separate from --print-config: these filesystem scans can be costly
     # on a large history and are only requested explicitly by the GUI.
-    local trash count disk_bytes available last_run disk_kb available_kb
+    local trash count disk_bytes available last_run disk_kb available_kb total_kb used_kb total used
     trash="$(trash_dir)"
     count=0
     disk_bytes=0
@@ -2624,12 +2624,18 @@ cmd_diagnostics() {
         disk_kb=$(du -sk "$trash" 2>/dev/null | cut -f1 || true)
         disk_bytes=$(( ${disk_kb:-0} * 1024 ))
     fi
+    total_kb=$(df -Pk "$SHARE_ROOT" 2>/dev/null | awk 'NR==2 {print $2}' || true)
+    used_kb=$(df -Pk "$SHARE_ROOT" 2>/dev/null | awk 'NR==2 {print $3}' || true)
     available_kb=$(df -Pk "$SHARE_ROOT" 2>/dev/null | awk 'NR==2 {print $4}' || true)
+    total=$(( ${total_kb:-0} * 1024 ))
+    used=$(( ${used_kb:-0} * 1024 ))
     available=$(( ${available_kb:-0} * 1024 ))
     last_run=$(cat "$STAMP_FILE" 2>/dev/null || echo 0)
     echo "VERSION=$VERSION"
     echo "TRASH_FILE_COUNT=$count"
     echo "TRASH_DISK_BYTES=$disk_bytes"
+    echo "SHARE_TOTAL_BYTES=$total"
+    echo "SHARE_USED_BYTES=$used"
     echo "SHARE_AVAILABLE_BYTES=$available"
     echo "LAST_RUN_EPOCH=$last_run"
     echo "JOURNAL_BYTES=$(wc -c < "$JOURNAL_FILE" 2>/dev/null || echo 0)"

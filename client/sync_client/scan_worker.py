@@ -24,7 +24,7 @@ from pathlib import Path
 from PyQt6.QtCore import QThread, pyqtSignal
 
 from . import paths, rsync_ops
-from .config import Config
+from .config import Config, normalize_conflict_policy
 from .lock_coordinator import LockCoordinator
 from .reconcile import Action, RemoteKind, plan_path
 from .sync_state import SyncStateStore
@@ -252,6 +252,7 @@ class ScanWorker(QThread):
                 or baseline[path].digest != remote.digest
             )
             and not _mirror_owned(path)
+            and not rsync_ops.path_is_excluded(self.cfg, path)
         }
         # The manifest is a journal-backed change set, not a complete filesystem
         # inventory: older files may predate journal support. Do not interpret a
@@ -297,12 +298,29 @@ class ScanWorker(QThread):
 
         items: list[rsync_ops.TransferItem] = []
         for path in sorted(candidates):
-            local_fingerprint = self.sync_state.fingerprint(Path(self.cfg.local_root(), path))
+            full_path = Path(self.cfg.local_root(), path)
+            try:
+                st = full_path.lstat()
+            except OSError:
+                st = None
+            base_entry = baseline.get(path)
+            if st is None or not stat.S_ISREG(st.st_mode):
+                local_fingerprint = None
+            elif (
+                base_entry is not None
+                and not base_entry.is_tombstone
+                and base_entry.size == st.st_size
+                and base_entry.mtime_ns == st.st_mtime_ns
+            ):
+                local_fingerprint = base_entry
+            else:
+                local_fingerprint = self.sync_state.fingerprint(full_path)
             decision = plan_path(
-                baseline.get(path),
+                base_entry,
                 local_fingerprint,
                 remote_states.get(path, rsync_ops.RemoteState(RemoteKind.ABSENT)),
                 delete_enabled=self.cfg.allows_remote_deletions(),
+                conflict_policy=normalize_conflict_policy(self.cfg.get("conflict_policy")),
             )
             if self.cfg.allows_push() and decision.action in (Action.UPLOAD, Action.CONFLICT_LOCAL_WINS):
                 items.append(rsync_ops.TransferItem(

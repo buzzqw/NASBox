@@ -9,8 +9,8 @@ from PyQt6.QtCore import Qt, QTimer, QUrl, pyqtSignal
 from PyQt6.QtGui import QColor, QDesktopServices
 from PyQt6.QtWidgets import (
     QAbstractItemView, QComboBox, QGroupBox, QHBoxLayout, QHeaderView, QLabel,
-    QLineEdit, QMessageBox, QPlainTextEdit, QPushButton, QSplitter,
-    QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
+    QLineEdit, QMessageBox, QPlainTextEdit, QProgressBar, QPushButton,
+    QSplitter, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
 from .. import conflicts
@@ -35,6 +35,45 @@ class _GroupInfo:
     newest_mtime: float
     origin_device: str
     recommended: Path | None
+
+
+def _report_progress(
+    progress, phase: str, done: int = 0, total: int = 0, path: str = "",
+) -> None:
+    """Best-effort progress emission from the worker thread."""
+    if progress is None:
+        return
+    try:
+        progress({"phase": phase, "done": done, "total": total, "path": path})
+    except Exception:
+        pass  # the tab/window may be closing while the worker finishes
+
+
+class _ConflictItem(QTreeWidgetItem):
+    """Row with a numeric sort key per column.
+
+    QTreeWidget sorts by the cell text by default, which would order
+    ``"9 KB"`` after ``"10 MB"`` and dates as strings. The parallel key list
+    keeps sorting correct while the visible text stays user-friendly.
+    """
+
+    def __init__(self, values: list[str], sort_keys: list[object]) -> None:
+        super().__init__(values)
+        self._sort_keys = sort_keys
+
+    def __lt__(self, other: object) -> bool:
+        tree = self.treeWidget()
+        column = tree.sortColumn() if tree is not None else 0
+        keys = getattr(other, "_sort_keys", None)
+        if not isinstance(keys, list):
+            return False
+        mine = self._sort_keys[column]
+        theirs = keys[column]
+        if mine == theirs:
+            # Stable, predictable order for equal values (e.g. same size).
+            mine = self._sort_keys[0]
+            theirs = keys[0]
+        return bool(mine < theirs)
 
 
 class ConflictsTab(QWidget):
@@ -83,6 +122,11 @@ class ConflictsTab(QWidget):
         self.refresh_btn = QPushButton(t("conflicts.refresh_btn"))
         self.refresh_btn.clicked.connect(self.refresh)
         action_row.addWidget(self.refresh_btn)
+        self.resolve_everything_btn = QPushButton(t("conflicts.resolve_everything_btn"))
+        self.resolve_everything_btn.setToolTip(t("conflicts.resolve_everything_tooltip"))
+        self.resolve_everything_btn.setObjectName("primaryButton")
+        self.resolve_everything_btn.clicked.connect(self._resolve_everything)
+        action_row.addWidget(self.resolve_everything_btn)
         root.addLayout(action_row)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -100,12 +144,17 @@ class ConflictsTab(QWidget):
             t("conflicts.col_modified"),
             t("conflicts.col_origin"),
         ])
-        self.tree.header().setStretchLastSection(False)
-        self.tree.header().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        self.tree.header().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
-        self.tree.header().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
-        self.tree.header().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
-        self.tree.header().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
+        header = self.tree.header()
+        header.setStretchLastSection(False)
+        # Every column is user-resizable: no Stretch/ResizeToContents section,
+        # which would silently override the width the user drags.
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        header.setMinimumSectionSize(70)
+        for column, width in enumerate((360, 90, 110, 150, 130)):
+            self.tree.setColumnWidth(column, width)
+        self.tree.setSortingEnabled(True)
+        header.setSortIndicatorShown(True)
+        header.setSortIndicator(0, Qt.SortOrder.AscendingOrder)
         self.tree.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.tree.setRootIsDecorated(False)
         self.tree.setAlternatingRowColors(True)
@@ -125,6 +174,19 @@ class ConflictsTab(QWidget):
         self.detail_meta.setWordWrap(True)
         right_layout.addWidget(self.detail_meta)
 
+        self.compare_box = QGroupBox("Dettaglio Versioni in Conflitto")
+        compare_layout = QVBoxLayout(self.compare_box)
+        self.orig_info_label = QLabel("Originale: -")
+        self.orig_info_label.setWordWrap(True)
+        compare_layout.addWidget(self.orig_info_label)
+        self.alt_info_label = QLabel("Alternativa: -")
+        self.alt_info_label.setWordWrap(True)
+        compare_layout.addWidget(self.alt_info_label)
+        self.recommend_label = QLabel("")
+        self.recommend_label.setWordWrap(True)
+        compare_layout.addWidget(self.recommend_label)
+        right_layout.addWidget(self.compare_box)
+
         choose_row = QHBoxLayout()
         choose_row.addWidget(QLabel(t("conflicts.keep_label")))
         self.candidate_combo = QComboBox()
@@ -140,6 +202,23 @@ class ConflictsTab(QWidget):
         self.preview.setObjectName("conflictPreview")
         preview_layout.addWidget(self.preview, 1)
         right_layout.addWidget(preview_box, 1)
+
+        direct_actions = QHBoxLayout()
+        self.keep_orig_btn = QPushButton("🟢 Mantieni Originale")
+        self.keep_orig_btn.setToolTip("Conserva il file originale ed elimina la copia di conflitto")
+        self.keep_orig_btn.clicked.connect(self._resolve_selected_keep_original)
+        direct_actions.addWidget(self.keep_orig_btn)
+
+        self.keep_alt_btn = QPushButton("🔵 Usa Alternativa")
+        self.keep_alt_btn.setToolTip("Sostituisce l'originale con la versione alternativa selezionata")
+        self.keep_alt_btn.clicked.connect(self._keep_selected)
+        direct_actions.addWidget(self.keep_alt_btn)
+
+        self.keep_both_btn = QPushButton("🟡 Conserva entrambe")
+        self.keep_both_btn.setToolTip("Rinomina la copia alternativa come file normale (copia archiviata), senza perdere nulla")
+        self.keep_both_btn.clicked.connect(self._keep_both_action)
+        direct_actions.addWidget(self.keep_both_btn)
+        right_layout.addLayout(direct_actions)
 
         buttons = QHBoxLayout()
         self.open_btn = QPushButton(t("conflicts.open_btn"))
@@ -169,6 +248,20 @@ class ConflictsTab(QWidget):
         splitter.setStretchFactor(1, 2)
         splitter.setSizes([620, 480])
         root.addWidget(splitter, 1)
+
+        self.progress_row = QWidget()
+        progress_layout = QHBoxLayout(self.progress_row)
+        progress_layout.setContentsMargins(0, 0, 0, 0)
+        self.progress_label = QLabel()
+        self.progress_label.setObjectName("conflictProgressLabel")
+        self.progress_label.setMinimumWidth(180)
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setTextVisible(True)
+        self.progress_bar.setMinimumWidth(220)
+        progress_layout.addWidget(self.progress_label)
+        progress_layout.addWidget(self.progress_bar, 1)
+        self.progress_row.hide()
+        root.addWidget(self.progress_row)
 
         self.status_label = QLabel()
         self.status_label.setWordWrap(True)
@@ -292,13 +385,23 @@ class ConflictsTab(QWidget):
             if self._filter and self._filter not in relative.lower():
                 continue
             info = self._infos.get(str(group.original)) or self._group_info(group)
-            item = QTreeWidgetItem([
-                relative,
-                str(len(group.candidates)),
-                human_size(info.total_alt_size),
-                time.strftime("%Y-%m-%d %H:%M", time.localtime(info.newest_mtime)) if info.newest_mtime else "—",
-                info.origin_device or "—",
-            ])
+            origin = info.origin_device or "—"
+            item = _ConflictItem(
+                [
+                    relative,
+                    str(len(group.candidates)),
+                    human_size(info.total_alt_size),
+                    time.strftime("%Y-%m-%d %H:%M", time.localtime(info.newest_mtime)) if info.newest_mtime else "—",
+                    origin,
+                ],
+                [
+                    relative.lower(),
+                    len(group.candidates),
+                    info.total_alt_size,
+                    info.newest_mtime,
+                    origin.lower(),
+                ],
+            )
             item.setData(0, GROUP_ROLE, group)
             for column in range(5):
                 item.setBackground(column, QColor("#fff3cd"))
@@ -355,6 +458,9 @@ class ConflictsTab(QWidget):
         if group is None:
             self.detail_path.setText(t("conflicts.no_selection"))
             self.detail_meta.clear()
+            self.orig_info_label.setText("Originale: -")
+            self.alt_info_label.setText("Alternativa: -")
+            self.recommend_label.setText("")
             self.preview.clear()
             return
         info = self._infos.get(str(group.original)) or self._group_info(group)
@@ -370,6 +476,38 @@ class ConflictsTab(QWidget):
                 else t("conflicts.original_missing")
             ),
         ))
+
+        orig_exists = group.original.exists()
+        orig_st = None
+        if orig_exists:
+            try:
+                orig_st = group.original.stat()
+            except OSError:
+                orig_st = None
+        orig_time = time.strftime('%d/%m/%Y %H:%M:%S', time.localtime(orig_st.st_mtime)) if orig_st else "mancante"
+        orig_size = human_size(orig_st.st_size) if orig_st else "0 B"
+        self.orig_info_label.setText(f"🖥️ Versione Locale (Originale): {orig_size} • Modificato: {orig_time}")
+
+        if candidate is not None and candidate.exists():
+            try:
+                c_st = candidate.stat()
+                c_time = time.strftime('%d/%m/%Y %H:%M:%S', time.localtime(c_st.st_mtime))
+                c_size = human_size(c_st.st_size)
+            except OSError:
+                c_time = "sconosciuto"
+                c_size = "0 B"
+            origin = info.origin_device or "altro dispositivo"
+            self.alt_info_label.setText(f"☁️ Versione Alternativa: {c_size} • Modificato: {c_time} (Dispositivo: {origin})")
+            if info.recommended == candidate:
+                self.recommend_label.setText("★ Versione consigliata: Alternativa (più recente)")
+            elif info.recommended == group.original:
+                self.recommend_label.setText("★ Versione consigliata: Originale locale (più recente)")
+            else:
+                self.recommend_label.setText("")
+        else:
+            self.alt_info_label.setText("☁️ Versione Alternativa: Seleziona una copia")
+            self.recommend_label.setText("")
+
         if candidate is None:
             self.preview.setPlainText("")
             return
@@ -449,13 +587,37 @@ class ConflictsTab(QWidget):
     def _update_buttons(self) -> None:
         selected = self._selected_candidate() is not None
         can_act = not self._busy and not self._action_busy
+        has_group = self._selected_group() is not None
+        has_groups = bool(self._selected_groups())
         self.open_btn.setEnabled(selected and can_act)
         self.keep_btn.setEnabled(selected and can_act)
-        self.restore_btn.setEnabled(self._selected_group() is not None and can_act)
-        self.discard_btn.setEnabled(self._selected_group() is not None and can_act)
-        self.resolve_all_btn.setEnabled(bool(self._selected_groups()) and can_act)
+        self.keep_orig_btn.setEnabled(has_groups and can_act)
+        self.keep_alt_btn.setEnabled(selected and can_act)
+        self.keep_both_btn.setEnabled(selected and can_act)
+        self.restore_btn.setEnabled(has_group and can_act)
+        self.discard_btn.setEnabled(has_group and can_act)
+        self.resolve_all_btn.setEnabled(has_groups and can_act)
+        self.resolve_everything_btn.setEnabled(bool(self._visible_groups()) and can_act)
         self.search_edit.setEnabled(can_act)
         self.refresh_btn.setEnabled(not self._busy and not self._action_busy)
+
+    def _keep_both_action(self) -> None:
+        group = self._selected_group()
+        candidate = self._selected_candidate()
+        local_root = self.cfg.local_root()
+        if group is None or candidate is None or not local_root:
+            return
+        self._set_action_busy(True, t("conflicts.resolving"))
+
+        def worker():
+            ok, detail = conflicts.keep_both(
+                group, candidate, local_root, self.engine.sync_state,
+            )
+            if ok:
+                self.engine.wake()
+            return {"ok": ok, "resolved": 1 if ok else 0, "problems": [] if ok else [detail]}
+
+        run_in_background(self, "_conflict_action_call", worker, self._on_action_done)
 
     def _open_selected(self) -> None:
         path = self._selected_candidate()
@@ -466,9 +628,49 @@ class ConflictsTab(QWidget):
 
     def _set_action_busy(self, busy: bool, message: str = "") -> None:
         self._action_busy = busy
-        if message:
-            self.status_label.setText(message)
+        if busy:
+            if message:
+                self.progress_label.setText(message)
+                self.status_label.setText(message)
+            self.progress_bar.setRange(0, 0)  # indeterminate until the first step
+            self.progress_bar.setValue(0)
+            self.progress_label.setToolTip("")
+            self.progress_row.show()
+        else:
+            self.progress_row.hide()
+            self.progress_label.setText("")
         self._update_buttons()
+
+    def _on_action_progress(self, payload: object) -> None:
+        """GUI-thread slot for progress emitted by the resolver worker."""
+        if not self._action_busy or not isinstance(payload, dict):
+            return
+        phase = str(payload.get("phase") or "")
+        done = int(payload.get("done") or 0)
+        total = int(payload.get("total") or 0)
+        path = str(payload.get("path") or "")
+        if phase == "waiting":
+            self.progress_label.setText(t("conflicts.progress_waiting"))
+            self.progress_bar.setRange(0, 0)
+        elif phase == "cleaning":
+            self.progress_label.setText(t("conflicts.progress_cleaning", done=done, total=total))
+            if done <= 0:
+                # Waiting for the first NAS lease/delete: animate instead of
+                # showing a frozen 0% bar during the first SSH round-trip.
+                self.progress_bar.setRange(0, 0)
+            else:
+                self.progress_bar.setRange(0, max(total, 1))
+                self.progress_bar.setValue(min(done, total))
+        elif phase == "done":
+            self.progress_label.setText(t("conflicts.progress_done", done=done, total=total))
+            self.progress_bar.setRange(0, max(total, 1))
+            self.progress_bar.setValue(total)
+        else:
+            self.progress_label.setText(t("conflicts.progress_resolving", done=done, total=total))
+            self.progress_bar.setRange(0, max(total, 1))
+            self.progress_bar.setValue(min(done, total))
+        self.progress_label.setToolTip(path)
+        self.progress_row.show()
 
     def _keep_selected(self) -> None:
         group = self._selected_group()
@@ -484,10 +686,13 @@ class ConflictsTab(QWidget):
         remote_paths = self._candidate_relatives(group)
         self._set_action_busy(True, t("conflicts.resolving"))
 
-        def worker():
-            return self._resolve_and_purge([(group, chosen, remote_paths)], local_root)
+        def worker(progress):
+            return self._resolve_and_purge([(group, chosen, remote_paths)], local_root, progress)
 
-        run_in_background(self, "_conflict_action_call", worker, self._on_action_done)
+        run_in_background(
+            self, "_conflict_action_call", worker, self._on_action_done,
+            on_progress=self._on_action_progress,
+        )
 
     def _discard_copies(self) -> None:
         group = self._selected_group()
@@ -502,19 +707,43 @@ class ConflictsTab(QWidget):
         remote_paths = self._candidate_relatives(group)
         self._set_action_busy(True, t("conflicts.resolving"))
 
-        def worker():
-            return self._discard_and_purge(group, remote_paths, local_root)
+        def worker(progress):
+            return self._discard_and_purge(group, remote_paths, local_root, progress)
 
-        run_in_background(self, "_conflict_action_call", worker, self._on_action_done)
+        run_in_background(
+            self, "_conflict_action_call", worker, self._on_action_done,
+            on_progress=self._on_action_progress,
+        )
+
+    def _visible_groups(self) -> list[conflicts.ConflictGroup]:
+        """Groups currently listed, i.e. after the search filter."""
+        groups: list[conflicts.ConflictGroup] = []
+        for index in range(self.tree.topLevelItemCount()):
+            group = self.tree.topLevelItem(index).data(0, GROUP_ROLE)
+            if group is not None and group not in groups:
+                groups.append(group)
+        return groups
+
+    def _resolve_everything(self) -> None:
+        self._resolve_groups(
+            self._visible_groups(),
+            "conflicts.resolve_everything_confirm_title",
+            "conflicts.resolve_everything_confirm_body",
+        )
 
     def _resolve_selected_keep_original(self) -> None:
-        groups = self._selected_groups()
+        self._resolve_groups(
+            self._selected_groups(),
+            "conflicts.resolve_all_confirm_title",
+            "conflicts.resolve_all_confirm_body",
+        )
+
+    def _resolve_groups(self, groups: list[conflicts.ConflictGroup], title_key: str, body_key: str) -> None:
         local_root = self.cfg.local_root()
         if not groups or not local_root:
             return
         if QMessageBox.question(
-            self, t("conflicts.resolve_all_confirm_title"),
-            t("conflicts.resolve_all_confirm_body", count=len(groups)),
+            self, t(title_key), t(body_key, count=len(groups)),
         ) != QMessageBox.StandardButton.Yes:
             return
         plans: list[tuple[conflicts.ConflictGroup, Path, list[str]]] = []
@@ -531,59 +760,83 @@ class ConflictsTab(QWidget):
             return
         self._set_action_busy(True, t("conflicts.resolving"))
 
-        def worker():
-            return self._resolve_and_purge(plans, local_root)
+        def worker(progress):
+            return self._resolve_and_purge(plans, local_root, progress)
 
-        run_in_background(self, "_conflict_action_call", worker, self._on_action_done)
+        run_in_background(
+            self, "_conflict_action_call", worker, self._on_action_done,
+            on_progress=self._on_action_progress,
+        )
 
-    def _resolve_and_purge(self, plans, local_root: str):
+    def _resolve_and_purge(self, plans, local_root: str, progress=None):
         """Run in a BackgroundCall: acquire the local gate, resolve, purge."""
         problems: list[str] = []
         resolved = 0
+        total_groups = len(plans)
         scheduler = getattr(self.engine, "transfer_scheduler", None)
         permit = scheduler.permit("conflict") if scheduler is not None else None
         try:
+            _report_progress(progress, "waiting")
             if permit is not None and not permit.acquire(timeout=300):
                 return {
                     "ok": False, "resolved": 0,
                     "problems": [t("conflicts.scheduler_timeout")],
                 }
-            for group, chosen, remote_paths in plans:
+            pending_remote: list[str] = []
+            for index, (group, chosen, remote_paths) in enumerate(plans, start=1):
                 ok, detail = conflicts.resolve_conflict(
                     group, chosen, local_root, self.engine.sync_state,
                 )
                 if not ok:
                     problems.append(f"{self._relative(group.original)}: {detail}")
-                    continue
-                resolved += 1
-                problems.extend(self._purge_remote(remote_paths))
+                else:
+                    resolved += 1
+                    pending_remote.extend(remote_paths)
+                _report_progress(
+                    progress, "resolving", index, total_groups,
+                    self._relative(group.original),
+                )
+            if pending_remote:
+                # One lease for the whole batch: "Risolvi tutto" can touch
+                # dozens of groups, and a lock handshake per group is slow.
+                relatives = list(dict.fromkeys(pending_remote))
+                _report_progress(progress, "cleaning", 0, len(relatives))
+                problems.extend(self._purge_remote(relatives, progress=progress))
             if resolved:
                 self.engine.wake()
+            _report_progress(progress, "done", total_groups, total_groups)
             return {"ok": resolved > 0, "resolved": resolved, "problems": problems}
         finally:
             if permit is not None:
                 permit.release()
 
-    def _discard_and_purge(self, group, remote_paths, local_root: str):
+    def _discard_and_purge(self, group, remote_paths, local_root: str, progress=None):
         problems: list[str] = []
         scheduler = getattr(self.engine, "transfer_scheduler", None)
         permit = scheduler.permit("conflict") if scheduler is not None else None
         try:
+            _report_progress(progress, "waiting")
             if permit is not None and not permit.acquire(timeout=300):
                 return {"ok": False, "resolved": 0, "problems": [t("conflicts.scheduler_timeout")]}
+            relative = self._relative(group.original)
+            _report_progress(progress, "resolving", 0, 1, relative)
             ok, detail = conflicts.discard_conflict_copies(
                 group, local_root, self.engine.sync_state,
             )
             if not ok:
                 return {"ok": False, "resolved": 0, "problems": [detail]}
-            problems.extend(self._purge_remote(remote_paths))
+            _report_progress(progress, "resolving", 1, 1, relative)
+            if remote_paths:
+                _report_progress(progress, "cleaning", 0, len(remote_paths))
+            problems.extend(self._purge_remote(remote_paths, progress=progress))
             self.engine.wake()
+            _report_progress(progress, "done", 1, 1)
             return {"ok": True, "resolved": 1, "problems": problems}
         finally:
             if permit is not None:
                 permit.release()
 
-    def _purge_remote(self, relatives: list[str]) -> list[str]:
+    def _purge_remote(self, relatives: list[str], progress=None) -> list[str]:
         """Remove conflict copies from the NAS too, under a single lease."""
         if not relatives:
             return []
@@ -593,7 +846,14 @@ class ConflictsTab(QWidget):
         if conn is None:
             return [t("conflicts.remote_unreachable")]
         device_id = self.engine.sync_state.device_id()
-        results = rsync_ops.browse_delete_many(self.cfg, conn, relatives, device_id)
+
+        def on_remote_progress(done: int, total: int, path: str, _ok: bool) -> None:
+            _report_progress(progress, "cleaning", done, total, path)
+
+        results = rsync_ops.browse_delete_many(
+            self.cfg, conn, relatives, device_id,
+            on_progress=on_remote_progress if progress is not None else None,
+        )
         problems: list[str] = []
         for relative, ok, detail in results:
             if ok:
@@ -657,12 +917,14 @@ class ConflictsTab(QWidget):
         remote_paths = self._candidate_relatives(group)
         self._set_action_busy(True, t("conflicts.resolving"))
 
-        def worker():
+        def worker(progress):
             scheduler = getattr(self.engine, "transfer_scheduler", None)
             permit = scheduler.permit("conflict") if scheduler is not None else None
             try:
+                _report_progress(progress, "waiting")
                 if permit is not None and not permit.acquire(timeout=300):
                     return {"ok": False, "resolved": 0, "problems": [t("conflicts.scheduler_timeout")]}
+                _report_progress(progress, "resolving", 0, 1, relative)
                 ok, detail = conflicts.resolve_conflict(
                     group, group.original, local_root, self.engine.sync_state,
                 )
@@ -672,11 +934,18 @@ class ConflictsTab(QWidget):
                     self.engine.sync_state.mark_pending({relative})
                 except Exception:
                     pass
-                problems = self._purge_remote(remote_paths)
+                _report_progress(progress, "resolving", 1, 1, relative)
+                if remote_paths:
+                    _report_progress(progress, "cleaning", 0, len(remote_paths))
+                problems = self._purge_remote(remote_paths, progress=progress)
                 self.engine.wake()
+                _report_progress(progress, "done", 1, 1)
                 return {"ok": True, "resolved": 1, "problems": problems}
             finally:
                 if permit is not None:
                     permit.release()
 
-        run_in_background(self, "_conflict_action_call", worker, self._on_action_done)
+        run_in_background(
+            self, "_conflict_action_call", worker, self._on_action_done,
+            on_progress=self._on_action_progress,
+        )

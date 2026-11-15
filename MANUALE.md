@@ -6,7 +6,7 @@ cartella NASBox** — con il NAS; il NAS gira un demone leggero che applica la
 retention dello storico. Tutti i PC collegati vedono, con un ritardo di al
 più qualche decina di secondi, i file che gli altri ci mettono dentro.
 
-Versione documentata: client `1.24.1`, server NAS `3.23.0`.
+Versione documentata: client `1.25.0`, server NAS `3.23.0`.
 
 Il modello è deliberatamente quello di Dropbox: **una** cartella per PC,
 niente elenchi di condivisioni da aggiungere/modificare/rimuovere a mano.
@@ -454,6 +454,14 @@ ambienti virtuali Python, anche se si trovano dentro una sottocartella di
 NASBox. Se erano già stati sincronizzati, l'esclusione non li rimuove dal NAS
 o dagli altri PC: per eliminarne una copia esistente serve farlo manualmente.
 
+`.git`, `.hg` e `.svn` sono esclusi **sempre**, anche se il pattern viene
+rimosso dall'elenco: sincronizzare i metadati di un repository non è mai
+desiderabile e una copia di conflitto dentro `.git/refs` lascia il repository
+con ref malformati. Lo stesso vale per le cache degli strumenti
+(`.pytest_cache`, `.mypy_cache`, `.ruff_cache`, `node_modules`) e per i file
+intermedi LaTeX (`.aux`, `.log`, `.toc`, `.synctex.gz`, …): sono rigenerati a
+ogni esecuzione e non sono contenuto scritto dall'utente.
+
 ### Rinomine e directory
 
 Quando un file locale sparisce da un percorso già sincronizzato e compare in un
@@ -569,18 +577,27 @@ quando entrambe le parti hanno modificato lo stesso file.
 
 ### Risoluzione di un conflitto tra due modifiche
 
-Quando entrambe le parti hanno modificato lo stesso file, NASBox conserva sempre
-la versione che perde sotto un nome del tipo:
+Quando entrambe le parti hanno modificato lo stesso file, con la policy
+predefinita `conflict_policy = "newest"` NASBox **tiene la versione più recente
+al percorso originale** e non crea una copia visibile: il perdente resta nello
+storico (`--backup` / `.sync-trash`, retention 30 giorni) e può essere
+recuperato dal tab **Storico**. L'ordine è: clock causale per percorso, poi
+mtime (i nanosecondi solo se entrambi i lati li espongono), infine un tie-break
+deterministico sul digest, così due client scelgono lo stesso vincitore.
+
+Impostando `conflict_policy = "manual"` nel file `client.json` si torna al
+comportamento precedente: la versione che perde viene conservata sotto un nome
+del tipo:
 
 ```text
 nome (conflitto da <device> <codice>).estensione
 ```
 
-Poi rende coerente il percorso originale con la versione vincente e aggiorna la
-baseline locale. In questo modo lo stesso conflitto non viene riproposto a ogni
-ciclo. Se la versione NAS vince, la copia locale viene prima salvata sul NAS e
-il file originale locale viene sostituito con la versione NAS; se vince la
-versione locale, il file NAS originale viene conservato come copia di conflitto.
+In entrambi i casi il percorso originale viene reso coerente con la versione
+vincente e la baseline locale viene aggiornata, così lo stesso conflitto non
+viene riproposto a ogni ciclo. Se la versione NAS vince, il file locale viene
+sostituito con la versione NAS; se vince la versione locale, il file NAS viene
+sovrascritto dall'upload.
 
 Il tab **Conflitti** è il punto di lavoro consigliato:
 

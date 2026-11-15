@@ -4,7 +4,7 @@ import io
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from sync_client import rsync_ops
 from sync_client.config import Config
@@ -178,6 +178,20 @@ class RsyncTransferTests(unittest.TestCase):
         self.assertEqual(first_id, same_id)
         self.assertNotEqual(first_id, changed_id)
         self.assertTrue(first_id.startswith("publish-"))
+
+    def test_conflict_policy_normalizes_unknown_values(self) -> None:
+        worker = PushWorker.__new__(PushWorker)
+        worker.cfg = Mock()
+
+        worker.cfg.get.return_value = "NEWEST"
+        self.assertEqual(worker._conflict_policy(), "newest")
+        self.assertTrue(worker._auto_resolve_conflicts())
+
+        worker.cfg.get.return_value = "manual"
+        self.assertFalse(worker._auto_resolve_conflicts())
+
+        worker.cfg.get.return_value = "typo"
+        self.assertEqual(worker._conflict_policy(), "manual")
 
 
 if __name__ == "__main__":

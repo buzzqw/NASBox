@@ -81,7 +81,7 @@ def _offer_update(cfg: config_module.Config, current_root: Path) -> bool:
         updater.install_update(source_root, current_root)
         candidate.cleanup()
         QMessageBox.information(None, t("updater.restarting_title"), t("updater.restarting_body"))
-        os.execv(sys.executable, [sys.executable, str(current_root / "main.py"), *sys.argv[1:]])
+        updater.restart(current_root)
     except Exception as exc:
         candidate.cleanup()
         QMessageBox.warning(

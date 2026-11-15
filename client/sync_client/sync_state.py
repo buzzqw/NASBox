@@ -833,17 +833,30 @@ class SyncStateStore:
         self, local_root: str, on_progress: Optional[Callable[[int, int], None]] = None,
     ) -> set[str]:
         """Find changed/new/deleted regular files when the watcher lacks a path."""
+        from . import rsync_ops
         root = Path(local_root)
         current: dict[str, os.stat_result] = {}
-        for path in root.rglob("*"):
-            if ".sync-partial" in path.parts:
-                continue
-            try:
-                path_stat = path.lstat()
-            except OSError:
-                continue
-            if stat.S_ISREG(path_stat.st_mode):
-                current[str(path.relative_to(root))] = path_stat
+        for dirpath, dirnames, filenames in os.walk(root):
+            rel_dir = os.path.relpath(dirpath, root)
+            pruned_dirs = []
+            for d in dirnames:
+                child_rel = d if rel_dir == "." else f"{rel_dir}/{d}"
+                if rsync_ops.path_is_excluded(self.cfg, child_rel):
+                    continue
+                pruned_dirs.append(d)
+            dirnames[:] = pruned_dirs
+
+            for f in filenames:
+                rel_file = f if rel_dir == "." else f"{rel_dir}/{f}"
+                if rsync_ops.path_is_excluded(self.cfg, rel_file):
+                    continue
+                try:
+                    full_path = os.path.join(dirpath, f)
+                    path_stat = os.lstat(full_path)
+                except OSError:
+                    continue
+                if stat.S_ISREG(path_stat.st_mode):
+                    current[rel_file] = path_stat
         with self._lock, self._connection() as conn:
             known = {
                 row[0]: Fingerprint(row[1], row[2], row[3], CausalVersion.parse(row[4]))
@@ -851,6 +864,7 @@ class SyncStateStore:
                 for row in conn.execute(
                     "SELECT path, digest, size, mtime_ns, causal FROM entry WHERE repository = ?", (self._repository(),)
                 )
+                if not rsync_ops.path_is_excluded(self.cfg, row[0])
             }
         candidates = set(current) | set(known)
         changed: set[str] = set()

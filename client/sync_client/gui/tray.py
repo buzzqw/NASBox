@@ -15,6 +15,7 @@ from ..logger import EventLogger
 from ..rsync_ops import TransferItem
 from . import icons
 from .dialogs import PauseForDialog
+from .format_utils import human_size
 
 RECENT_ACTIONS = {"UPLOAD", "DOWNLOAD", "DELETE_LOCAL", "DELETE_REMOTE"}
 RECENT_ICONS = {
@@ -46,6 +47,9 @@ class TrayIcon(QSystemTrayIcon):
         self._animation_frame = 0
         self._transfer_counts = {"upload": 0, "download": 0}
         self._transfer_start_times: dict[str, float] = {}
+        self._current_item: tuple[str, str, int] | None = None
+        self._current_speed: float = 0.0
+        self._current_percent: int = 0
 
         self._animation_timer = QTimer(self)
         self._animation_timer.setInterval(420)
@@ -82,7 +86,15 @@ class TrayIcon(QSystemTrayIcon):
             t("tray.conflicts_suffix", count=self._conflict_count)
             if self._conflict_count else ""
         )
-        self.setToolTip(f"NASBox — {self._status_text}{suffix}{conflicts_suffix}")
+        active_info = ""
+        if self._current_item is not None:
+            direction, path, _size = self._current_item
+            dir_sym = "↑" if direction == "upload" else "↓"
+            fname = os.path.basename(path) or path
+            speed = f" • {human_size(self._current_speed)}/s" if self._current_speed > 0 else ""
+            pct = f" ({self._current_percent}%)" if self._current_percent > 0 else ""
+            active_info = f"\n{dir_sym} {fname}{pct}{speed}"
+        self.setToolTip(f"NASBox — {self._status_text}{suffix}{conflicts_suffix}{active_info}")
 
     def set_conflict_count(self, count: int) -> None:
         try:
@@ -116,8 +128,22 @@ class TrayIcon(QSystemTrayIcon):
     def on_download_item_done(self, item_direction: str, path: str) -> None:
         self._on_transfer_item_done("download")
 
+    @pyqtSlot(str, str, int)
+    def on_item_started(self, direction: str, path: str, size: int) -> None:
+        self._current_item = (direction, path, size)
+        self._apply_icon()
+
+    @pyqtSlot(str, float, int)
+    def on_speed_update(self, direction: str, bytes_per_sec: float, percent: int) -> None:
+        self._current_speed = bytes_per_sec
+        self._current_percent = percent
+        self._apply_icon()
+
     @pyqtSlot(str, bool)
     def on_transfer_finished(self, direction: str, success: bool) -> None:
+        self._current_item = None
+        self._current_speed = 0.0
+        self._current_percent = 0
         count = self._transfer_counts.get(direction, 0)
         start_time = self._transfer_start_times.pop(direction, None)
         elapsed = time.monotonic() - start_time if start_time is not None else 0.0
@@ -158,6 +184,16 @@ class TrayIcon(QSystemTrayIcon):
 
         status_action = menu.addAction(self._status_text)
         status_action.setEnabled(False)
+
+        if self._current_item is not None:
+            direction, path, _size = self._current_item
+            dir_sym = "↑ Invio" if direction == "upload" else "↓ Download"
+            fname = os.path.basename(path) or path
+            speed = f" • {human_size(self._current_speed)}/s" if self._current_speed > 0 else ""
+            pct = f" ({self._current_percent}%)" if self._current_percent > 0 else ""
+            active_act = menu.addAction(f"{dir_sym}: {fname}{pct}{speed}")
+            active_act.setEnabled(False)
+
         if self._pending_count:
             pending_action = menu.addAction(t("tray.pending_files", count=self._pending_count))
             pending_action.setEnabled(False)
@@ -168,6 +204,10 @@ class TrayIcon(QSystemTrayIcon):
             conflict_action.triggered.connect(self._show_conflicts)
         menu.addSeparator()
 
+        sync_now_act = menu.addAction("⚡ Sincronizza adesso")
+        sync_now_act.setEnabled(bool(self._connected and not self._paused))
+        sync_now_act.triggered.connect(self._sync_now)
+
         open_action = menu.addAction(t("tray.open_folder"))
         open_action.setEnabled(bool(self.cfg.local_root()))
         open_action.triggered.connect(self._open_folder)
@@ -177,12 +217,24 @@ class TrayIcon(QSystemTrayIcon):
 
         menu.addSeparator()
 
-        toggle_label = t("tray.resume") if self.cfg.is_manually_paused() else t("tray.pause")
-        toggle_action = menu.addAction(toggle_label)
-        toggle_action.triggered.connect(self._toggle_pause)
-
-        pause_for_action = menu.addAction(t("tray.pause_for"))
-        pause_for_action.triggered.connect(self._pause_for)
+        if self.cfg.is_manually_paused():
+            resume_act = menu.addAction("▶️ " + t("tray.resume"))
+            resume_act.triggered.connect(self._toggle_pause)
+        else:
+            pause_menu = menu.addMenu("⏸ " + t("tray.pause"))
+            p30 = pause_menu.addAction("Per 30 minuti")
+            p30.triggered.connect(lambda: self._quick_pause(30 * 60))
+            p60 = pause_menu.addAction("Per 1 ora")
+            p60.triggered.connect(lambda: self._quick_pause(60 * 60))
+            p120 = pause_menu.addAction("Per 2 ore")
+            p120.triggered.connect(lambda: self._quick_pause(120 * 60))
+            p_tonight = pause_menu.addAction("Fino a domani (08:00)")
+            p_tonight.triggered.connect(self._pause_until_tomorrow)
+            p_indef = pause_menu.addAction("Fino a riavvio")
+            p_indef.triggered.connect(self._pause_indefinite)
+            pause_menu.addSeparator()
+            pause_for_action = pause_menu.addAction(t("tray.pause_for"))
+            pause_for_action.triggered.connect(self._pause_for)
 
         menu.addSeparator()
 
@@ -207,18 +259,43 @@ class TrayIcon(QSystemTrayIcon):
         local_root = self.cfg.local_root()
         for ev in events:
             icon = RECENT_ICONS.get(ev.action, "")
-            label = f"{icon} {ev.path}"
-            if len(label) > 60:
-                label = label[:57] + "…"
-            action = recent_menu.addAction(label)
-            if local_root:
-                action.triggered.connect(
-                    lambda _checked=False, p=ev.path: self._open_containing_folder(local_root, p)
-                )
-            else:
-                action.setEnabled(False)
+            fname = os.path.basename(ev.path) or ev.path
+            label = f"{icon} {fname}"
+            full = os.path.join(local_root, ev.path) if local_root else ""
+            exists = bool(full and os.path.exists(full))
+            file_menu = recent_menu.addMenu(label)
+            file_menu.setToolTip(ev.path)
+            if exists:
+                open_act = file_menu.addAction("📄 Apri file")
+                open_act.triggered.connect(lambda _c=False, p=full: self._open_path(p))
+            show_act = file_menu.addAction("📁 Mostra nella cartella")
+            show_act.triggered.connect(
+                lambda _c=False, p=ev.path: self._open_containing_folder(local_root, p)
+            )
 
     # --- actions ---
+
+    def _sync_now(self) -> None:
+        if self.cfg.is_manually_paused():
+            self.cfg.resume()
+        self.engine.wake(force=True)
+
+    def _quick_pause(self, seconds: int) -> None:
+        self.cfg.pause_for_seconds(seconds)
+        self.engine.cancel_current_transfer()
+        self.engine.wake()
+
+    def _pause_until_tomorrow(self) -> None:
+        from datetime import datetime, timedelta
+        now = datetime.now()
+        tomorrow_8am = (now + timedelta(days=1)).replace(hour=8, minute=0, second=0, microsecond=0)
+        seconds = int((tomorrow_8am - now).total_seconds())
+        self._quick_pause(max(seconds, 60))
+
+    def _pause_indefinite(self) -> None:
+        self.cfg.pause_indefinitely()
+        self.engine.cancel_current_transfer()
+        self.engine.wake()
 
     def _open_path(self, path: str) -> None:
         QDesktopServices.openUrl(QUrl.fromLocalFile(path))

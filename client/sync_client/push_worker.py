@@ -25,7 +25,7 @@ from PyQt6.QtCore import pyqtSignal
 
 from . import rsync_ops
 from .conflicts import CONFLICT_TAG
-from .config import Config
+from .config import Config, normalize_conflict_policy
 from .i18n import t
 from .lock_coordinator import LockCoordinator
 from .logger import EventLogger
@@ -61,6 +61,15 @@ STAGING_CHUNK_SIZE = 500
 # no visible benefit (same reasoning as TransferWorker's own speed-signal
 # throttling).
 HASH_PROGRESS_MIN_INTERVAL = 0.2
+
+# A pass that fails keeps the durable pending queue and forces a full local
+# sweep on the next tick. When the failure is not transient -- one path the NAS
+# rejects forever, a safety block, an unreachable lock -- that fell back to
+# re-hashing the whole tree every second, pinning a core on a large folder and
+# never converging. Retries therefore back off exponentially, up to the
+# documented poll interval; an explicit wake() still skips the remaining wait.
+RETRY_BACKOFF_START_SECONDS = 5
+RETRY_BACKOFF_MAX_SECONDS = 60  # the documented poll interval: never slower than that
 
 
 @dataclass(frozen=True)
@@ -131,6 +140,7 @@ class PushWorker(TransferWorker):
         # new full-size copy on every pass; after the configured limit we reuse
         # one stable conflict name so only the latest losing version is kept.
         self._conflict_history: dict[str, list[float]] = {}
+        self._failed_passes = 0
 
     def _wake_now(self) -> None:
         self._wake.set()
@@ -158,13 +168,27 @@ class PushWorker(TransferWorker):
     def run(self) -> None:
         while not self._stop_flag.is_set():
             self._begin_operation_connection()
+            had_force = self._force_sync.is_set()
             try:
                 self._tick()
             except Exception as exc:  # keep the loop alive no matter what
                 self._log("ERROR", "-", detail=f"push tick failed: {exc}")
             finally:
                 self._end_operation_connection()
-            self._wake.wait(TICK_SECONDS)
+            if not self._force_sync.is_set():
+                self._failed_passes = 0
+                wait = TICK_SECONDS
+            else:
+                # A pass still wants a full sweep at the end of the tick: the
+                # previous attempt failed. Nothing about a retry changes within
+                # a second, so wait progressively longer instead of re-reading
+                # the whole tree (and the whole baseline) every tick.
+                self._failed_passes = self._failed_passes + 1 if had_force else 1
+                wait = min(
+                    RETRY_BACKOFF_MAX_SECONDS,
+                    RETRY_BACKOFF_START_SECONDS * 2 ** (self._failed_passes - 1),
+                )
+            self._wake.wait(wait)
             self._wake.clear()
 
     def _tick(self) -> None:
@@ -814,22 +838,30 @@ class PushWorker(TransferWorker):
                     False, [], raw_error=f"modifica locale durante la risoluzione del conflitto: {path}",
                 )
 
-        tombstones = {
-            path for path, state in remote.items() if state.kind == RemoteKind.TOMBSTONE
+        # A path the NAS deleted is "gone" whether the deletion was journaled as
+        # a tombstone or the path simply does not exist there anymore (a file
+        # that predates the journal, or one whose tombstone was already pruned by
+        # retention). Treating the plain ABSENT case as an invalid, "non
+        # regular" entry used to fail the whole adoption batch -- including every
+        # other path in it -- on every pass, so the same conflicts were
+        # regenerated forever and the client never converged.
+        gone = {
+            path for path, state in remote.items()
+            if state.kind in (RemoteKind.TOMBSTONE, RemoteKind.ABSENT)
         }
         invalid = {
             path for path, state in remote.items()
-            if state.kind not in (RemoteKind.FILE, RemoteKind.TOMBSTONE)
+            if state.kind not in (RemoteKind.FILE, RemoteKind.TOMBSTONE, RemoteKind.ABSENT)
         }
         if invalid:
             return rsync_ops.TransferResult(
                 False, [], raw_error=f"percorso NAS non regolare nel conflitto: {sorted(invalid)[0]}",
             )
 
-        if tombstones:
+        if gone:
             from . import trash
 
-            for path in sorted(tombstones):
+            for path in sorted(gone):
                 local_path = Path(self.cfg.local_root(), path)
                 if local_path.exists() and not trash.move_to_local_trash(local_path, self.cfg.local_root()):
                     return rsync_ops.TransferResult(
@@ -838,7 +870,7 @@ class PushWorker(TransferWorker):
                 self._mark_self_written(path)
                 self._log("DELETE_LOCAL", path, "versione NAS vincente: cancellazione adottata")
 
-        file_paths = set(expected_paths) - tombstones
+        file_paths = set(expected_paths) - gone
         if not file_paths:
             return rsync_ops.TransferResult(True, [])
 
@@ -985,6 +1017,7 @@ class PushWorker(TransferWorker):
                 local_causal=local_fp.causal if local_fp is not None else self.sync_state.local_causal(
                     self.cfg.local_root(), relative_path,
                 ),
+                conflict_policy=self._conflict_policy(),
             )
             # A mirror destination is authoritative on this PC. Never turn a
             # NAS-side edit into a conflict (or adopt it): re-assert the local
@@ -1045,20 +1078,43 @@ class PushWorker(TransferWorker):
             elif decision.action == Action.ADOPT:
                 adopted.add(relative_path)
             elif decision.action == Action.CONFLICT_LOCAL_WINS:
-                storm = self._conflict_storm(relative_path)
-                conflict_path = self._conflict_path(relative_path, "" if storm else remote.digest)
-                if not rsync_ops.copy_remote_file(self.cfg, self._conn, relative_path, conflict_path):
-                    raise rsync_ops.RemoteLockError("impossibile conservare la versione NAS in conflitto")
-                self._conflict_journal_items.append(rsync_ops.TransferItem("upload", conflict_path))
-                self._causal_journal_versions[conflict_path] = remote.causal
-                self._causal_journal_versions[relative_path] = local_fp.causal if local_fp else None
-                self._log(
-                    "CONFLICT_STORM" if storm else "CONFLICT", relative_path,
-                    f"versione NAS salvata come {conflict_path}",
-                )
-                uploads.add(relative_path)
+                if self._auto_resolve_conflicts():
+                    # The upload below uses rsync --backup, so the NAS version
+                    # is retained in the remote .sync-trash history. Keep the
+                    # canonical path on the winner and create no conflict copy.
+                    self._causal_journal_versions[relative_path] = local_fp.causal if local_fp else None
+                    self._log(
+                        "CONFLICT_AUTO", relative_path,
+                        f"vince la versione locale ({decision.detail}); "
+                        "versione NAS conservata nello storico",
+                    )
+                    uploads.add(relative_path)
+                else:
+                    storm = self._conflict_storm(relative_path)
+                    conflict_path = self._conflict_path(relative_path, "" if storm else remote.digest)
+                    if not rsync_ops.copy_remote_file(self.cfg, self._conn, relative_path, conflict_path):
+                        raise rsync_ops.RemoteLockError("impossibile conservare la versione NAS in conflitto")
+                    self._conflict_journal_items.append(rsync_ops.TransferItem("upload", conflict_path))
+                    self._causal_journal_versions[conflict_path] = remote.causal
+                    self._causal_journal_versions[relative_path] = local_fp.causal if local_fp else None
+                    self._log(
+                        "CONFLICT_STORM" if storm else "CONFLICT", relative_path,
+                        f"versione NAS salvata come {conflict_path}",
+                    )
+                    uploads.add(relative_path)
             elif decision.action == Action.CONFLICT_REMOTE_WINS:
-                if local_fp is not None:
+                if local_fp is not None and self._auto_resolve_conflicts():
+                    # The adoption pull below uses rsync --backup, so the
+                    # losing local version lands in the local trash history.
+                    # Converge on the NAS winner without a visible conflict.
+                    self._causal_journal_versions[relative_path] = remote.causal
+                    self._log(
+                        "CONFLICT_AUTO", relative_path,
+                        f"vince la versione NAS ({decision.detail}); "
+                        "versione locale conservata nello storico",
+                    )
+                    remote_adoptions[relative_path] = local_fp
+                elif local_fp is not None:
                     storm = self._conflict_storm(relative_path)
                     conflict_path = self._conflict_path(relative_path, "" if storm else local_fp.digest)
                     ok, detail = rsync_ops.upload_conflict_copy(
@@ -1279,6 +1335,14 @@ class PushWorker(TransferWorker):
         # just like the later rsync process. Otherwise a contended lock can
         # hold application shutdown until RemoteLock's timeout expires.
         self._current_proc = proc
+
+    def _conflict_policy(self) -> str:
+        """Normalize the configured conflict policy to a known value."""
+        return normalize_conflict_policy(self.cfg.get("conflict_policy"))
+
+    def _auto_resolve_conflicts(self) -> bool:
+        """True when the newest version should win without a visible copy."""
+        return self._conflict_policy() == "newest"
 
     def _conflict_storm(self, relative_path: str) -> bool:
         """Remember recent conflicts for one path and report a storm."""

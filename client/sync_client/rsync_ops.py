@@ -44,7 +44,14 @@ REPOSITORY_MARKER_NAME = ".nasbox-root"
 SYNOLOGY_EADIR = "@eaDir"
 STAGING_DIRNAME = ".nasbox-staging"
 PARTIAL_DIRNAME = ".sync-partial"
-EXCLUDE_DIRNAMES = [TRASH_DIRNAME, SYNOLOGY_EADIR, PARTIAL_DIRNAME, STAGING_DIRNAME]
+# Version-control metadata is never user content. Synchronizing it is not just
+# noise: a conflict copy inside .git/refs produces a malformed ref and breaks
+# the repository, and .git/index changes on every single git command -- exactly
+# the churn that produces conflict storms on a multi-client setup.
+VCS_DIRNAMES = [".git", ".hg", ".svn"]
+EXCLUDE_DIRNAMES = [
+    TRASH_DIRNAME, SYNOLOGY_EADIR, PARTIAL_DIRNAME, STAGING_DIRNAME, *VCS_DIRNAMES,
+]
 RSYNC_SKIP_COMPRESS_SUFFIXES = (
     "gz/zip/z/rpm/deb/iso/bz2/tbz/7z/xz/zst/tgz/rar/"
     "mp4/mkv/avi/webm/mov/wmv/flv/m4v/"
@@ -54,6 +61,16 @@ RSYNC_SKIP_COMPRESS_SUFFIXES = (
 DEFAULT_SYSTEM_EXCLUDES = [
     ".DS_Store", "Thumbs.db", "desktop.ini",
     ".~lock.*", "~$*", "*.tmp.*", "*.part", "*.crdownload",
+    "__pycache__", "*.pyc", "*.pyo", ".venv", "venv", "node_modules",
+    "*.swp", "*.swo", "*~",
+    # Tool caches: rewritten on every test/lint run, never authored content.
+    ".pytest_cache", ".mypy_cache", ".ruff_cache", ".tox", ".coverage",
+    "htmlcov", "*.egg-info",
+    # LaTeX intermediates: the PDF is the document, these are regenerated on
+    # every compile and used to produce one conflict copy per build.
+    "*.aux", "*.fls", "*.fdb_latexmk", "*.synctex.gz", "*.toc", "*.lof",
+    "*.lot", "*.bbl", "*.blg", "*.idx", "*.ind", "*.ilg", "*.xdv",
+    "*.nav", "*.snm", "*.vrb", "*.bcf", "*.run.xml",
 ]
 
 # Keep the rsync pipe useful as backpressure: diagnostics are for the error
@@ -143,8 +160,12 @@ def _detect_remote_old_args(cfg: Config, conn: NasConnection) -> bool:
         proc.wait()
         return False
     if proc.returncode != 0 or proc.stdout is None:
+        if proc.stdout is not None:
+            proc.stdout.close()
         return False
-    match = _RSYNC_VERSION_RE.search(proc.stdout.read())
+    with proc.stdout:
+        output = proc.stdout.read()
+    match = _RSYNC_VERSION_RE.search(output)
     if not match:
         return False
     needs_old_args = _version_tuple(match.group(1)) < _version_tuple(RSYNC_ARG_PROTECTION_MIN_VERSION)
@@ -1156,6 +1177,7 @@ def browse_delete(
 
 def browse_delete_many(
     cfg: Config, conn: NasConnection, relative_paths: list[str], device_id: str,
+    on_progress: Optional[Callable[[int, int, str, bool], None]] = None,
 ) -> list[tuple[str, bool, str]]:
     """Delete several remote paths under one lease.
 
@@ -1174,11 +1196,13 @@ def browse_delete_many(
     results: list[tuple[str, bool, str]] = []
     try:
         with remote_lock(cfg, conn, owner_id=device_id) as lease:
-            for path in paths:
+            for index, path in enumerate(paths, start=1):
                 ok, detail = browse_delete(
                     cfg, conn, path, device_id, lease=lease, validate=False,
                 )
                 results.append((path, ok, detail))
+                if on_progress is not None:
+                    on_progress(index, len(paths), path, ok)
     except RemoteLockBusy:
         detail = "NAS occupato da un'altra sincronizzazione; riprova tra poco"
         return [(path, False, detail) for path in paths]
@@ -1826,8 +1850,9 @@ def _dry_run(
         return []
     if on_start:
         on_start(proc)
+    preflight_timeout = int(cfg.get("preflight_timeout_seconds") or 180)
     try:
-        stdout, _ = proc.communicate(timeout=60)
+        stdout, _ = proc.communicate(timeout=preflight_timeout)
     except subprocess.TimeoutExpired:
         proc.kill()
         proc.communicate()

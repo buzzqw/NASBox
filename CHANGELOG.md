@@ -4,6 +4,118 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 1.26.4 - 2026-11-15
+
+- **Conflitti: la cancellazione NAS non cancella più modifiche locali più
+  recenti.** Se il NAS aveva cancellato un file e la copia locale era stata
+  modificata dopo (confronto sulla data della tombstone, non solo sul
+  contenuto), il conflitto veniva sempre risolto a favore del NAS: con la nuova
+  risoluzione automatica la modifica locale finiva nello storico senza avvisare.
+  Ora vince la versione più recente, coerentemente con `conflict_policy`.
+- **Conflitti: fine del ciclo infinito che bloccava la sincronizzazione.** Un
+  percorso presente in locale e semplicemente assente sul NAS (mai entrato nel
+  journal, o con tombstone già rimossa dalla retention) veniva classificato come
+  "non regolare" e faceva fallire l'intero batch di adozione a ogni passata: gli
+  stessi conflitti venivano rigenerati ogni ~50 s, il client non convergeva mai
+  e teneva occupato un core. Ora un percorso assente viene adottato come una
+  cancellazione; solo directory/symlink continuano a bloccare.
+- **Prestazioni: retry con backoff dopo un errore.** Ogni passata fallita
+  forzava una rilettura completa dell'albero (e del baseline) al tick
+  successivo, cioè ogni secondo: su una cartella grande significava un core
+  occupato in permanenza. Ora i tentativi si distanziano da 5 s fino al
+  `poll_interval` configurato, e un "Sincronizza ora" salta comunque l'attesa.
+- **Anteprima e pianificazione coerenti:** anche l'anteprima (`ScanWorker`) usa
+  `conflict_policy`, quindi la tabella dei trasferimenti non mostra più una
+  direzione diversa da quella che il push applicherà.
+
+## 1.26.3 - 2026-11-15
+
+- **Tab Conflitti, avanzamento visibile:** la risoluzione (singola o "Risolvi
+  tutto") ora mostra una barra di progressione e un contatore, invece del solo
+  testo statico "Risoluzione in corso…":
+  - `Risoluzione X di Y…` durante la parte locale;
+  - `In attesa del trasferimento in corso…` quando il gate di trasferimento è
+    occupato;
+  - `Pulizia sul NAS X di Y…` durante la rimozione delle copie remote, con
+    avanzamento reale per ogni file.
+  La barra resta indeterminata finché non arriva il primo passo e si nasconde
+  al termine, lasciando il riepilogo nel messaggio di stato.
+
+## 1.26.2 - 2026-11-15
+
+- **Tab Conflitti:**
+  - nuovo pulsante **Risolvi tutto**, che risolve in un colpo tutti i conflitti
+    visibili (rispettando il filtro di ricerca), mantenendo l'originale o la
+    versione più recente quando l'originale manca;
+  - tutte le colonne sono ora ridimensionabili manualmente trascinando il
+    bordo dell'intestazione;
+  - click sull'intestazione per ordinare per percorso, numero di alternative,
+    dimensione reale, data di modifica o dispositivo di origine. L'ordinamento
+    usa chiavi numeriche/cronologiche, non il testo formattato, quindi
+    `9 KB` non finisce più dopo `10 MB`.
+
+## 1.26.1 - 2026-11-15
+
+- **Riavvio dopo l'aggiornamento:** corretto il caso in cui il client installava
+  la nuova versione ma poi non ripartiva. `os.execv()` conserva il PID e il file
+  descriptor del lock di istanza: la nuova immagine apriva un secondo fd,
+  `flock()` falliva e il client usciva subito con "NASBox è già in esecuzione".
+  Il lock viene ora passato esplicitamente alla nuova immagine, che lo adotta
+  senza riaprirlo. Il riavvio è centralizzato in `updater.restart()` ed è usato
+  da tutti e tre i punti di aggiornamento (avvio, scheda Stato, finestra
+  principale).
+
+## 1.26.0 - 2026-11-15
+
+Conflitti "più recente vince" per default e protezione dal churn di sviluppo.
+
+- **Risoluzione automatica dei conflitti:** nuova chiave
+  `conflict_policy` (default `"newest"`). Quando entrambe le parti hanno
+  modificato lo stesso file, il client tiene la versione più recente al
+  percorso originale e lascia quella perdente nello storico `--backup`
+  (retention 30 giorni), senza creare una copia `(conflitto da ...)` da
+  risolvere a mano. L'ordine di scelta è clock causale, poi mtime (nanosecondi
+  solo se entrambi i lati li espongono), infine tie-break deterministico sul
+  digest: due client convergono sullo stesso vincitore. `"manual"` ripristina
+  il comportamento precedente.
+- **`.git` mai sincronizzato:** `.git`, `.hg` e `.svn` sono ora esclusi in
+  modo permanente, non solo tramite un pattern rimovibile. Una copia di
+  conflitto dentro `.git/refs` produceva ref malformati e rendeva il repository
+  inutilizzabile.
+- **Esclusioni predefinite più sicure:** cache di test/lint
+  (`.pytest_cache`, `.mypy_cache`, `.ruff_cache`, `.tox`, `htmlcov`, …) e
+  intermedi LaTeX (`.aux`, `.fls`, `.synctex.gz`, `.toc`, `.bbl`, …) non
+  vengono più sincronizzati per default.
+- **Log:** i conflitti risolti automaticamente appaiono come `CONFLICT_AUTO`
+  nel tab Log, con l'indicazione della versione vincente.
+- **Pulizia una tantum:** nuovo `tools/clean_conflicts.py` per archiviare le
+  copie di conflitto esistenti localmente e spostare le corrispondenti versioni
+  NAS nello storico, evitando che il pull successivo le ricrei.
+
+## 1.25.0 - 2026-11-14
+
+System tray interattiva, monitoraggio risorse NAS, risoluzione conflitti potenziata, esclusioni dev e ottimizzazioni performance.
+
+- **System Tray Interattiva**:
+  - Tooltip e intestazione dinamica con velocità e percentuale di trasferimento in tempo reale.
+  - Menu pausa rapida con preset (30m, 1h, 2h, fino a domani ore 08:00, indefinita).
+  - Azione rapida "⚡ Sincronizza adesso".
+  - Sottomenu "File recenti" arricchito con "📄 Apri file" e "📁 Mostra nella cartella".
+- **Monitoraggio Risorse e Stato NAS**:
+  - Nuovo riquadro dedicato in Scheda Stato con stato connessione (LAN/SSH), attività NAS in tempo reale (A riposo, In upload, In sync da altro client).
+  - Barra di utilizzo disco NAS e monitoraggio spazio in tempo reale tramite estensione di `--diagnostics`.
+  - Barra di avanzamento sincronizzazione visibile durante il trasferimento attivo.
+- **Conflict Center Potenziato**:
+  - Comparazione affiancata di metadati (dimensione, data/ora, device sorgente) con suggerimento automatico.
+  - Nuovi pulsanti espliciti: `Mantieni Originale`, `Usa Alternativa` e `Conserva entrambe` (`keep_both`) per archiviare la copia senza perdita dati.
+- **Esclusioni Dev & Ottimizzazione Performance**:
+  - Aggiunti `.venv`, `venv`, `__pycache__`, `node_modules`, `*.pyc`, `*.pyo`, `*.swp` a `DEFAULT_SYSTEM_EXCLUDES`.
+  - Potatura directory escluse durante la scansione locale (`os.walk`) e skip ricalcolo hash SHA-256 per file identici per mtime e dimensione.
+  - Timeout rsync preflight reso dinamico a 180s per prevenire blocchi di cancellazione su NAS a basso consumo.
+- **Stabilità Processi**:
+  - Collegamento ciclo di vita `inotifywait` al processo client via `prctl(PR_SET_PDEATHSIG, SIGTERM)` su Linux, azzerando i leak di processi orfani.
+  - Correzione ResourceWarning per chiusura pipe in `rsync_ops.py`.
+
 ## 1.24.1 - 2026-10-23
 
 Manutenzione automatica lato NAS (server 3.23.0).

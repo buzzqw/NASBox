@@ -6,6 +6,7 @@ import os
 import shlex
 import shutil
 import subprocess
+import sys
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -187,6 +188,28 @@ def find_update(cfg: Any, current_root: Path, startup_path: str) -> UpdateCandid
                 ))
 
     return max(candidates, key=lambda candidate: version_tuple(candidate.version), default=None)
+
+
+def restart(current_root: Path) -> None:
+    """Replace this process with the freshly installed client.
+
+    os.execv() keeps the PID and the instance-lock fd, so the lock must be
+    handed over explicitly (see instance_lock.prepare_reexec). Without that,
+    the new image opened a second lock fd, flock() failed and the updated
+    client exited immediately with "already running".
+    """
+    from . import instance_lock
+
+    instance_lock.prepare_reexec()
+    argv = [sys.executable]
+    if not getattr(sys, "frozen", False):
+        argv.append(str(current_root.expanduser().resolve() / "main.py"))
+    argv.extend(sys.argv[1:])
+    try:
+        os.execv(sys.executable, argv)
+    except OSError:
+        instance_lock.cancel_reexec()
+        raise
 
 
 def install_update(source_root: Path, destination_root: Path) -> None:

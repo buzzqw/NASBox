@@ -25,7 +25,7 @@ ACTION_FILTERS = [
     ("BROWSE_DOWNLOAD", "browse"), ("BROWSE_RENAME", "browse"),
     ("BROWSE_DELETE", "browse"), ("RESTORE_REMOTE_VERSION", "history"),
     ("PRUNE_LOCAL_TRASH", "history"), ("PRUNE_REMOTE_TRIGGER", "history"),
-    ("CONFLICT", "safety"), ("STALE_DELETE", "safety"),
+    ("CONFLICT", "safety"), ("CONFLICT_AUTO", "safety"), ("STALE_DELETE", "safety"),
     ("SAFETY_BLOCK", "safety"), ("JOURNAL_BLOCK", "safety"),
     ("JOURNAL_ERROR", "safety"), ("UNSUPPORTED", "safety"),
     ("PULL_DEFERRED", "system"), ("LOCK_DEFERRED", "system"), ("CANCELLED", "system"),
@@ -36,7 +36,7 @@ ACTION_FILTERS = [
 
 LOCAL_PATH_ACTIONS = {
     "UPLOAD", "DOWNLOAD", "DELETE_LOCAL", "DELETE_REMOTE", "PRUNE_LOCAL_TRASH",
-    "CONFLICT", "STALE_DELETE", "UNSUPPORTED", "RENAME_REMOTE",
+    "CONFLICT", "CONFLICT_AUTO", "STALE_DELETE", "UNSUPPORTED", "RENAME_REMOTE",
 }
 
 
@@ -56,7 +56,7 @@ class LogTab(QWidget):
         CATEGORY_GROUPS = [
             ("log.group.transfers", {"UPLOAD", "DOWNLOAD", "DELETE_LOCAL", "DELETE_REMOTE", "RENAME_REMOTE"}),
             ("log.group.errors", {"ERROR", "SAFETY_BLOCK", "JOURNAL_ERROR", "SERVER_DOWN", "SERVER_OUTDATED", "CANCELLED"}),
-            ("log.group.safety", {"CONFLICT", "STALE_DELETE", "SAFETY_BLOCK", "JOURNAL_BLOCK", "JOURNAL_ERROR"}),
+            ("log.group.safety", {"CONFLICT", "CONFLICT_AUTO", "STALE_DELETE", "SAFETY_BLOCK", "JOURNAL_BLOCK", "JOURNAL_ERROR"}),
             ("log.group.history", {"RESTORE_REMOTE_VERSION", "PRUNE_LOCAL_TRASH", "PRUNE_REMOTE_TRIGGER", "BROWSE_DELETE", "BROWSE_RENAME", "BROWSE_DOWNLOAD"}),
         ]
         for key, actions in CATEGORY_GROUPS:
