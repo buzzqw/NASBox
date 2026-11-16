@@ -4,6 +4,19 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 1.26.11 - 2026-11-16
+
+Completa la correzione dei picchi di CPU: la causa residua era un falso
+"file modificato".
+
+- **Solo il contenuto conta.** `changed_paths()` confrontava l'intero
+  fingerprint (incluso `mtime`) con la base locale. Un file con gli stessi byte
+  ma mtime diverso finiva quindi nella coda del push; il push lo classificava
+  correttamente come "vince il NAS" e non faceva nulla, mentre il pull restava
+  rinviato perché vedeva quella modifica pendente. Il confronto ora usa digest
+  e dimensione: un semplice `touch` non genera più lavoro inutile.
+- Aggiunto un test di regressione per la differenza di solo mtime.
+
 ## 1.26.10 - 2026-11-16
 
 Corretto il ciclo che poteva tenere la CPU del client occupata a intermittenza

@@ -137,6 +137,20 @@ class SyncStateTests(unittest.TestCase):
         self.assertEqual(stable_paths, {"stable.txt", "missing.txt"})
         self.assertEqual(unstable_paths, {"unstable.txt"})
 
+    def test_changed_paths_ignores_mtime_only_difference(self) -> None:
+        """Touching a file must not enqueue a push when its bytes are identical."""
+        file_path = self.root / "file.txt"
+        file_path.write_bytes(b"hello")
+        self.store.record_local(str(self.root), "file.txt")
+        self.assertEqual(self.store.changed_paths(str(self.root)), set())
+
+        original = file_path.stat().st_mtime_ns
+        os.utime(file_path, ns=(original + 5_000_000_000, original + 5_000_000_000))
+        self.assertEqual(self.store.changed_paths(str(self.root)), set())
+
+        file_path.write_bytes(b"hello again")
+        self.assertEqual(self.store.changed_paths(str(self.root)), {"file.txt"})
+
     def test_pending_queue_records_attempts_and_can_be_cleared(self) -> None:
         self.store.mark_pending({"a.txt", "b.txt", ""})
         self.assertEqual(self.store.pending_paths(), {"a.txt", "b.txt"})

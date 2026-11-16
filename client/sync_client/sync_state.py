@@ -906,7 +906,18 @@ class SyncStateStore:
                     known_fp = known.get(relative_path)
                     if current_fp is None and known_fp is not None and known_fp.is_tombstone:
                         continue
-                    if current_fp != known_fp:
+                    # Only different content is a local change. A fingerprint
+                    # also carries mtime/causal, but a file restored or touched
+                    # with identical bytes must not enter the durable push
+                    # queue: PushWorker would classify it as REMOTE_WINS and do
+                    # nothing, while PullWorker kept deferring on that same
+                    # phantom pending entry forever.
+                    if (
+                        current_fp is None
+                        or known_fp is None
+                        or current_fp.digest != known_fp.digest
+                        or current_fp.size != known_fp.size
+                    ):
                         changed.add(relative_path)
                     if on_progress is not None:
                         on_progress(index + 1, total)
