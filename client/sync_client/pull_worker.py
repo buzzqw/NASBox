@@ -128,9 +128,20 @@ class PullWorker(TransferWorker):
             pending = set()
         if not pending:
             pending = self.sync_state.changed_paths(self.cfg.local_root())
+        # A pull deletes/overwrites files itself; inotify reports those writes
+        # exactly like a user edit, so PushWorker can briefly queue them. That
+        # is not an external local change and must not abort the very pull that
+        # produced it, otherwise applying a batch of NAS deletions restarts the
+        # full pull after every item. The same distinction already exists in
+        # _cancel_check below; apply it to the durable queue too.
+        own_paths = self._self_written_snapshot()
+        root = self.cfg.local_root()
         pending = {
             path for path in pending
-            if path and not rsync_ops.path_is_excluded(self.cfg, path)
+            if path
+            and not rsync_ops.path_is_excluded(self.cfg, path)
+            and path not in own_paths
+            and not Path(root, path).is_dir()
         }
         if not pending:
             return

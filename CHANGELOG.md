@@ -4,6 +4,18 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 1.26.12 - 2026-11-16
+
+Evita che un pull si annulli da solo mentre applica le cancellazioni arrivate dal
+NAS.
+
+- Le cancellazioni e i download eseguiti dal pull generano eventi del watcher e
+  finivano nella coda del push: al controllo successivo il pull li scambiava per
+  modifiche locali esterne e si rinviava, riavviando la scansione completa dopo
+  ogni elemento. Ora i percorsi scritti dal pull stesso (e le directory, che non
+  sono file sincronizzabili) vengono ignorati in quel controllo.
+- Aggiunto un test di regressione per scritture proprie e directory.
+
 ## 1.26.11 - 2026-11-16
 
 Completa la correzione dei picchi di CPU: la causa residua era un falso

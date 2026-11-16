@@ -176,6 +176,32 @@ class SyncModeTests(unittest.TestCase):
         worker.wake()
         self.assertEqual(worker._defer_retry_at, 0.0)
 
+    def test_pull_defer_ignores_its_own_writes_and_directories(self) -> None:
+        """Applying NAS deletions must not abort the pull on its own inotify noise."""
+        import tempfile
+        from pathlib import Path
+
+        from sync_client.pull_worker import _PullDeferred
+
+        self.cfg.set("delete_enabled", True, persist=False)
+        with tempfile.TemporaryDirectory() as local_root:
+            self.cfg.set_local_root(local_root)
+            Path(local_root, "own.txt").write_bytes(b"pulled")
+            Path(local_root, "dir").mkdir()
+            sync_state = Mock()
+            sync_state.pending_paths.return_value = {"own.txt", "dir", "real.txt"}
+            watcher = Mock()
+            worker = PullWorker(self.cfg, Mock(), Mock(), threading.Lock(), sync_state)
+            worker._mark_self_written("own.txt")
+
+            with self.assertRaises(_PullDeferred):
+                worker._defer_if_local_changes_pending(
+                    watcher, full_pull_required=True, tombstone_count=0,
+                )
+
+            marked = {call.args[0] for call in watcher.mark_dirty.call_args_list}
+            self.assertEqual(marked, {"real.txt"})
+
     def test_full_sweep_drops_pending_paths_already_at_baseline(self) -> None:
         """A stale queue entry must not keep pulling deferred forever."""
         import tempfile
