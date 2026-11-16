@@ -51,6 +51,10 @@ TICK_SECONDS = 1
 # predate it. Keep a periodic full reconciliation as a bounded safety net rather
 # than turning every poll into a recursive remote scan.
 DEFAULT_FULL_PULL_INTERVAL_SECONDS = 2 * 3600
+# A pull deferred because the local pending queue is not empty must not hammer
+# the NAS control plane every second -- each attempt exports the whole manifest
+# over SSH. PushWorker wakes the pull immediately when it commits a push.
+PULL_DEFERRED_RETRY_SECONDS = 20
 
 
 class _PullDeferred(Exception):
@@ -83,6 +87,10 @@ class PullWorker(TransferWorker):
         self._skip_change_feed_once = False
         self._self_cancelled = False  # set by the cancel_check right before it terminates the process
         self._cancel_dirty_paths: set[str] = set()
+        # A deferral is not an error to retry on every tick: each attempt still
+        # exports the remote manifest over SSH, which is the expensive part of a
+        # pull. Wait a little (or until PushWorker wakes us) before retrying.
+        self._defer_retry_at = 0.0
 
     def _wake_now(self) -> None:
         self._wake.set()
@@ -130,19 +138,26 @@ class PullWorker(TransferWorker):
         self._self_cancelled = True
         self._cancel_dirty_paths = pending
         if watcher is not None:
-            # An unknown-path mark makes PushWorker perform its authoritative
-            # local sweep instead of relying on a potentially incomplete list.
-            watcher.mark_dirty()
+            # Mark the exact durable pending paths: PushWorker already owns an
+            # authoritative queue, so it does not need to re-scan the whole tree
+            # (which on a large folder costs seconds of CPU per retry) just
+            # because this pull had to step aside.
+            for path in pending:
+                watcher.mark_dirty(path)
         raise _PullDeferred
 
     def wake(self) -> None:
         """Ask the worker to re-evaluate immediately instead of waiting for the next tick."""
+        # A wake means the reason for waiting may be gone (e.g. PushWorker just
+        # committed the pending changes), so clear the deferral backoff too.
+        self._defer_retry_at = 0.0
         self._wake.set()
 
     def reset_schedule(self) -> None:
         """Forget when the folder was last pulled, so it's checked on the very next
         tick instead of waiting out poll_interval -- used by "Sincronizza tutto ora"."""
         self._last_pull = 0.0
+        self._defer_retry_at = 0.0
         self._wake.set()
 
     def _full_pull_interval(self) -> float:
@@ -182,6 +197,8 @@ class PullWorker(TransferWorker):
 
         poll_interval = float(self.cfg.get("poll_interval") or 60)
         now = time.time()
+        if now < self._defer_retry_at:
+            return
         if not self.lock_coordinator.can_attempt(now):
             return
         watcher = self.watchers.get()
@@ -580,7 +597,9 @@ class PullWorker(TransferWorker):
                 "PULL_DEFERRED", "-",
                 detail,
             )
-            # don't advance the timer -- retry next tick
+            # Wait for PushWorker (which was woken above) instead of exporting
+            # the manifest again every TICK_SECONDS.
+            self._defer_retry_at = time.time() + PULL_DEFERRED_RETRY_SECONDS
         else:
             self._report_failure(result)
             self._last_pull = time.time()

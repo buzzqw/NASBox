@@ -150,6 +150,62 @@ class SyncModeTests(unittest.TestCase):
             ):
                 worker._tick()
 
+    def test_pull_defer_marks_exact_pending_paths_and_backs_off(self) -> None:
+        """Stepping aside for pending changes must not force a full-tree sweep."""
+        import time
+
+        from sync_client.pull_worker import _PullDeferred
+
+        self.cfg.set("delete_enabled", True, persist=False)
+        sync_state = Mock()
+        sync_state.pending_paths.return_value = {"a.txt", "b.txt"}
+        watcher = Mock()
+        worker = PullWorker(self.cfg, Mock(), Mock(), threading.Lock(), sync_state)
+
+        with self.assertRaises(_PullDeferred):
+            worker._defer_if_local_changes_pending(
+                watcher, full_pull_required=True, tombstone_count=0,
+            )
+
+        marked = {call.args[0] for call in watcher.mark_dirty.call_args_list}
+        self.assertEqual(marked, {"a.txt", "b.txt"})
+        # No unknown-path sentinel: that is what triggered a whole-tree scan.
+        self.assertNotIn("", marked)
+
+        worker._defer_retry_at = time.time() + 60
+        worker.wake()
+        self.assertEqual(worker._defer_retry_at, 0.0)
+
+    def test_full_sweep_drops_pending_paths_already_at_baseline(self) -> None:
+        """A stale queue entry must not keep pulling deferred forever."""
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+
+        from sync_client import rsync_ops
+        from sync_client.sync_state import SyncStateStore
+
+        with tempfile.TemporaryDirectory() as local_root:
+            self.cfg.set_local_root(local_root)
+            self.cfg.set("repository_id", "repo-test", persist=False)
+            (Path(local_root) / "dirty.txt").write_bytes(b"changed")
+            store = SyncStateStore(self.cfg)
+            store.mark_pending({"stale.txt", "dirty.txt"})
+
+            watcher = Mock()
+            watcher.is_dirty.return_value = True
+            watcher.consume_paths_if_ready.return_value = {""}
+            watchers = Mock()
+            watchers.get.return_value = watcher
+            worker = PushWorker(self.cfg, Mock(), watchers, threading.Lock(), store)
+            worker.set_connection(object())
+
+            with patch.object(store, "changed_paths", return_value={"dirty.txt"}), \
+                    patch.object(rsync_ops, "remote_lock", side_effect=rsync_ops.RemoteLockBusy()):
+                worker._tick()
+
+            self.assertEqual(store.pending_paths(), {"dirty.txt"})
+
 
 if __name__ == "__main__":
     unittest.main()

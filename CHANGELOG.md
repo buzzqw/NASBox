@@ -4,6 +4,24 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 1.26.10 - 2026-11-16
+
+Corretto il ciclo che poteva tenere la CPU del client occupata a intermittenza
+quando una coda di modifiche locali non riusciva più a svuotarsi.
+
+- **Coda pendente riconciliata.** Dopo una scansione completa, i percorsi in
+  coda che non risultano più diversi dalla base locale (o la cui cancellazione
+  è già registrata come tombstone) vengono rimossi. Prima restavano per
+  sempre: il pull si rinviava all'infinito e ogni rinvio innescava una nuova
+  scansione completa dell'albero (oltre 160.000 file), con picchi di CPU
+  ricorrenti.
+- **Niente più scansione completa a ogni rinvio.** Il pull ora segna al
+  watcher i percorsi esatti della coda invece del sentinel "percorso
+  sconosciuto", che obbligava il push a rileggere tutto l'albero.
+- **Rinvio del pull con attesa.** Dopo un `PULL_DEFERRED` non si ritenta più a
+  ogni tick: si aspetta 20 secondi oppure il completamento di un push (che
+  risveglia subito il pull per applicare le modifiche appena pubblicate).
+
 ## 1.26.9 - 2026-11-15
 
 Aggiornamento del client ripensato per essere verificabile, periodico e con

@@ -220,6 +220,7 @@ class PushWorker(TransferWorker):
         dirty_paths.update(pending_paths)
         if not dirty_paths and not force_sync:
             return
+        swept_paths: set[str] | None = None
         if dirty_paths:
             if "" in dirty_paths:
                 # Keep the full-sweep sentinel durable while changed_paths()
@@ -227,12 +228,27 @@ class PushWorker(TransferWorker):
                 # in this gap and delay the real push behind its own preview.
                 self.sync_state.mark_pending({""})
                 dirty_paths = self.sync_state.changed_paths(self.cfg.local_root())
+                swept_paths = set(dirty_paths)
             dirty_paths = {
                 path for path in dirty_paths
                 if path and not rsync_ops.path_is_excluded(self.cfg, path)
             }
             if dirty_paths:
                 self.sync_state.mark_pending(dirty_paths)
+
+        if swept_paths is not None and pending_paths:
+            # A full sweep is authoritative: a queued path it no longer reports
+            # as changed is already at its baseline (or its deletion is already
+            # a tombstone). Without this reconciliation a stale queue entry --
+            # e.g. left after a conflict was resolved -- keeps PullWorker
+            # deferred forever, which in turn kept triggering another full
+            # sweep on every tick. Never drop paths whose content still differs.
+            stale_pending = {
+                path for path in pending_paths
+                if path and path not in swept_paths
+            }
+            if stale_pending:
+                self.sync_state.clear_pending(stale_pending)
 
         # Resolve local paths before any NAS preflight. Watchers also report
         # directory-only events (notably Git maintenance under a synced

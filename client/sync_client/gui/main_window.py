@@ -96,6 +96,13 @@ class MainWindow(QMainWindow):
             sync_state=sync_state,
             transfer_scheduler=transfer_scheduler,
         )
+        # A committed push may have been exactly what kept PullWorker deferred
+        # ("local changes not uploaded yet"). Wake it only after success so the
+        # NAS changes just written are pulled without waiting for the next poll,
+        # while a failed push (lock contention, network) keeps the normal backoff.
+        self.push_worker.transfer_finished.connect(
+            lambda _direction, ok: self.pull_worker.wake() if ok else None
+        )
         self.mirror_manager = MirrorManager(self.cfg, self.logger, transfer_scheduler.permit("mirror"))
 
         shell = QWidget()
