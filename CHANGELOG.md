@@ -4,6 +4,25 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 1.26.13 - 2026-11-19
+
+Ripristina i pull completi e svuota il log dagli errori rsync.
+
+- **Progresso rsync 3.5.2.** Il totale trasferito delle righe
+  `--info=progress2` include ora l'unità (`600,000,000B 100% ...`): la vecchia
+  regex non lo riconosceva, quindi il progresso non veniva letto, la coda delle
+  completioni non si svuotava e al 4096° file il trasferimento veniva abortito
+  con `output rsync non compatibile: coda completioni oltre il limite`. Il pull
+  completo dell'albero veniva ritentato all'infinito e ogni tentativo scaricava
+  fino a 64 KB di progresso nel log come errore. Ora sono riconosciuti entrambi
+  i formati e le righe di progresso non finiscono mai nel dettaglio errore.
+- **Mirror senza sorgente.** Se la cartella esterna manca o il sync fallisce,
+  il mirror riprova ogni 5 minuti invece che a ogni tick (0,5 s) e non riscrive
+  più `client.json` due volte al secondo; l'errore viene salvato e registrato
+  solo quando cambia.
+- Aggiunti test di regressione per il formato rsync 3.5.2, il trasferimento di
+  alberi con più di 4096 file e il backoff del mirror.
+
 ## 1.26.12 - 2026-11-16
 
 Evita che un pull si annulli da solo mentre applica le cancellazioni arrivate dal

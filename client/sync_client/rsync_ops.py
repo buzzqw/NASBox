@@ -1838,7 +1838,14 @@ def _parse_itemize(output: str, direction: str) -> list[TransferItem]:
 # rsync --info=progress2, with LC_ALL=C forced so the numeric formatting is
 # predictable (locale-dependent thousands/decimal separators otherwise break
 # this -- e.g. Italian locale prints "20.971.520" and "554,69MB/s").
-_PROGRESS_RE = re.compile(r"^\s*[\d,]+\s+(\d+)%\s+([\d.]+)(B|kB|MB|GB|TB)/s")
+# rsync >= 3.5.2 appends the unit to the transferred total ("600,000,000B
+# 100% ..."), while older builds printed the bare number ("600,000,000 100%
+# ..."). Both shapes must parse: when the progress line is not recognised the
+# completion queue is never drained and a large transfer aborts at
+# MAX_PENDING_TRANSFER_ITEMS with its whole progress output logged as an error.
+_PROGRESS_RE = re.compile(
+    r"^\s*[\d.,]+\s*[kKMGT]?B?\s+(\d+)%\s+([\d.]+)(B|kB|MB|GB|TB)/s"
+)
 # rsync's own informational chatter (it shares stdout with the diagnostics
 # because stderr is merged into it). Kept out of the error detail: on a large
 # tree these lines alone fill the diagnostic budget and the real failure -- which
@@ -1853,6 +1860,9 @@ _RSYNC_CHATTER_RE = re.compile(
     r"|created directory .*"
     r"|delta-transmission .*"
     r"|opening connection using:.*"
+    # Any progress shape (including future rsync formatting changes) is
+    # informational, never the reason a transfer failed.
+    r"|[\d.,]+\s*[kKMGT]?B?\s+\d+%\s+[\d.,]+[kKMGT]?B/s.*"
     r")$"
 )
 

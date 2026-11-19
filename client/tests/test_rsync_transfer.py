@@ -159,6 +159,53 @@ class RsyncTransferTests(unittest.TestCase):
         self.assertTrue(result.ok)
         self.assertFalse(partial.exists())
 
+    def test_progress_lines_of_modern_and_legacy_rsync_are_parsed(self) -> None:
+        cases = {
+            # rsync >= 3.5.2: unit attached to the transferred total.
+            "          8.000B 100%       0B/s    0:00:00": (100, 0.0),
+            "    600,000,000B 100%    497MB/s    0:00:01 (xfr#1, to-chk=0/2)": (100, 497 * 1024**2),
+            "          1,234B   1%   8.19MB/s    0:00:00": (1, 8.19 * 1024**2),
+            # Older rsync: bare number, no unit.
+            "560,185,917   0%   31.2MB/s    0:00:17": (0, 31.2 * 1024**2),
+        }
+        for line, expected in cases.items():
+            with self.subTest(line=line):
+                self.assertEqual(rsync_ops._parse_progress_line(line), expected)
+
+    def test_large_transfer_keeps_the_completion_queue_drained(self) -> None:
+        """More than MAX_PENDING_TRANSFER_ITEMS files must not abort the run."""
+        count = rsync_ops.MAX_PENDING_TRANSFER_ITEMS + 100
+        output = []
+        for index in range(1, count + 1):
+            output.append(f">f+++++++++|100|file{index:05d}\n")
+            output.append("\n")
+            output.append(
+                f"      {index * 100:,}B   0%   31.2MB/s    0:00:17 "
+                f"(xfr#{index}, to-chk={count - index}/{count})\n"
+            )
+        completed: list = []
+        result, _command = self._run_with_process(
+            _FakeProcess("".join(output)), rsync_ops.push, on_item=completed.append,
+        )
+
+        self.assertTrue(result.ok, result.raw_error)
+        self.assertEqual(len(completed), count)
+        self.assertEqual(result.raw_error, "")
+
+    def test_progress_output_never_ends_up_in_the_error_detail(self) -> None:
+        output = (
+            "    600,000,000B 100%    497MB/s    0:00:01 (xfr#1, to-chk=0/2)\n"
+            "rsync: [receiver] write failed on \"/volume1/NASBox/x.bin\": "
+            "No space left on device (28)\n"
+            "rsync error: error in file IO (code 11) at receiver.c(380) [receiver=3.5.2]\n"
+        )
+        result, _command = self._run_with_process(_FakeProcess(output, returncode=11), rsync_ops.pull)
+
+        self.assertFalse(result.ok)
+        self.assertIn("No space left on device", result.raw_error)
+        self.assertNotIn("MB/s", result.raw_error)
+        self.assertNotIn("to-chk=", result.raw_error)
+
     def test_diagnostic_output_is_bounded(self) -> None:
         noisy_output = "".join("rsync warning: transient output\n" for _ in range(10000))
         result, _command = self._run_with_process(_FakeProcess(noisy_output, returncode=23), rsync_ops.push)

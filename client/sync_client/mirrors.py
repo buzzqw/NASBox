@@ -156,6 +156,11 @@ class MirrorWatcher(QThread):
         self._force_sync = threading.Event()
         self._last_emitted: dict | None = None
         self._current_proc = None
+        # Monotonic timestamp of the last sync attempt, successful or not. The
+        # periodic check used to compare only last_sync, which is not updated on
+        # failure: a missing source or a failing rsync was therefore retried at
+        # every tick (0.5 s) and each attempt rewrote client.json.
+        self._last_attempt = 0.0
 
     def request_sync(self) -> None:
         self._force_sync.set()
@@ -198,8 +203,8 @@ class MirrorWatcher(QThread):
                     else:
                         self._maybe_periodic_sync()
                 except Exception as exc:
-                    self._set_error(str(exc))
-                    self._log("ERROR", self.source, f"loop mirror fallito: {exc}")
+                    if self._set_error(str(exc)):
+                        self._log("ERROR", self.source, f"loop mirror fallito: {exc}")
                 self._stop.wait(TICK_SECONDS)
         finally:
             watcher.stop()
@@ -211,13 +216,20 @@ class MirrorWatcher(QThread):
             return
         entry = self.cfg.mirror_by_source(self.source)
         last_sync = (entry or {}).get("last_sync") or 0
-        if time.time() - last_sync >= PERIODIC_SECONDS:
-            self._sync()
+        if time.time() - last_sync < PERIODIC_SECONDS:
+            return
+        # After a failure last_sync stays old, so the time since the last
+        # attempt (not last_sync) must gate the retry: one attempt every
+        # PERIODIC_SECONDS, not one per tick.
+        if time.monotonic() - self._last_attempt < PERIODIC_SECONDS:
+            return
+        self._sync()
 
     def _current_entry(self) -> dict | None:
         return self.cfg.mirror_by_source(self.source)
 
     def _sync(self) -> None:
+        self._last_attempt = time.monotonic()
         entry = self._current_entry()
         if entry is None or not entry.get("enabled", True):
             return
@@ -225,7 +237,9 @@ class MirrorWatcher(QThread):
         dest = (entry.get("dest") or "").strip("/")
         ok, error = _validate_mirror_paths(self.cfg, source, dest, root=self.root)
         if not ok:
-            self._set_error(error)
+            # The condition is usually persistent (removed/unmounted source):
+            # record it once instead of rewriting the config every tick.
+            self._set_error(error, log_change=True)
             return
 
         destination = f"{self.root}/{dest}"
@@ -272,9 +286,16 @@ class MirrorWatcher(QThread):
         self._emit_status("idle", self._t("mirrors.state_idle"))
         self._log("MIRROR", source, f"replica aggiornata in NASBox/{dest}")
 
-    def _set_error(self, message: str) -> None:
-        self.cfg.update_mirror(self.source, error=message)
+    def _set_error(self, message: str, *, log_change: bool = False) -> bool:
+        """Record the error only when it changes. Returns True if it changed."""
+        current = (self._current_entry() or {}).get("error") or ""
+        changed = current != message
+        if changed:
+            self.cfg.update_mirror(self.source, error=message)
+            if log_change:
+                self._log("ERROR", self.source, message)
         self._emit_status("error", message)
+        return changed
 
     def _emit_status(self, state: str, message: str) -> None:
         entry = self._current_entry() or {}
