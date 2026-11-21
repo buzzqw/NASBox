@@ -117,6 +117,13 @@ class TransfersTab(QWidget):
         # jump back into the queue before the next fresh scan.
         self._recently_completed: set[tuple[str, str]] = set()
         self._completed_items: set[tuple[str, str]] = set()
+        # Deadline (monotonic) of the next automatic attempt after the NAS lock
+        # was busy, per direction. Without a live countdown the queue looked
+        # frozen right after the deferral message.
+        self._retry_deadlines: dict[str, float] = {}
+        # Last file each direction actually finished, so the activity line can
+        # show files flowing instead of only the one currently in flight.
+        self._last_completed: dict[str, str] = {}
 
         # Fast-arriving per-file completions and speed samples (during a big
         # transfer, potentially many per second) are buffered here and applied
@@ -130,6 +137,13 @@ class TransfersTab(QWidget):
         self._flush_timer.setInterval(FLUSH_INTERVAL_MS)
         self._flush_timer.timeout.connect(self._flush)
         self._flush_timer.start()
+
+        # The countdown after a deferral has to move on its own; the 250 ms
+        # flush timer only runs while something is actually transferring.
+        self._activity_timer = QTimer(self)
+        self._activity_timer.setInterval(1000)
+        self._activity_timer.timeout.connect(self._tick_retry_countdown)
+        self._activity_timer.start()
 
     # --- full refresh from a periodic dry-run scan ---
 
@@ -271,12 +285,51 @@ class TransfersTab(QWidget):
         self._preparing_transfers.add(direction)
         self._active_transfers.add(direction)
         self._lock_waiting.discard(direction)
+        self._retry_deadlines.pop(direction, None)
         self._preflight_progress = None
         self._phase_started_at = time.monotonic()
         self._last_lock_error = ""
         self._last_completion = ""
         self._begin_queue_progress()
         self._apply_filter()
+        self._refresh_activity()
+
+    def on_transfer_retry_scheduled(self, direction: str, seconds: int) -> None:
+        """NAS lock busy: hold the queue and count down to the next attempt."""
+        try:
+            delay = max(1, int(seconds))
+        except (TypeError, ValueError):
+            delay = 1
+        self._retry_deadlines[direction] = time.monotonic() + delay
+        self._refresh_activity()
+
+    def _retry_remaining(self, direction: str) -> int | None:
+        deadline = self._retry_deadlines.get(direction)
+        if deadline is None:
+            return None
+        remaining = deadline - time.monotonic()
+        if remaining <= -2:
+            self._retry_deadlines.pop(direction, None)
+            return None
+        return max(0, int(round(remaining)))
+
+    def _retry_activity_text(self) -> str:
+        for direction in ("upload", "download"):
+            remaining = self._retry_remaining(direction)
+            if remaining is None:
+                continue
+            label = self._direction_labels.get(direction, direction)
+            if remaining <= 0:
+                return t("transfers.retry_now", direction=label)
+            return t(
+                "transfers.retry_countdown",
+                direction=label, seconds=remaining, count=len(self._all_items),
+            )
+        return ""
+
+    def _tick_retry_countdown(self) -> None:
+        if not self._retry_deadlines:
+            return
         self._refresh_activity()
 
     def on_transfer_waiting_for_lock(self, direction: str) -> None:
@@ -311,6 +364,7 @@ class TransfersTab(QWidget):
 
     def on_transfer_started(self, direction: str) -> None:
         self._preparing_transfers.discard(direction)
+        self._retry_deadlines.pop(direction, None)
         self._preflight_progress = None
         if self._phase_started_at is None:
             self._phase_started_at = time.monotonic()
@@ -352,6 +406,7 @@ class TransfersTab(QWidget):
         key = (direction, path)
         self._item_progress[key] = 100
         self._pending_item_progress.pop(key, None)
+        self._last_completed["upload" if direction in ("upload", "delete_remote", "rename_remote") else "download"] = path
         self._pending_removals.add(key)
         self._completed_items.add(key)
         transfer_direction = "upload" if direction in ("upload", "delete_remote", "rename_remote") else "download"
@@ -373,6 +428,8 @@ class TransfersTab(QWidget):
 
     def on_transfer_finished(self, direction: str, ok: bool) -> None:
         self._preparing_transfers.discard(direction)
+        if ok:
+            self._retry_deadlines.pop(direction, None)
         self._active_items.difference_update(self._pending_removals)
         self._completed_items.update(self._pending_removals)
         self._pending_removals.clear()
@@ -636,6 +693,10 @@ class TransfersTab(QWidget):
                     "transfers.queue_scan_running", seconds=self._queue_scan_elapsed(),
                 ))
                 return
+            retry_text = self._retry_activity_text()
+            if retry_text:
+                self.activity_label.setText(retry_text)
+                return
             self.activity_label.setText(
                 t("transfers.lock_unavailable", detail=self._last_lock_error)
                 if self._last_lock_error else self._last_completion or t("transfers.waiting")
@@ -667,10 +728,23 @@ class TransfersTab(QWidget):
                 continue
             path = self._current_files.get(direction)
             if path:
-                messages.append(t(
+                position = ""
+                if self._queue_progress_total > 0:
+                    position = t(
+                        "transfers.active_file_progress",
+                        direction=self._direction_labels[direction],
+                        path=path,
+                        done=min(self._queue_progress_done, self._queue_progress_total),
+                        total=self._queue_progress_total,
+                        seconds=self._phase_elapsed(),
+                    )
+                messages.append(position or t(
                     "transfers.active_file",
                     direction=self._direction_labels[direction], path=path, seconds=self._phase_elapsed(),
                 ))
+                last_done = self._last_completed.get(direction)
+                if last_done and last_done != path:
+                    messages.append(t("transfers.last_completed", path=last_done))
             else:
                 messages.append(t(
                     "transfers.active_starting",

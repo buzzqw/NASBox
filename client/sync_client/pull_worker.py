@@ -576,6 +576,7 @@ class PullWorker(TransferWorker):
                 self._skip_change_feed_once = True
                 retry_after = self.lock_coordinator.defer()
                 detail = f"{t('lock.busy_retry')} Nuovo tentativo tra {retry_after}s."
+                self.transfer_retry_scheduled.emit("download", retry_after)
                 self.transfer_lock_unavailable.emit("download", detail)
                 self.transfer_finished.emit("download", False)
                 self._log("LOCK_DEFERRED", "-", detail)

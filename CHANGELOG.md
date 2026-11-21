@@ -4,6 +4,37 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 1.26.14 - 2026-11-21
+
+Rende leggibile ciò che sta succedendo: messaggi più chiari e avanzamento
+sempre visibile anche quando il NAS è occupato da un altro PC.
+
+- **Niente più "errore e poi silenzio".** Quando il lock del NAS è occupato da
+  un altro client, al posto di una riga di errore statica compare un conto alla
+  rovescia che scorre ("riprovo da solo tra 12s"), la coda resta visibile e
+  viene detto esplicitamente che nessun file è perso. Il conto alla rovescia è
+  mostrato nella scheda Stato, nella scheda Trasferimenti e nel tooltip della
+  tray.
+- **Un errore vero resta un errore, un'attesa no.** La contesa tra PC non
+  produce più un messaggio d'errore; un lock davvero in errore (SSH, permessi)
+  sì. Un trasferimento interrotto dice ora che i file restano in coda e che il
+  tentativo riparte da solo.
+- **Si vedono i file scorrere.** La riga di stato mostra `file N di M` del batch
+  e la barra del batch avanza a ogni file completato (prima solo la barra del
+  singolo file, che sui tanti file piccoli resta a 0→100 e sembra ferma). Nella
+  scheda Trasferimenti compaiono anche la posizione nel batch e l'ultimo file
+  completato.
+- **"Sincronizza adesso" dalla tray ora funziona davvero:** chiamava
+  `engine.wake(force=True)`, che non accetta argomenti; l'eccezione veniva
+  inghiottita dallo slot Qt e la voce di menu non faceva nulla.
+- **Meno rumore da errori già risolti.** Un `ERROR` di trasferimento resta nella
+  scheda "Richiede attenzione" per 15 minuti invece di 24 ore: dopo quel tempo
+  il worker lo ha già ritentato e il problema non è più azionabile. I blocchi di
+  sicurezza e del journal mantengono la finestra di 24 ore.
+- Aggiunti 15 test di regressione su conto alla rovescia, posizione nel batch,
+  distinzione contesa/errore e verifica del tray.
+
+
 ## 1.26.13 - 2026-11-19
 
 Ripristina i pull completi e svuota il log dagli errori rsync.

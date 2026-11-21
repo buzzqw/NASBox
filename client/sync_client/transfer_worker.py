@@ -28,6 +28,7 @@ class TransferWorker(QThread):
     transfer_preparing = pyqtSignal(str)                # upload | download, reconciliation/preflight
     transfer_phase = pyqtSignal(str, str, int, int)     # direction, phase, completed, total
     transfer_lock_unavailable = pyqtSignal(str, str)    # upload | download, detail
+    transfer_retry_scheduled = pyqtSignal(str, int)      # upload | download, seconds until the next attempt
     transfer_started = pyqtSignal(str)                  # upload | download
     transfer_item_started = pyqtSignal(str, str, int)  # direction, path, size
     transfer_item_progress = pyqtSignal(str, str, int)  # direction, path, percent

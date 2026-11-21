@@ -53,10 +53,18 @@ class TrayIcon(QSystemTrayIcon):
         self._current_item: tuple[str, str, int] | None = None
         self._current_speed: float = 0.0
         self._current_percent: int = 0
+        # While the NAS lock is busy this client is neither syncing nor idle;
+        # the tooltip says so with a countdown, so a tray-only user can see the
+        # wait is intentional and temporary instead of a stalled sync.
+        self._retry_until = 0.0
 
         self._animation_timer = QTimer(self)
         self._animation_timer.setInterval(420)
         self._animation_timer.timeout.connect(self._advance_animation)
+
+        self._retry_timer = QTimer(self)
+        self._retry_timer.setInterval(1000)
+        self._retry_timer.timeout.connect(self._tick_retry)
 
         menu = QMenu()
         menu.aboutToShow.connect(self._rebuild_menu)
@@ -97,7 +105,35 @@ class TrayIcon(QSystemTrayIcon):
             speed = f" • {human_size(self._current_speed)}/s" if self._current_speed > 0 else ""
             pct = f" ({self._current_percent}%)" if self._current_percent > 0 else ""
             active_info = f"\n{dir_sym} {fname}{pct}{speed}"
-        self.setToolTip(f"NASBox — {self._status_text}{suffix}{conflicts_suffix}{active_info}")
+        retry_info = ""
+        remaining = self._retry_remaining()
+        if remaining and self._current_item is None:
+            retry_info = t("tray.retry_suffix", seconds=remaining)
+        self.setToolTip(f"NASBox — {self._status_text}{suffix}{conflicts_suffix}{retry_info}{active_info}")
+
+    def _retry_remaining(self) -> int:
+        if self._retry_until <= 0:
+            return 0
+        return max(0, int(round(self._retry_until - time.monotonic())))
+
+    @pyqtSlot(str, int)
+    def on_transfer_retry_scheduled(self, direction: str, seconds: int) -> None:
+        try:
+            delay = max(1, int(seconds))
+        except (TypeError, ValueError):
+            delay = 1
+        self._retry_until = time.monotonic() + delay
+        if not self._retry_timer.isActive():
+            self._retry_timer.start()
+        self._apply_icon()
+
+    def _tick_retry(self) -> None:
+        if self._retry_remaining() > 0:
+            self._apply_icon()
+            return
+        self._retry_timer.stop()
+        self._retry_until = 0.0
+        self._apply_icon()
 
     def set_update_available(self, version: str) -> None:
         """Offer "Aggiorna a <versione>" in the tray menu (empty = no update)."""
@@ -120,6 +156,9 @@ class TrayIcon(QSystemTrayIcon):
         self._animation_frame = 0
         self._transfer_counts[direction] = 0
         self._transfer_start_times[direction] = time.monotonic()
+        if self._retry_until:
+            self._retry_until = 0.0
+            self._retry_timer.stop()
         if self.cfg.get("animate_sync_icon", False) and not self._animation_timer.isActive():
             self._animation_timer.start()
         self._apply_icon()
@@ -151,6 +190,9 @@ class TrayIcon(QSystemTrayIcon):
         self._current_item = None
         self._current_speed = 0.0
         self._current_percent = 0
+        if success and self._retry_until:
+            self._retry_until = 0.0
+            self._retry_timer.stop()
         count = self._transfer_counts.get(direction, 0)
         start_time = self._transfer_start_times.pop(direction, None)
         elapsed = time.monotonic() - start_time if start_time is not None else 0.0
@@ -204,6 +246,12 @@ class TrayIcon(QSystemTrayIcon):
         if self._pending_count:
             pending_action = menu.addAction(t("tray.pending_files", count=self._pending_count))
             pending_action.setEnabled(False)
+        retry_remaining = self._retry_remaining()
+        if retry_remaining > 0:
+            retry_action = menu.addAction(
+                t("tray.retry_action", seconds=retry_remaining)
+            )
+            retry_action.setEnabled(False)
         if self._update_version:
             update_action = menu.addAction(t("tray.update_action", version=self._update_version))
             update_action.triggered.connect(self.update_requested.emit)
@@ -288,7 +336,14 @@ class TrayIcon(QSystemTrayIcon):
     def _sync_now(self) -> None:
         if self.cfg.is_manually_paused():
             self.cfg.resume()
-        self.engine.wake(force=True)
+        # engine.wake() takes no arguments: calling it with force=True raised
+        # TypeError inside this Qt slot, which PyQt swallows, so the menu item
+        # silently did nothing at all. sync_now() is the one that also forces a
+        # full push request.
+        if hasattr(self.engine, "sync_now"):
+            self.engine.sync_now()
+        else:  # keep lightweight test doubles working
+            self.engine.wake()
 
     def _quick_pause(self, seconds: int) -> None:
         self.cfg.pause_for_seconds(seconds)

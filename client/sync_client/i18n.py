@@ -256,8 +256,52 @@ STRINGS: dict[str, dict[str, str]] = {
     },
     "status.watcher_disabled": {"it": "Controllo modifiche: non attivo.", "en": "Change detection: inactive."},
     "status.sync_deferred_lock": {
-        "it": "{direction} rimandato: un altro client sta usando il lock NAS; nuovo tentativo automatico.",
-        "en": "{direction} deferred: another client is using the NAS lock; retrying automatically.",
+        "it": "{direction} rimandato: un altro client sta usando il NAS; nuovo tentativo automatico.",
+        "en": "{direction} deferred: another client is using the NAS; retrying automatically.",
+    },
+    "status.retry_owner": {
+        "it": "il NAS è impegnato con {owner}",
+        "en": "the NAS is busy with {owner}",
+    },
+    "status.retry_owner_unknown": {
+        "it": "il NAS è impegnato con un'altra sincronizzazione",
+        "en": "the NAS is busy with another sync",
+    },
+    "status.retry_queue_known": {
+        "it": "{count} file in coda, nessuno perso",
+        "en": "{count} files queued, none lost",
+    },
+    "status.retry_queue_unknown": {
+        "it": "i file restano in coda",
+        "en": "the files stay queued",
+    },
+    "status.retry_countdown": {
+        "it": "⏳ {direction} rimandato — {owner}. Nessun errore: {queue}; riprovo da solo tra {seconds}s.",
+        "en": "⏳ {direction} deferred — {owner}. Not an error: {queue}; retrying on my own in {seconds}s.",
+    },
+    "status.retry_now": {
+        "it": "⏳ {direction}: {owner}. Sto riprovando adesso ({queue}).",
+        "en": "⏳ {direction}: {owner}. Retrying now ({queue}).",
+    },
+    "status.batch_position": {
+        "it": " (file {done} di {total})",
+        "en": " (file {done} of {total})",
+    },
+    "status.batch_progress_format": {
+        "it": "File sincronizzati: {done} di {total}",
+        "en": "Files synced: {done} of {total}",
+    },
+    "status.transfer_interrupted": {
+        "it": "⏸ {direction} interrotto: i file restano in coda e il tentativo riparte da solo. Dettagli nel Log.",
+        "en": "⏸ {direction} interrupted: the files stay queued and the attempt restarts on its own. Details in the Log.",
+    },
+    "status.nas_activity_waiting_retry": {
+        "it": "⏳ Attività NAS: in attesa che si liberi (riprovo tra {seconds}s)",
+        "en": "⏳ NAS activity: waiting for it to free up (retrying in {seconds}s)",
+    },
+    "status.nas_activity_queued": {
+        "it": "⏳ Attività NAS: {count} file in coda, nessuno perso",
+        "en": "⏳ NAS activity: {count} files queued, none lost",
     },
     "status.sync_lock_error": {
         "it": "Sincronizzazione non avviata: il lock NAS ha restituito un errore. {detail}",
@@ -268,7 +312,10 @@ STRINGS: dict[str, dict[str, str]] = {
     "status.last_sync_never": {"it": "Ultima sincronizzazione riuscita: nessun trasferimento registrato.", "en": "Last successful synchronization: no transfer recorded."},
     "status.last_sync": {"it": "Ultima sincronizzazione riuscita: {time} ({direction}).", "en": "Last successful synchronization: {time} ({direction})."},
     "status.last_problem_none": {"it": "Ultimo errore o blocco di sicurezza: nessuno registrato.", "en": "Last error or safety block: none recorded."},
-    "status.last_problem": {"it": "Ultimo errore o blocco: {time} [{action}] {detail}", "en": "Last error or block: {time} [{action}] {detail}"},
+    "status.last_problem": {
+        "it": "Ultimo problema: {time} — {action}: {detail}. La sincronizzazione riparte da sola; il dettaglio completo è nel Log.",
+        "en": "Last problem: {time} — {action}: {detail}. Syncing resumes on its own; the full detail is in the Log.",
+    },
     "status.problem_category_connection": {"it": "connessione SSH", "en": "SSH connection"},
     "status.problem_category_transfer": {"it": "trasferimento rsync", "en": "rsync transfer"},
     "status.problem_category_safety_block": {"it": "blocco di sicurezza", "en": "safety block"},
@@ -371,7 +418,10 @@ STRINGS: dict[str, dict[str, str]] = {
     "status.problem_repository": {"it": "Il repository NASBox remoto non è verificato. Rileva la configurazione dal NAS prima di sincronizzare.", "en": "The remote NASBox repository is not verified. Detect its configuration before synchronizing."},
     "status.problem_journal_unavailable": {"it": "Il journal del repository NAS non risulta verificato o disponibile.", "en": "The NAS repository journal is not verified or available."},
     "status.problem_journal": {"it": "Errore journal: {detail}", "en": "Journal error: {detail}"},
-    "status.problem_recent_event": {"it": "Evento recente {action}: {detail}", "en": "Recent {action} event: {detail}"},
+    "status.problem_recent_event": {
+        "it": "{action} di recente: {detail}. NASBox riprova da solo: apri il Log per il dettaglio.",
+        "en": "Recent {action}: {detail}. NASBox retries on its own: open the Log for details.",
+    },
     "status.problem_low_space": {"it": "Spazio disponibile sul NAS basso: {free}. Controlla lo storico e libera spazio.", "en": "Low available NAS space: {free}. Review history and free space."},
 
     # --- settings_tab.py ---
@@ -767,10 +817,29 @@ STRINGS: dict[str, dict[str, str]] = {
     "transfers.preparing": {"it": "{direction} in preparazione: sto analizzando i file e costruendo la lista ({seconds}s trascorsi).", "en": "{direction} preparing: analyzing files and building the list ({seconds}s elapsed)."},
     "transfers.queue_scan_running": {"it": "Sto verificando le differenze con il NAS ({seconds}s trascorsi)…", "en": "Checking for differences with the NAS ({seconds}s elapsed)…"},
     "transfers.lock_unavailable": {"it": "Sincronizzazione rimandata. {detail}", "en": "Synchronization deferred. {detail}"},
+    "transfers.retry_countdown": {
+        "it": "⏳ {direction} rimandato: il NAS sta servendo un altro PC. {count} file restano in coda, nessuno è perso — riprovo automaticamente tra {seconds}s.",
+        "en": "⏳ {direction} deferred: the NAS is serving another PC. {count} files stay queued, none are lost — retrying automatically in {seconds}s.",
+    },
+    "transfers.retry_now": {
+        "it": "⏳ {direction}: sto riprovando adesso…",
+        "en": "⏳ {direction}: retrying now…",
+    },
     "transfers.completed_batch": {"it": "{direction} completato: {count} operazioni eseguite. Il monitoraggio continua.", "en": "{direction} complete: {count} operations completed. Monitoring continues."},
-    "transfers.failed_batch": {"it": "{direction} non completato: controlla il Log.", "en": "{direction} did not complete: check the Log."},
+    "transfers.failed_batch": {
+        "it": "{direction} interrotto. I file restano in coda e NASBox riprova da solo: non serve fare nulla (i dettagli sono nel Log).",
+        "en": "{direction} interrupted. The files stay queued and NASBox retries on its own: nothing to do (details are in the Log).",
+    },
     "transfers.active_starting": {"it": "{direction} in corso: sto confrontando i file con il NAS; compariranno qui sotto appena rilevati ({seconds}s trascorsi).", "en": "{direction} in progress: comparing files with the NAS; they will appear below as detected ({seconds}s elapsed)."},
     "transfers.active_file": {"it": "{direction} in corso: {path} ({seconds}s trascorsi)", "en": "{direction} in progress: {path} ({seconds}s elapsed)"},
+    "transfers.active_file_progress": {
+        "it": "{direction} in corso: {path} — file {done} di {total} ({seconds}s trascorsi)",
+        "en": "{direction} in progress: {path} — file {done} of {total} ({seconds}s elapsed)",
+    },
+    "transfers.last_completed": {
+        "it": "ultimo completato: {path}",
+        "en": "last completed: {path}",
+    },
     "transfers.upload_speed_idle": {"it": "↑ Carica: -", "en": "↑ Upload: -"},
     "transfers.download_speed_idle": {"it": "↓ Scarica: -", "en": "↓ Download: -"},
     "transfers.upload_prefix": {"it": "↑ Carica", "en": "↑ Upload"},
@@ -887,8 +956,8 @@ STRINGS: dict[str, dict[str, str]] = {
     "log.action.error": {"it": "Errore", "en": "Error"},
 
     "lock.busy_retry": {
-        "it": "Un altro PC sta sincronizzando con il NAS. Nessun dato è stato perso: NASBox riproverà automaticamente.",
-        "en": "Another PC is syncing with the NAS. No data was lost: NASBox will retry automatically.",
+        "it": "Un altro PC sta sincronizzando con il NAS: non è un errore e nessun dato è stato perso.",
+        "en": "Another PC is syncing with the NAS: this is not an error and no data was lost.",
     },
     "lock.acquire_failed": {
         "it": "Il lock di sincronizzazione del NAS non è disponibile per un problema inatteso: {detail}",
@@ -1082,6 +1151,8 @@ STRINGS: dict[str, dict[str, str]] = {
     "tray.show_window": {"it": "Apri finestra principale", "en": "Open main window"},
     "tray.quit": {"it": "Esci", "en": "Quit"},
     "tray.pending_suffix": {"it": " — {count} in coda", "en": " — {count} queued"},
+    "tray.retry_suffix": {"it": " · riprovo tra {seconds}s", "en": " · retrying in {seconds}s"},
+    "tray.retry_action": {"it": "⏳ Riprovo automaticamente tra {seconds}s", "en": "⏳ Retrying automatically in {seconds}s"},
     "tray.conflict_title": {"it": "Conflitto di sincronizzazione", "en": "Sync conflict"},
     "tray.conflict_body": {
         "it": "Sono state mantenute entrambe le versioni di '{path}'. {detail}",

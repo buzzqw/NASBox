@@ -417,6 +417,10 @@ class PushWorker(TransferWorker):
                 retry_after = self.lock_coordinator.defer()
                 detail = f"{t('lock.busy_retry')} Nuovo tentativo tra {retry_after}s."
                 self.sync_state.record_pending_attempt(dirty_paths, detail)
+                # The countdown signal goes out before the generic deferral so the
+                # GUI can turn "not started" into "resuming in Ns" instead of a
+                # static error line that never changes again.
+                self.transfer_retry_scheduled.emit("upload", retry_after)
                 self.transfer_lock_unavailable.emit("upload", detail)
                 self.transfer_finished.emit("upload", False)
                 self._log("LOCK_DEFERRED", "-", detail)

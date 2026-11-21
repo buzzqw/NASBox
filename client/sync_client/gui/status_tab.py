@@ -28,6 +28,11 @@ from .format_utils import human_size
 UPDATE_CHECK_INITIAL_DELAY_MS = 10_000
 UPDATE_CHECK_INTERVAL_MS = 60 * 60 * 1000
 RECENT_PROBLEM_SECONDS = 24 * 60 * 60
+# A generic transfer error is usually transient and already retried by the
+# worker, so it must not keep the "Richiede attenzione" card up for a whole
+# day after the sync has healed by itself. Safety and journal blocks are real
+# decisions the user has to see, so they keep the long window.
+RECENT_TRANSIENT_SECONDS = 15 * 60
 RECENT_EVENT_SCAN_LIMIT = 20_000
 
 
@@ -72,6 +77,13 @@ class StatusTab(QWidget):
         self._scheduler_status: dict[str, object] = {}
         self._transfer_phases: dict[str, str] = {}
         self._current_paths: dict[str, str] = {}
+        # Deadline (monotonic) of the next automatic attempt after the NAS lock
+        # was busy, per direction. A plain "deferred" line left the user staring
+        # at an error with nothing moving; the countdown proves the client is
+        # still working and that the queued files are not lost.
+        self._retry_deadlines: dict[str, float] = {}
+        self._batch_totals: dict[str, int] = {}
+        self._batch_done: dict[str, int] = {}
         self._current_speed: float = 0.0
         self._current_percent: int = 0
         self._remote_lock_held: bool = False
@@ -115,6 +127,14 @@ class StatusTab(QWidget):
         self.sync_progress_bar.setTextVisible(True)
         self.sync_progress_bar.hide()
         status_layout.addWidget(self.sync_progress_bar)
+        # The bar above follows the current file, which on an import of
+        # thousands of small files jumps 0 -> 100 for each of them and looks
+        # frozen. This one moves once per completed file across the whole batch.
+        self.batch_progress_bar = QProgressBar()
+        self.batch_progress_bar.setRange(0, 100)
+        self.batch_progress_bar.setTextVisible(True)
+        self.batch_progress_bar.hide()
+        status_layout.addWidget(self.batch_progress_bar)
         self.conflict_stat_label = QLabel()
         self.conflict_stat_label.setObjectName("statusConflictStat")
         self.conflict_stat_label.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -352,6 +372,10 @@ class StatusTab(QWidget):
         remaining = self.cfg.pause_remaining_seconds()
         if remaining and remaining > 0:
             self._refresh_pause_button()
+        # A pending retry countdown has to tick down on its own: without this
+        # the line frozen at "riprovo tra 43s" looked exactly like a stall.
+        if self._retry_deadlines:
+            self._refresh_sync_state()
 
     def _open_folder(self) -> None:
         local_root = self.cfg.local_root()
@@ -488,6 +512,14 @@ class StatusTab(QWidget):
         if not self._connected:
             self.nas_activity_label.setText("⚠️ Attività NAS: Disconnesso")
             return
+        pending_retries = self._pending_retries()
+        if pending_retries:
+            _direction, remaining = pending_retries[0]
+            self.nas_activity_label.setText(
+                t("status.nas_activity_waiting_retry", seconds=remaining)
+                if remaining > 0 else t("status.nas_activity_queued", count=len(self._queue_items or []))
+            )
+            return
         if self._remote_lock_held:
             self.nas_activity_label.setText(f"🔒 Attività NAS: Sync in corso da altro client ({self._remote_lock_owner}, da {self._remote_lock_age})")
         elif self._transfer_phases:
@@ -498,7 +530,8 @@ class StatusTab(QWidget):
             speed_str = f" • {human_size(self._current_speed)}/s" if self._current_speed > 0 else ""
             pct_str = f" ({self._current_percent}%)" if self._current_percent > 0 else ""
             item_str = f": {fname}" if fname else ""
-            self.nas_activity_label.setText(f"⚡ Attività NAS: {dir_str}{item_str}{pct_str}{speed_str}")
+            batch_str = self._batch_position(direction)
+            self.nas_activity_label.setText(f"⚡ Attività NAS: {dir_str}{item_str}{batch_str}{pct_str}{speed_str}")
         elif self._queue_items:
             self.nas_activity_label.setText(f"⏳ Attività NAS: {len(self._queue_items)} file in coda")
         else:
@@ -577,6 +610,9 @@ class StatusTab(QWidget):
 
     def on_transfer_preparing(self, direction: str) -> None:
         self._transfer_phases[direction] = "preparing"
+        # A new attempt started: the previous countdown is over.
+        self._retry_deadlines.pop(direction, None)
+        self._batch_done[direction] = 0
         self._refresh_sync_state()
 
     def on_transfer_waiting_for_lock(self, direction: str) -> None:
@@ -585,7 +621,25 @@ class StatusTab(QWidget):
 
     def on_transfer_started(self, direction: str) -> None:
         self._transfer_phases[direction] = "active"
+        self._retry_deadlines.pop(direction, None)
+        self.sync_feedback_label.hide()
         self._refresh_sync_state()
+
+    def on_transfer_retry_scheduled(self, direction: str, seconds: int) -> None:
+        """The NAS lock was busy: show a live countdown instead of a dead end."""
+        try:
+            delay = max(1, int(seconds))
+        except (TypeError, ValueError):
+            delay = 1
+        self._retry_deadlines[direction] = time.monotonic() + delay
+        self._refresh_sync_state()
+
+    def on_batch_size_known(self, total: int) -> None:
+        """Authoritative batch size from PushWorker, for "file N di M"."""
+        try:
+            self._batch_totals["upload"] = max(0, int(total))
+        except (TypeError, ValueError):
+            self._batch_totals["upload"] = 0
 
     def on_transfer_item_started(self, direction: str, path: str, _size: int = 0) -> None:
         transfer_direction = "upload" if direction in ("upload", "delete_remote") else "download"
@@ -594,13 +648,17 @@ class StatusTab(QWidget):
         self._refresh_sync_state()
 
     def on_transfer_item_done(self, direction: str, path: str) -> None:
-        if self._queue_items is None:
-            return
-        self._queue_items = [
-            item for item in self._queue_items
-            if (item.direction, item.path) != (direction, path)
-        ]
-        self._refresh_queue_label()
+        transfer_direction = "upload" if direction in ("upload", "delete_remote", "rename_remote") else "download"
+        self._batch_done[transfer_direction] = self._batch_done.get(transfer_direction, 0) + 1
+        if self._queue_items is not None:
+            self._queue_items = [
+                item for item in self._queue_items
+                if (item.direction, item.path) != (direction, path)
+            ]
+            self._refresh_queue_label()
+        # Keep "file N di M" and the queue count moving as files complete,
+        # instead of only refreshing when the next file starts.
+        self._refresh_sync_state()
 
     def on_transfer_speed(self, direction: str, bytes_per_sec: float, percent: int) -> None:
         self._current_speed = bytes_per_sec
@@ -621,6 +679,18 @@ class StatusTab(QWidget):
             self._last_success = (time.time(), direction)
             self.last_sync_label.setText(self._last_sync_text())
             self.sync_feedback_label.hide()
+            self._retry_deadlines.pop(direction, None)
+            self._batch_totals.pop(direction, None)
+            self._batch_done.pop(direction, None)
+        elif not self.cfg.is_paused() and self._retry_remaining(direction) is None:
+            # An interrupted transfer used to leave the status card looking
+            # idle ("Sincronizzazione pronta") right after an error. Say what
+            # happened and, above all, what happens next.
+            self.sync_feedback_label.setText(t(
+                "status.transfer_interrupted",
+                direction=t(f"status.direction_{direction}"),
+            ))
+            self.sync_feedback_label.show()
         self._refresh_sync_state()
 
     def _refresh_sync_state(
@@ -659,29 +729,100 @@ class StatusTab(QWidget):
             sym = "⬆️" if direction == "upload" else "⬇️"
             if path:
                 fname = os.path.basename(path) or path
-                text = f"{sym} {direction_text}: {fname}{pct_str}{speed_str}"
+                text = f"{sym} {direction_text}: {fname}{self._batch_position(direction)}{pct_str}{speed_str}"
             else:
                 text = f"{sym} " + t(f"status.sync_state_{phase}", direction=direction_text) + speed_str
+        elif self._pending_retries():
+            text = self._retry_message()
         elif self._queue_items:
             text = t("status.sync_state_pending", count=len(self._queue_items))
         else:
             text = t("status.sync_state_ready")
         self.sync_state_label.setText(text)
+        self._refresh_batch_progress()
         self._refresh_nas_activity()
+
+    def _refresh_batch_progress(self) -> None:
+        direction = next(iter(self._transfer_phases), "") if self._transfer_phases else ""
+        total = self._batch_totals.get(direction) or 0
+        if total <= 0:
+            self.batch_progress_bar.hide()
+            return
+        done = min(self._batch_done.get(direction, 0), total)
+        self.batch_progress_bar.setValue(int(100 * done / total))
+        self.batch_progress_bar.setFormat(
+            t("status.batch_progress_format", done=done, total=total)
+        )
+        self.batch_progress_bar.show()
+
+    # --- pending-rerun countdown (NAS lock busy) ---
+
+    def _retry_remaining(self, direction: str) -> int | None:
+        """Seconds left before the automatic retry, or None when none is pending."""
+        deadline = self._retry_deadlines.get(direction)
+        if deadline is None:
+            return None
+        remaining = deadline - time.monotonic()
+        if remaining <= -2:
+            # The worker should have started by now; don't keep a stale countdown.
+            self._retry_deadlines.pop(direction, None)
+            return None
+        return max(0, int(round(remaining)))
+
+    def _pending_retries(self) -> list[tuple[str, int]]:
+        return [
+            (direction, remaining)
+            for direction in ("upload", "download")
+            if (remaining := self._retry_remaining(direction)) is not None
+        ]
+
+    def _retry_message(self) -> str:
+        direction, remaining = self._pending_retries()[0]
+        owner = self._remote_lock_owner
+        owner_clause = (
+            t("status.retry_owner", owner=owner) if owner
+            else t("status.retry_owner_unknown")
+        )
+        queue_count = len(self._queue_items) if self._queue_items else 0
+        queue_clause = (
+            t("status.retry_queue_known", count=queue_count) if queue_count
+            else t("status.retry_queue_unknown")
+        )
+        direction_text = t(f"status.direction_{direction}")
+        if remaining <= 0:
+            return t(
+                "status.retry_now",
+                direction=direction_text, owner=owner_clause, queue=queue_clause,
+            )
+        return t(
+            "status.retry_countdown",
+            direction=direction_text, owner=owner_clause, queue=queue_clause,
+            seconds=remaining,
+        )
+
+    def _batch_position(self, direction: str) -> str:
+        total = self._batch_totals.get(direction) or 0
+        if total <= 0:
+            return ""
+        done = min(self._batch_done.get(direction, 0), total)
+        return t("status.batch_position", done=done, total=total)
 
     def on_transfer_lock_unavailable(self, direction: str, detail: str) -> None:
         self._transfer_phases.pop(direction, None)
         self._current_paths.pop(direction, None)
         normalized = str(detail).lower()
-        if "altro pc" in normalized or "another pc" in normalized:
-            feedback = t(
-                "status.sync_deferred_lock",
-                direction=t(f"status.direction_{direction}"),
-            )
+        if (
+            ("altro pc" in normalized or "another pc" in normalized)
+            and self._retry_remaining(direction) is not None
+        ):
+            # Contention is normal and already explained by the countdown line:
+            # showing it as an error here is what made it look like a failure.
+            self.sync_feedback_label.hide()
         else:
-            feedback = t("status.sync_lock_error", detail=self._compact_detail(detail))
-        self.sync_feedback_label.setText(feedback)
-        self.sync_feedback_label.show()
+            self.sync_feedback_label.setText(
+                t("status.sync_lock_error", detail=self._compact_detail(detail))
+            )
+            self.sync_feedback_label.show()
         self._refresh_sync_state()
 
     def on_log_event(self, action: str, _path: str, detail: str) -> None:
@@ -822,9 +963,14 @@ class StatusTab(QWidget):
             ))
 
         cutoff = time.time() - RECENT_PROBLEM_SECONDS
+        transient_cutoff = time.time() - RECENT_TRANSIENT_SECONDS
         for action in ("SAFETY_BLOCK", "JOURNAL_BLOCK", "ERROR"):
             event = self._recent_problem_events.get(action)
-            if event is None or event[0] < cutoff:
+            if event is None:
+                continue
+            # A plain transfer error that has not recurred for a while is no
+            # longer actionable: the worker already retried and the queue moved.
+            if event[0] < (transient_cutoff if action == "ERROR" else cutoff):
                 continue
             # A persisted journal error already carries the same actionable fact.
             if action == "JOURNAL_BLOCK" and journal_error:
