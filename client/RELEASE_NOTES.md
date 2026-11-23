@@ -1,9 +1,9 @@
-# NASBox 1.28.11
+# NASBox 1.28.12
 
-Il client è ora più intelligente nella gestione delle cancellazioni:
+Controlli e confronti più veloci:
 
-- il manifest scaricato dal pull viene condiviso con il planner del push per
-  5 minuti: una scansione completa non rimette più in coda migliaia di
-  cancellazioni già applicate sul NAS;
-- i messaggi `PULL_DEFERRED` identici non intasano più il log: vengono
-  registrati quando il blocco cambia o ogni 5 minuti.
+- il conteggio delle cancellazioni proposte usa il manifest già in cache
+  invece di lanciare un rsync `--dry-run` su tutto l'albero (si ricade su rsync
+  solo se la cache è fredda);
+- il confronto della scansione locale è a passata singola con `os.scandir`,
+  senza costruire un dizionario di stat per tutti i file.

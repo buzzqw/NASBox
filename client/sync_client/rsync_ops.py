@@ -2172,8 +2172,22 @@ def validate_transfer_safety(
     if remote_values.get("SYNC_LOCK_AVAILABLE", "").lower() != "true":
         raise RepositorySafetyError("lock multi-client non disponibile sul NAS")
     if destructive and direction == "download":
-        candidates = _dry_run(cfg, conn, direction, strict=True)
-        deletions = [item for item in candidates if item.direction.startswith("delete_")]
+        # The pull already holds the authoritative manifest in cache. Counting
+        # deletions from it (one stat per candidate path) is far cheaper than a
+        # full-tree rsync --dry-run over ~100k files. Fall back to rsync only
+        # when the cache is cold or unavailable.
+        cached = cached_manifest(cfg, max_age_seconds=300)
+        if cached is not None:
+            root = Path(cfg.local_root())
+            deletions = [
+                path for path, state in cached.items()
+                if state.kind == RemoteKind.FILE
+                and not path_is_excluded(cfg, path)
+                and not (root / path).exists()
+            ]
+        else:
+            candidates = _dry_run(cfg, conn, direction, strict=True)
+            deletions = [item for item in candidates if item.direction.startswith("delete_")]
         try:
             max_deletes = int(cfg.get("max_delete_files") or 1000)
         except (TypeError, ValueError):

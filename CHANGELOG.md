@@ -4,6 +4,12 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 1.28.12 - 2026-11-23
+
+- Safety check: conteggio cancellazioni dal manifest in cache invece di un
+  rsync `--dry-run` sull'intero albero (fallback a rsync se cache assente).
+- `changed_paths()` riscritto a passata singola con `os.scandir`.
+
 ## 1.28.11 - 2026-11-23
 
 - Manifest condiviso tra PullWorker e PushWorker (cache con scadenza 5 minuti):

@@ -858,28 +858,6 @@ class SyncStateStore:
         """Find changed/new/deleted regular files when the watcher lacks a path."""
         from . import rsync_ops
         root = Path(local_root)
-        current: dict[str, os.stat_result] = {}
-        for dirpath, dirnames, filenames in os.walk(root):
-            rel_dir = os.path.relpath(dirpath, root)
-            pruned_dirs = []
-            for d in dirnames:
-                child_rel = d if rel_dir == "." else f"{rel_dir}/{d}"
-                if rsync_ops.path_is_excluded(self.cfg, child_rel):
-                    continue
-                pruned_dirs.append(d)
-            dirnames[:] = pruned_dirs
-
-            for f in filenames:
-                rel_file = f if rel_dir == "." else f"{rel_dir}/{f}"
-                if rsync_ops.path_is_excluded(self.cfg, rel_file):
-                    continue
-                try:
-                    full_path = os.path.join(dirpath, f)
-                    path_stat = os.lstat(full_path)
-                except OSError:
-                    continue
-                if stat.S_ISREG(path_stat.st_mode):
-                    current[rel_file] = path_stat
         with self._lock, self._connection() as conn:
             known = {
                 row[0]: Fingerprint(row[1], row[2], row[3], CausalVersion.parse(row[4]))
@@ -889,32 +867,52 @@ class SyncStateStore:
                 )
                 if not rsync_ops.path_is_excluded(self.cfg, row[0])
             }
-        candidates = set(current) | set(known)
+        # Single-pass comparison with os.scandir: DirEntry already carries the
+        # dirent type and its stat() avoids a separate lstat() per file. The old
+        # implementation first built a stat dict for the whole tree and only
+        # then compared it with the baseline -- two passes and ~120k stored
+        # stat objects on a large NASBox folder.
         changed: set[str] = set()
-        # Files whose content actually needs reading. Matching metadata, missing
-        # files, and files without a common baseline are resolved without hashing.
         to_hash: list[str] = []
-        for relative_path in candidates:
-            known_fp = known.get(relative_path)
-            current_stat = current.get(relative_path)
-            if (
-                current_stat is not None and known_fp is not None and not known_fp.is_tombstone
-                and current_stat.st_size == known_fp.size and current_stat.st_mtime_ns == known_fp.mtime_ns
-            ):
+        seen: set[str] = set()
+        stack: list[tuple[str, Path]] = [("", root)]
+        while stack:
+            rel_dir, directory = stack.pop()
+            try:
+                with os.scandir(directory) as entries:
+                    for entry in entries:
+                        relative_path = f"{rel_dir}/{entry.name}" if rel_dir else entry.name
+                        if rsync_ops.path_is_excluded(self.cfg, relative_path):
+                            continue
+                        try:
+                            if entry.is_dir(follow_symlinks=False):
+                                stack.append((relative_path, Path(entry.path)))
+                                continue
+                            if not entry.is_file(follow_symlinks=False):
+                                continue
+                            path_stat = entry.stat(follow_symlinks=False)
+                        except OSError:
+                            continue
+                        seen.add(relative_path)
+                        known_fp = known.get(relative_path)
+                        if known_fp is None or known_fp.is_tombstone:
+                            # New files and local recreations are candidates by
+                            # definition; do not hash a whole bulk import before
+                            # its first chunk can start transferring.
+                            changed.add(relative_path)
+                            continue
+                        if (
+                            path_stat.st_size == known_fp.size
+                            and path_stat.st_mtime_ns == known_fp.mtime_ns
+                        ):
+                            continue
+                        to_hash.append(relative_path)
+            except OSError:
                 continue
-            if current_stat is None:
-                if known_fp is not None and known_fp.is_tombstone:
-                    continue
+        # A known path that is no longer on disk is a local deletion.
+        for relative_path, known_fp in known.items():
+            if relative_path not in seen and not known_fp.is_tombstone:
                 changed.add(relative_path)
-                continue
-            if known_fp is None or known_fp.is_tombstone:
-                # New files and local recreations are candidates by definition.
-                # Their digest is needed for the per-chunk reconciliation, not to
-                # discover that they must be queued, so do not hash an entire bulk
-                # import before its first chunk can start transferring.
-                changed.add(relative_path)
-                continue
-            to_hash.append(relative_path)
 
         if to_hash:
             # Hashing is I/O-bound (hashlib/file reads release the GIL), so a thread
