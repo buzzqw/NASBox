@@ -159,6 +159,10 @@ class PullWorker(TransferWorker):
         }
         if applied:
             self.sync_state.clear_pending(applied)
+            # Also tombstone the local baseline: otherwise the next full sweep
+            # reports the very same missing files again and re-queues them,
+            # recreating the defer loop a few seconds later.
+            self.sync_state.record_fingerprints({path: None for path in applied})
             pending -= applied
         pending = {
             path for path in pending

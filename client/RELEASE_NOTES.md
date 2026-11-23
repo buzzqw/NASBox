@@ -1,5 +1,6 @@
-# NASBox 1.28.9
+# NASBox 1.28.10
 
-Corretto il loop di "PULL_DEFERRED": le cancellazioni locali già applicate sul
-NAS restavano nella coda `pending` e facevano rinviare il pull all'infinito.
-Ora vengono riconosciute e rimosse automaticamente.
+Completa la correzione del loop di "PULL_DEFERRED": oltre a rimuovere dalla
+coda le cancellazioni già applicate, ora viene aggiornato anche il baseline
+locale (tombstone), così la scansione successiva non le rileva più come
+modifiche e non le rimette in coda.

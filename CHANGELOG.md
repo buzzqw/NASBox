@@ -4,6 +4,12 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 1.28.10 - 2026-11-23
+
+- Completamento del fix del loop `PULL_DEFERRED`: le cancellazioni già
+  applicate su entrambi i lati vengono tombstonate anche nel baseline locale,
+  impedendo alla scansione successiva di rimetterle in coda.
+
 ## 1.28.9 - 2026-11-23
 
 - Rotto il loop di `PULL_DEFERRED`: i percorsi di cancellazioni locali il cui
