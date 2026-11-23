@@ -111,6 +111,15 @@ class TrayIcon(QSystemTrayIcon):
             retry_info = t("tray.retry_suffix", seconds=remaining)
         self.setToolTip(f"NASBox — {self._status_text}{suffix}{conflicts_suffix}{retry_info}{active_info}")
 
+    def set_assurance(self, headline: str, proof: str) -> None:
+        """Keep the definitive 'is everything synced?' answer in the tooltip."""
+        self._assurance_headline = headline
+        self._assurance_proof = proof
+        self.setToolTip(
+            f"NASBox — {headline}\n{proof}"
+            if proof else f"NASBox — {headline}"
+        )
+
     def _retry_remaining(self) -> int:
         if self._retry_until <= 0:
             return 0

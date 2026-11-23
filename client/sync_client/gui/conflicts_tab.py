@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import difflib
+import hashlib
+import os
 import time
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
 from PyQt6.QtCore import Qt, QTimer, QUrl, pyqtSignal
-from PyQt6.QtGui import QColor, QDesktopServices
+from PyQt6.QtGui import QColor, QDesktopServices, QTextCharFormat, QTextCursor
 from PyQt6.QtWidgets import (
     QAbstractItemView, QComboBox, QGroupBox, QHBoxLayout, QHeaderView, QLabel,
     QLineEdit, QMessageBox, QPlainTextEdit, QProgressBar, QPushButton,
@@ -47,6 +50,123 @@ def _report_progress(
         progress({"phase": phase, "done": done, "total": total, "path": path})
     except Exception:
         pass  # the tab/window may be closing while the worker finishes
+
+
+def diff_changed_lines(
+    original_lines: list[str], candidate_lines: list[str],
+) -> tuple[list[int], list[int]]:
+    """1-based line numbers that differ, for each side of a comparison."""
+    matcher = difflib.SequenceMatcher(
+        None, original_lines, candidate_lines, autojunk=False,
+    )
+    left: set[int] = set()
+    right: set[int] = set()
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        if tag == "equal":
+            continue
+        left.update(range(i1 + 1, i2 + 1))
+        right.update(range(j1 + 1, j2 + 1))
+    return sorted(left), sorted(right)
+
+
+def _side_changes(base_lines: list[str], side_lines: list[str]):
+    """Line-wise edits of one side relative to ``base_lines``.
+
+    Returns ``(replacements, deleted)``: ``replacements`` maps a base index to
+    the lines that must be emitted there, ``deleted`` lists base indices that
+    must be dropped. Both are stdlib/difflib-only and never touch the disk.
+    """
+    replacements: dict[int, list[str]] = {}
+    deleted: set[int] = set()
+    matcher = difflib.SequenceMatcher(
+        None, base_lines, side_lines, autojunk=False,
+    )
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        if tag == "equal":
+            continue
+        if i1 < i2:
+            deleted.update(range(i1, i2))
+        if j1 < j2:
+            replacements.setdefault(i1, []).extend(side_lines[j1:j2])
+    return replacements, deleted
+
+
+def _with_newline(line: str) -> str:
+    return line if line.endswith(("\n", "\r")) else line + "\n"
+
+
+def merge_three_way(base: str, ours: str, theirs: str) -> str:
+    """Combine the non-overlapping line edits of ``ours`` and ``theirs``.
+
+    ``base`` is the common ancestor of the two versions. Only difflib (stdlib)
+    is used. When both sides changed the same base lines differently, a
+    conventional conflict block is emitted so the user can finish the merge in
+    the editable preview instead of losing one side silently.
+    """
+    base_lines = base.splitlines(keepends=True)
+    ours_repl, ours_del = _side_changes(base_lines, ours.splitlines(keepends=True))
+    theirs_repl, theirs_del = _side_changes(base_lines, theirs.splitlines(keepends=True))
+    ours_del_only = ours_del - ours_repl.keys()
+    theirs_del_only = theirs_del - theirs_repl.keys()
+
+    def conflict_block(left: list[str], right: list[str]) -> list[str]:
+        return [
+            f"<<<<<<< {_with_newline(t('conflicts.merge_label_ours'))}",
+            *(_with_newline(line) for line in left),
+            "=======\n",
+            *(_with_newline(line) for line in right),
+            f">>>>>>> {_with_newline(t('conflicts.merge_label_theirs'))}",
+        ]
+
+    out: list[str] = []
+    index = 0
+    count = len(base_lines)
+    while index <= count:
+        left = ours_repl.get(index)
+        right = theirs_repl.get(index)
+        if left is not None and right is not None:
+            if left == right:
+                out.extend(left)
+            else:
+                out.extend(conflict_block(left, right))
+        elif (left is not None and index in theirs_del_only) or (
+            right is not None and index in ours_del_only
+        ):
+            # One side deleted the line, the other replaced it: keep both
+            # versions in a conflict block for the user to review.
+            out.extend(conflict_block(left or [], right or []))
+        elif left is not None:
+            out.extend(left)
+        elif right is not None:
+            out.extend(right)
+
+        if index < count:
+            if index not in ours_del and index not in theirs_del:
+                out.append(base_lines[index])
+        index += 1
+    return "".join(out)
+
+
+def conflict_copy_name(relative_path: str, device_id: str, digest: str = "") -> str:
+    """Exact name of a conflict copy, using the same rule as the pusher.
+
+    The preview must not guess: ``CONFLICT_TAG`` and the name-length budget are
+    the very ones used by ``PushWorker._conflict_path``. No file is created.
+    """
+    path = Path(relative_path)
+    token = hashlib.sha256(f"{relative_path}\0{digest}".encode()).hexdigest()[:8]
+    tag = f"{conflicts.CONFLICT_TAG}{device_id} {token})"
+    suffix = path.suffix
+    max_name_bytes = 240
+    if len(os.fsencode(tag + suffix)) >= max_name_bytes:
+        suffix = ""
+        stem = path.name
+    else:
+        stem = path.stem
+    budget = max_name_bytes - len(os.fsencode(tag + suffix))
+    while stem and len(os.fsencode(stem)) > budget:
+        stem = stem[:-1]
+    return str(path.with_name(f"{stem or 'file'}{tag}{suffix}"))
 
 
 class _ConflictItem(QTreeWidgetItem):
@@ -197,15 +317,67 @@ class ConflictsTab(QWidget):
         choose_row.addWidget(self.candidate_combo, 1)
         right_layout.addLayout(choose_row)
 
+        self.copy_name_label = QLabel()
+        self.copy_name_label.setObjectName("conflictCopyNamePreview")
+        self.copy_name_label.setAccessibleName(t("a11y.conflict_copy_name"))
+        self.copy_name_label.setWordWrap(True)
+        compare_layout.addWidget(self.copy_name_label)
+        self.copy_name_label.setText(t("conflicts.copy_name_none"))
+
         preview_box = QGroupBox(t("conflicts.preview_title"))
         preview_layout = QVBoxLayout(preview_box)
+        # Side-by-side textual comparison: two read-only panes in a splitter,
+        # with the lines that differ highlighted on each side.
+        self.compare_splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.compare_splitter.setChildrenCollapsible(False)
+        self.preview_original = QPlainTextEdit()
+        self.preview_original.setReadOnly(True)
+        self.preview_original.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
+        self.preview_original.setAccessibleName(t("a11y.conflict_preview_original"))
+        self.preview_original.setObjectName("conflictPreviewOriginal")
+        self.preview_original.setPlaceholderText(t("conflicts.preview_original"))
+        self.preview_alternative = QPlainTextEdit()
+        self.preview_alternative.setReadOnly(True)
+        self.preview_alternative.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
+        self.preview_alternative.setAccessibleName(t("a11y.conflict_preview_alternative"))
+        self.preview_alternative.setObjectName("conflictPreviewAlternative")
+        self.preview_alternative.setPlaceholderText(t("conflicts.preview_alternative"))
+        self.compare_splitter.addWidget(self.preview_original)
+        self.compare_splitter.addWidget(self.preview_alternative)
+        self.compare_splitter.setSizes([400, 400])
+        preview_layout.addWidget(self.compare_splitter, 1)
+        # Kept as a compatibility view for callers that read the unified diff
+        # from ``preview`` (and for the existing accessibility test). It is no
+        # longer the visible comparison widget.
         self.preview = QPlainTextEdit()
         self.preview.setAccessibleName(t("a11y.conflict_preview"))
         self.preview.setReadOnly(True)
         self.preview.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
         self.preview.setObjectName("conflictPreview")
-        preview_layout.addWidget(self.preview, 1)
+        self.preview.hide()
+        preview_layout.addWidget(self.preview)
         right_layout.addWidget(preview_box, 1)
+
+        # Editable three-way merge result. Shown only after "Unisci (3 vie)".
+        self.merge_box = QGroupBox(t("conflicts.merge_title"))
+        merge_layout = QVBoxLayout(self.merge_box)
+        self.merge_editor = QPlainTextEdit()
+        self.merge_editor.setObjectName("conflictMergeEditor")
+        self.merge_editor.setAccessibleName(t("a11y.conflict_merge_editor"))
+        self.merge_editor.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
+        merge_layout.addWidget(self.merge_editor, 1)
+        merge_actions = QHBoxLayout()
+        self.merge_save_btn = QPushButton(t("conflicts.merge_save_btn"))
+        self.merge_save_btn.setObjectName("conflictMergeSave")
+        self.merge_save_btn.clicked.connect(self._save_merge)
+        merge_actions.addWidget(self.merge_save_btn)
+        self.merge_cancel_btn = QPushButton(t("conflicts.merge_cancel_btn"))
+        self.merge_cancel_btn.setObjectName("conflictMergeCancel")
+        self.merge_cancel_btn.clicked.connect(self._cancel_merge)
+        merge_actions.addWidget(self.merge_cancel_btn)
+        merge_layout.addLayout(merge_actions)
+        self.merge_box.hide()
+        right_layout.addWidget(self.merge_box, 1)
 
         direct_actions = QHBoxLayout()
         self.keep_orig_btn = QPushButton(t("conflicts.keep_original_btn"))
@@ -222,7 +394,41 @@ class ConflictsTab(QWidget):
         self.keep_both_btn.setToolTip(t("conflicts.keep_both_tooltip"))
         self.keep_both_btn.clicked.connect(self._keep_both_action)
         direct_actions.addWidget(self.keep_both_btn)
+
+        self.merge_btn = QPushButton(t("conflicts.merge_btn"))
+        self.merge_btn.setObjectName("conflictMergeBtn")
+        self.merge_btn.setToolTip(t("conflicts.merge_base_unavailable"))
+        self.merge_btn.clicked.connect(self._start_merge)
+        direct_actions.addWidget(self.merge_btn)
         right_layout.addLayout(direct_actions)
+
+        # Large, explicit primary actions at the bottom of the panel. They use
+        # the same resolution helpers as the compact buttons above: no new
+        # remote/action API is introduced here.
+        big_actions = QHBoxLayout()
+        self.use_newest_btn = QPushButton(t("conflicts.use_newest_btn"))
+        self.use_newest_btn.setObjectName("conflictUseNewest")
+        self.use_newest_btn.setToolTip(t("conflicts.use_newest_tooltip"))
+        self.use_newest_btn.clicked.connect(self._use_newest)
+        big_actions.addWidget(self.use_newest_btn)
+
+        self.keep_both_big_btn = QPushButton(t("conflicts.keep_both_big_btn"))
+        self.keep_both_big_btn.setObjectName("conflictKeepBothBig")
+        self.keep_both_big_btn.setToolTip(t("conflicts.keep_both_tooltip"))
+        self.keep_both_big_btn.clicked.connect(self._keep_both_action)
+        big_actions.addWidget(self.keep_both_big_btn)
+
+        self.ignore_close_btn = QPushButton(t("conflicts.ignore_close_btn"))
+        self.ignore_close_btn.setObjectName("conflictIgnoreClose")
+        self.ignore_close_btn.setToolTip(t("conflicts.ignore_close_tooltip"))
+        self.ignore_close_btn.clicked.connect(self._ignore_close)
+        big_actions.addWidget(self.ignore_close_btn)
+        for button in (
+            self.use_newest_btn, self.keep_both_big_btn, self.ignore_close_btn,
+        ):
+            button.setMinimumHeight(44)
+            button.setProperty("primaryAction", True)
+        right_layout.addLayout(big_actions)
 
         buttons = QHBoxLayout()
         self.open_btn = QPushButton(t("conflicts.open_btn"))
@@ -250,7 +456,10 @@ class ConflictsTab(QWidget):
         # Screen readers announce the same localised text shown on the buttons.
         for button in (
             self.refresh_btn, self.resolve_everything_btn, self.keep_orig_btn,
-            self.keep_alt_btn, self.keep_both_btn, self.open_btn, self.restore_btn,
+            self.keep_alt_btn, self.keep_both_btn, self.merge_btn,
+            self.use_newest_btn, self.keep_both_big_btn, self.ignore_close_btn,
+            self.merge_save_btn, self.merge_cancel_btn,
+            self.open_btn, self.restore_btn,
             self.discard_btn, self.keep_btn, self.resolve_all_btn,
         ):
             button.setAccessibleName(button.text())
@@ -280,6 +489,7 @@ class ConflictsTab(QWidget):
         self.status_label.setObjectName("conflictStatus")
         root.addWidget(self.status_label)
 
+        self._merge_base_path: Path | None = None
         self._update_buttons()
         self.refresh()
 
@@ -431,6 +641,11 @@ class ConflictsTab(QWidget):
         else:
             self.candidate_combo.clear()
             self.preview.clear()
+            self._set_compare_texts("", "", [], [])
+            self.copy_name_label.setText(t("conflicts.copy_name_none"))
+            self._merge_base_path = None
+            self._update_merge_availability(None, None)
+            self._hide_merge_editor()
             self.detail_path.setText(t("conflicts.no_selection"))
             self.detail_meta.clear()
         self._update_buttons()
@@ -474,6 +689,11 @@ class ConflictsTab(QWidget):
             self.alt_info_label.setText(t("conflicts.alternative_placeholder"))
             self.recommend_label.setText("")
             self.preview.clear()
+            self._set_compare_texts("", "", [], [])
+            self.copy_name_label.setText(t("conflicts.copy_name_none"))
+            self._merge_base_path = None
+            self._update_merge_availability(None, None)
+            self._hide_merge_editor()
             return
         info = self._infos.get(str(group.original)) or self._group_info(group)
         self.detail_path.setText(self._relative(group.original))
@@ -530,8 +750,96 @@ class ConflictsTab(QWidget):
 
         if candidate is None:
             self.preview.setPlainText("")
+            self._set_compare_texts("", "", [], [])
+            self.copy_name_label.setText(t("conflicts.copy_name_none"))
+            self._merge_base_path = None
+            self._update_merge_availability(None, None)
+            self._hide_merge_editor()
             return
         self.preview.setPlainText(self._preview_text(group, candidate))
+        self._update_compare(group, candidate)
+        self._update_copy_name(group)
+        self._update_merge_availability(group, candidate)
+
+    def _version_text(self, path: Path) -> tuple[str, str | None]:
+        """Read a version for the side-by-side view; return (text, error_key)."""
+        try:
+            size = path.stat().st_size
+        except OSError:
+            return "", t("conflicts.preview_missing")
+        if size > PREVIEW_LIMIT_BYTES:
+            return "", t("conflicts.preview_too_large", size=human_size(size))
+        text = self._read_text(path)
+        if text is None:
+            return "", t("conflicts.preview_binary", size=human_size(size))
+        lines = text.splitlines(keepends=True)
+        if len(lines) > PREVIEW_LIMIT_LINES:
+            text = "".join(lines[:PREVIEW_LIMIT_LINES]) + t("conflicts.preview_truncated")
+        return text, None
+
+    def _update_compare(
+        self, group: conflicts.ConflictGroup, candidate: Path,
+    ) -> None:
+        original_text, left_error = (
+            self._version_text(group.original)
+            if group.original.exists() else ("", t("conflicts.original_missing"))
+        )
+        candidate_text, right_error = (
+            self._version_text(candidate)
+            if candidate.exists() else ("", t("conflicts.alternative_unselected"))
+        )
+        left_lines: list[int] = []
+        right_lines: list[int] = []
+        if left_error is None and right_error is None and candidate != group.original:
+            left_lines, right_lines = diff_changed_lines(
+                original_text.splitlines(), candidate_text.splitlines(),
+            )
+        self._set_compare_texts(
+            original_text if left_error is None else left_error,
+            candidate_text if right_error is None else right_error,
+            left_lines, right_lines,
+        )
+
+    def _set_compare_texts(
+        self, left: str, right: str, left_lines: list[int], right_lines: list[int],
+    ) -> None:
+        """Fill the two panes and highlight their differing lines."""
+        for widget, text, lines, color in (
+            (self.preview_original, left, left_lines, "#ffe0e0"),
+            (self.preview_alternative, right, right_lines, "#e0ffe0"),
+        ):
+            widget.setPlainText(text)
+            if not lines:
+                continue
+            fmt = QTextCharFormat()
+            fmt.setBackground(QColor(color))
+            cursor = widget.textCursor()
+            for number in lines:
+                block = widget.document().findBlockByLineNumber(number - 1)
+                if not block.isValid():
+                    continue
+                cursor.setPosition(block.position())
+                cursor.movePosition(
+                    QTextCursor.MoveOperation.EndOfBlock,
+                    QTextCursor.MoveMode.KeepAnchor,
+                )
+                cursor.mergeCharFormat(fmt)
+
+    def _update_copy_name(self, group: conflicts.ConflictGroup) -> None:
+        """Show the exact conflict-copy name the pusher would create."""
+        relative = self._relative(group.original)
+        sync_state = getattr(self.engine, "sync_state", None)
+        device = t("conflicts.copy_name_device_unknown")
+        if sync_state is not None:
+            try:
+                found = str(sync_state.device_id() or "").strip()
+                if found:
+                    device = found
+            except Exception:
+                pass
+        name = conflict_copy_name(relative, device)
+        self.copy_name_label.setText(t("conflicts.copy_name_preview", name=name))
+        self.copy_name_label.setToolTip(name)
 
     def _preview_text(self, group: conflicts.ConflictGroup, candidate: Path) -> str:
         original = group.original
@@ -586,6 +894,114 @@ class ConflictsTab(QWidget):
                 continue
         return None
 
+    # --- three-way merge (stdlib difflib only) ---
+
+    @staticmethod
+    def _common_base(group: conflicts.ConflictGroup | None) -> Path | None:
+        """Common ancestor of a conflict, when the data model provides one.
+
+        ``ConflictGroup`` has no base field today. Rather than inventing an
+        ancestor, the merge button stays disabled with an explicit tooltip. A
+        future group exposing ``base`` (Path or str) enables it automatically.
+        """
+        if group is None:
+            return None
+        base = getattr(group, "base", None)
+        if isinstance(base, Path) and base.is_file():
+            return base
+        if isinstance(base, str) and base:
+            path = Path(base)
+            if path.is_file():
+                return path
+        return None
+
+    def _update_merge_availability(
+        self, group: conflicts.ConflictGroup | None, candidate: Path | None,
+    ) -> None:
+        self._merge_base_path = self._common_base(group)
+        base = self._merge_base_path
+        if base is None:
+            self.merge_btn.setEnabled(False)
+            self.merge_btn.setToolTip(t("conflicts.merge_base_unavailable"))
+            return
+        if candidate is None:
+            self.merge_btn.setEnabled(False)
+            self.merge_btn.setToolTip(t("conflicts.merge_text_only"))
+            return
+        usable = (
+            self._read_text(base) is not None
+            and self._read_text(candidate) is not None
+            and not self._busy and not self._action_busy
+        )
+        self.merge_btn.setEnabled(usable)
+        self.merge_btn.setToolTip(
+            t("conflicts.merge_tooltip") if usable else t("conflicts.merge_text_only")
+        )
+
+    def _start_merge(self) -> None:
+        group = self._selected_group()
+        candidate = self._selected_candidate()
+        base = self._merge_base_path
+        if group is None or candidate is None or base is None:
+            return
+        base_text = self._read_text(base)
+        theirs_text = self._read_text(candidate)
+        if base_text is None or theirs_text is None:
+            return
+        ours_text = ""
+        if group.original.exists():
+            ours_text = self._read_text(group.original) or ""
+        self.merge_editor.setPlainText(
+            merge_three_way(base_text, ours_text, theirs_text),
+        )
+        self.compare_splitter.hide()
+        self.merge_box.show()
+        self.status_label.setText(t("conflicts.merge_review_hint"))
+
+    def _hide_merge_editor(self) -> None:
+        self.merge_box.hide()
+        self.compare_splitter.show()
+        self.merge_editor.clear()
+
+    def _cancel_merge(self) -> None:
+        self._hide_merge_editor()
+
+    def _save_merge(self) -> None:
+        group = self._selected_group()
+        local_root = self.cfg.local_root()
+        if group is None or not local_root:
+            return
+        merged_path = group.original.with_name(
+            f"{group.original.name}.nasbox-merge-{uuid.uuid4().hex[:8]}",
+        )
+        try:
+            merged_path.write_text(self.merge_editor.toPlainText(), encoding="utf-8")
+        except OSError as exc:
+            self.status_label.setText(t("conflicts.merge_save_failed", detail=str(exc)))
+            return
+        # Present the merged result as an extra candidate to the *existing*
+        # resolver: it promotes this version, archives the others and purges
+        # their copies on the NAS. No new action/remote API is needed.
+        merged_group = conflicts.ConflictGroup(
+            group.original, group.candidates + (merged_path,), group.group_id,
+        )
+        self._hide_merge_editor()
+        self._set_action_busy(True, t("conflicts.resolving"))
+
+        def worker(progress):
+            try:
+                return self._resolve_and_purge(
+                    [(merged_group, merged_path, self._candidate_relatives(group))],
+                    local_root, progress,
+                )
+            finally:
+                merged_path.unlink(missing_ok=True)
+
+        run_in_background(
+            self, "_conflict_action_call", worker, self._on_action_done,
+            on_progress=self._on_action_progress,
+        )
+
     # --- selection helpers ---
 
     def _selected_groups(self) -> list[conflicts.ConflictGroup]:
@@ -614,12 +1030,19 @@ class ConflictsTab(QWidget):
         self.keep_orig_btn.setEnabled(has_groups and can_act)
         self.keep_alt_btn.setEnabled(selected and can_act)
         self.keep_both_btn.setEnabled(selected and can_act)
+        self.use_newest_btn.setEnabled(has_group and can_act)
+        self.keep_both_big_btn.setEnabled(selected and can_act)
+        self.ignore_close_btn.setEnabled(can_act)
         self.restore_btn.setEnabled(has_group and can_act)
         self.discard_btn.setEnabled(has_group and can_act)
         self.resolve_all_btn.setEnabled(has_groups and can_act)
         self.resolve_everything_btn.setEnabled(bool(self._visible_groups()) and can_act)
         self.search_edit.setEnabled(can_act)
         self.refresh_btn.setEnabled(not self._busy and not self._action_busy)
+        if hasattr(self, "merge_btn"):
+            self._update_merge_availability(
+                self._selected_group(), self._selected_candidate(),
+            )
 
     def _keep_both_action(self) -> None:
         group = self._selected_group()
@@ -638,6 +1061,32 @@ class ConflictsTab(QWidget):
             return {"ok": ok, "resolved": 1 if ok else 0, "problems": [] if ok else [detail]}
 
         run_in_background(self, "_conflict_action_call", worker, self._on_action_done)
+
+    def _use_newest(self) -> None:
+        """Pick the recommended (newest) version via the existing keep flow."""
+        group = self._selected_group()
+        if group is None:
+            return
+        info = self._infos.get(str(group.original)) or self._group_info(group)
+        chosen = info.recommended
+        if chosen is None:
+            return
+        for index in range(self.candidate_combo.count()):
+            if self.candidate_combo.itemData(index) == chosen:
+                self.candidate_combo.setCurrentIndex(index)
+                break
+        # Same confirmation, lock gate and resolution worker as "Mantieni
+        # selezionata": no new API is involved.
+        self._keep_selected()
+
+    def _ignore_close(self) -> None:
+        """Close the detail view without touching any file."""
+        self.tree.setCurrentItem(None)
+        self.tree.clearSelection()
+        self._hide_merge_editor()
+        self._update_preview()
+        self._update_buttons()
+        self.status_label.setText(t("conflicts.ignore_hint"))
 
     def _open_selected(self) -> None:
         path = self._selected_candidate()

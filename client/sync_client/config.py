@@ -197,6 +197,12 @@ DEFAULTS: dict[str, Any] = {
     "delete_safety_window_seconds": 3600,
     "delete_confirmation_seconds": 600,
     "integrity_check_interval_seconds": 86400,  # automatic checksum audit (0 disables)
+    "last_integrity_check_ts": 0,
+    "last_integrity_mismatches": 0,
+    "last_integrity_files": 0,
+    "last_integrity_error": "",
+    "last_manifest_revision": -1,
+    "last_seen_release_notes_version": "",
     "bandwidth_upload_kbps": 0,    # 0 = unlimited -- applies to push (this client -> NAS)
     "bandwidth_download_kbps": 0,  # 0 = unlimited -- applies to pull (NAS -> this client)
     "retention_days_local": 30,   # client-side trash retention

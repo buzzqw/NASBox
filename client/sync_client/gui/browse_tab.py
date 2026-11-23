@@ -9,23 +9,30 @@ this particular client has synced locally. Deliberately narrow in scope:
   .sync-trash/retention the sync engine itself uses. Nothing here is a raw
   unlink; anything removed from this tab is recoverable from the History tab
   for the same number of days as an ordinary sync-driven deletion.
-- No upload and no arbitrary file creation from here -- that's what the
-  regular sync engine is for. This tab manages what's already on the NAS.
+- Dropping files/folders from the desktop uploads them through the ordinary
+  sync engine (local staging + pending queue): that keeps the shared NAS lease,
+  the journal and conflict handling intact. This tab never writes a file to
+  the NAS behind the engine's back. Dragging a row out offers its local path.
 """
 from __future__ import annotations
 
 import os
+import shutil
 from pathlib import Path
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import QMimeData, Qt, QUrl
+from PyQt6.QtGui import QDesktopServices, QDrag
 from PyQt6.QtWidgets import (
-    QAbstractItemView, QFileDialog, QHBoxLayout, QHeaderView, QInputDialog, QLabel,
-    QLineEdit, QMenu, QMessageBox, QPushButton, QStyle, QTreeWidget, QTreeWidgetItem,
-    QVBoxLayout, QWidget,
+    QAbstractItemView, QApplication, QFileDialog, QHBoxLayout, QHeaderView,
+    QInputDialog, QLabel, QLineEdit, QMenu, QMessageBox, QPushButton, QStyle,
+    QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
 from .. import rsync_ops
-from ..config import Config
+from ..config import (
+    SYNC_MODE_ARCHIVE, SYNC_MODE_BIDIRECTIONAL, SYNC_MODE_PULL_ONLY,
+    SYNC_MODE_PUSH_ONLY, Config,
+)
 from ..engine import SyncEngine
 from ..i18n import t
 from ..logger import EventLogger
@@ -34,6 +41,56 @@ from .async_utils import run_in_background
 from .format_utils import human_size
 
 ENTRY_ROLE = 100  # Qt.ItemDataRole.UserRole -- holds a BrowseEntry on each row
+
+# Menu labels are separate keys (rather than reusing the Settings tab's) so the
+# context menu can read "Solo NAS" / "Solo locale" without the push-only suffix.
+SYNC_MODE_MENU_KEYS = {
+    SYNC_MODE_PULL_ONLY: "browse.menu_sync_nas_only",
+    SYNC_MODE_PUSH_ONLY: "browse.menu_sync_local_only",
+    SYNC_MODE_BIDIRECTIONAL: "browse.menu_sync_bidirectional",
+    SYNC_MODE_ARCHIVE: "browse.menu_sync_archive",
+}
+
+
+class _BrowseTreeWidget(QTreeWidget):
+    """The browse tree, with external drops and a local-path drag payload."""
+
+    def __init__(self, tab: "BrowseTab") -> None:
+        super().__init__(tab)
+        self._tab = tab
+        self.setDragEnabled(True)
+        self.setAcceptDrops(True)
+        self.setDragDropMode(QAbstractItemView.DragDropMode.DragDrop)
+        self.setDefaultDropAction(Qt.DropAction.CopyAction)
+
+    def startDrag(self, supportedActions) -> None:
+        mime = self._tab._drag_mime_data()
+        if mime is None:
+            return
+        drag = QDrag(self)
+        drag.setMimeData(mime)
+        drag.exec(supportedActions)
+
+    def dragEnterEvent(self, event) -> None:
+        if event.source() is not self and event.mimeData().hasUrls():
+            event.acceptProposedAction()
+        else:
+            super().dragEnterEvent(event)
+
+    def dragMoveEvent(self, event) -> None:
+        if event.source() is not self and event.mimeData().hasUrls():
+            event.acceptProposedAction()
+        else:
+            super().dragMoveEvent(event)
+
+    def dropEvent(self, event) -> None:
+        if event.source() is not self and event.mimeData().hasUrls():
+            event.acceptProposedAction()
+            self._tab._upload_dropped_urls([
+                url.toLocalFile() for url in event.mimeData().urls()
+            ])
+        else:
+            super().dropEvent(event)
 
 
 class BrowseTab(QWidget):
@@ -77,7 +134,7 @@ class BrowseTab(QWidget):
         root.addLayout(search_row)
 
         cols = [t("browse.col_name"), t("browse.col_size"), t("browse.col_modified")]
-        self.tree = QTreeWidget()
+        self.tree = _BrowseTreeWidget(self)
         self.tree.setColumnCount(len(cols))
         self.tree.setHeaderLabels(cols)
         self.tree.header().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
@@ -86,6 +143,15 @@ class BrowseTab(QWidget):
         self.tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.tree.customContextMenuRequested.connect(self._show_context_menu)
         root.addWidget(self.tree, 1)
+
+        # Empty state: an empty tree should suggest what to do instead of
+        # looking like a broken view. Hidden whenever there is something to show.
+        self.empty_label = QLabel(t("browse.empty_hint"))
+        self.empty_label.setObjectName("browseEmptyHint")
+        self.empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.empty_label.setWordWrap(True)
+        root.addWidget(self.empty_label, 1)
+        self.empty_label.hide()
 
         buttons_row = QHBoxLayout()
         self.download_btn = QPushButton(t("browse.download_btn"))
@@ -111,6 +177,17 @@ class BrowseTab(QWidget):
         if not self._shown:
             self._shown = True
             self.refresh()
+
+    # --- path helpers (shared by the menu, the drag payload and uploads) ---
+
+    def _relative_path_for_name(self, name: str) -> str:
+        return f"{self._path}/{name}" if self._path else name
+
+    def _entry_relative_path(self, entry: rsync_ops.BrowseEntry) -> str:
+        return self._relative_path_for_name(entry.name)
+
+    def _entry_local_path(self, entry: rsync_ops.BrowseEntry) -> Path:
+        return Path(self.cfg.local_root(), self._entry_relative_path(entry))
 
     # --- navigation ---
 
@@ -162,6 +239,7 @@ class BrowseTab(QWidget):
         if conn is None:
             self.status_label.setText(t("browse.nas_unreachable"))
             self.tree.clear()
+            self._update_empty_state()
             return
         self._set_busy(t("browse.loading"))
         path = self._path
@@ -203,6 +281,20 @@ class BrowseTab(QWidget):
             self.status_label.setText(t("browse.filtered_count", shown=len(entries), total=len(self._entries)))
         else:
             self.status_label.setText(t("browse.entry_count", count=len(self._entries)))
+        self._update_empty_state()
+
+    def _update_empty_state(self) -> None:
+        """Swap the tree for a useful hint when there is nothing to display."""
+        if self.tree.topLevelItemCount():
+            self.tree.show()
+            self.empty_label.hide()
+            return
+        filtered = bool(self.search_edit.text().strip())
+        self.empty_label.setText(
+            t("browse.empty_filtered_hint") if filtered else t("browse.empty_hint")
+        )
+        self.tree.hide()
+        self.empty_label.show()
 
     @staticmethod
     def _format_mtime(epoch_seconds: int) -> str:
@@ -220,6 +312,9 @@ class BrowseTab(QWidget):
             widget.setEnabled(not self._busy)
         if message is not None:
             self.status_label.setText(message)
+            self.empty_label.hide()  # "Caricamento…" is the status label's job
+        else:
+            self._update_empty_state()
         self._update_breadcrumbs()
 
     def _selected_entries(self) -> list[rsync_ops.BrowseEntry]:
@@ -234,6 +329,37 @@ class BrowseTab(QWidget):
         if not entries:
             return
         menu = QMenu(self)
+
+        copy_remote = menu.addAction(t("browse.menu_copy_remote_path"))
+        copy_remote.triggered.connect(self._copy_remote_paths)
+        copy_local = menu.addAction(t("browse.menu_copy_local_path"))
+        copy_local.triggered.connect(self._copy_local_paths)
+        open_local = menu.addAction(t("browse.menu_open_local_folder"))
+        open_local.setEnabled(len(entries) == 1)
+        open_local.triggered.connect(self._open_local_folder)
+        menu.addSeparator()
+
+        has_dirs = any(entry.kind == "DIR" for entry in entries)
+        exclude = menu.addAction(t("browse.menu_exclude_folder"))
+        exclude.setEnabled(has_dirs)
+        exclude.triggered.connect(lambda _checked=False: self._set_folder_excluded(True))
+        include = menu.addAction(t("browse.menu_include_folder"))
+        include.setEnabled(has_dirs)
+        include.triggered.connect(lambda _checked=False: self._set_folder_excluded(False))
+        menu.addSeparator()
+
+        for mode, key in SYNC_MODE_MENU_KEYS.items():
+            action = menu.addAction(t(key))
+            action.triggered.connect(
+                lambda _checked=False, value=mode: self._set_sync_mode(value)
+            )
+        menu.addSeparator()
+
+        mirror = menu.addAction(t("browse.menu_create_mirror"))
+        mirror.setEnabled(len(entries) == 1 and entries[0].kind == "DIR")
+        mirror.triggered.connect(self._create_mirror_from_folder)
+        menu.addSeparator()
+
         download = menu.addAction(t("browse.download_btn"))
         download.setEnabled(any(entry.kind == "FILE" for entry in entries))
         download.triggered.connect(self._download_selected)
@@ -243,6 +369,200 @@ class BrowseTab(QWidget):
         delete = menu.addAction(t("browse.delete_btn"))
         delete.triggered.connect(self._delete_selected)
         menu.exec(self.tree.viewport().mapToGlobal(position))
+
+    # --- context-menu actions ------------------------------------------------
+
+    def _copy_remote_paths(self) -> None:
+        paths = [self._entry_relative_path(entry) for entry in self._selected_entries()]
+        QApplication.clipboard().setText("\n".join(paths))
+        self.status_label.setText(t("browse.path_copied", path=", ".join(paths)))
+
+    def _copy_local_paths(self) -> None:
+        paths = [str(self._entry_local_path(entry)) for entry in self._selected_entries()]
+        QApplication.clipboard().setText("\n".join(paths))
+        self.status_label.setText(t("browse.local_path_copied", path=", ".join(paths)))
+
+    def _open_local_folder(self) -> None:
+        entries = self._selected_entries()
+        if len(entries) != 1:
+            return
+        path = self._entry_local_path(entries[0])
+        target = path if path.is_dir() else path.parent
+        if not target.is_dir():
+            QMessageBox.warning(
+                self, t("browse.open_local_failed_title"),
+                t("browse.open_local_failed_body", path=str(target)),
+            )
+            return
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(target)))
+
+    def _set_folder_excluded(self, exclude: bool) -> None:
+        """Toggle anchored selective-sync excludes for the selected folders."""
+        paths = [
+            self._entry_relative_path(entry)
+            for entry in self._selected_entries() if entry.kind == "DIR"
+        ]
+        if not paths:
+            return
+        current = self.cfg.selective_sync_excludes()
+        if exclude:
+            updated = current + [path for path in paths if path not in current]
+        else:
+            updated = [
+                path for path in current
+                if not any(path == item or path.startswith(item + "/") for item in paths)
+            ]
+        self.cfg.set_selective_sync_excludes(updated)
+        self.engine.wake()
+        self.status_label.setText(
+            t("browse.exclude_done" if exclude else "browse.include_done", path=", ".join(paths))
+        )
+        self.logger.log(
+            "BROWSE_EXCLUDE" if exclude else "BROWSE_INCLUDE", ", ".join(paths)
+        )
+
+    def _set_sync_mode(self, mode: str) -> None:
+        self.cfg.set_sync_mode(mode)
+        self.engine.wake()
+        self.status_label.setText(
+            t("browse.sync_mode_changed", mode=t(SYNC_MODE_MENU_KEYS[mode]))
+        )
+        self.logger.log("BROWSE_SYNC_MODE", mode)
+
+    def _create_mirror_from_folder(self) -> None:
+        """Register the selected remote folder as a one-way mirror destination.
+
+        The source must live outside the NASBox root: that is what makes the
+        folder authoritative for its own subtree (pull skips it, push re-asserts
+        the source's contents). The user supplies it in a small dialog.
+        """
+        entries = [entry for entry in self._selected_entries() if entry.kind == "DIR"]
+        if len(entries) != 1:
+            return
+        dest = self._entry_relative_path(entries[0])
+        default_source = os.path.join(os.path.expanduser("~"), entries[0].name)
+        source, accepted = QInputDialog.getText(
+            self, t("browse.menu_create_mirror"),
+            t("browse.mirror_source_prompt"), text=default_source,
+        )
+        source = source.strip()
+        if not accepted or not source:
+            return
+        from ..mirrors import validate_mirror
+
+        ok, error = validate_mirror(self.cfg, source, dest)
+        if not ok:
+            QMessageBox.warning(self, t("browse.mirror_error_title"), error)
+            return
+        mirrors = self.cfg.mirrors()
+        mirrors.append({
+            "source": source,
+            "dest": dest,
+            "enabled": True,
+            "last_sync": None,
+            "error": "",
+        })
+        self.cfg.set_mirrors(mirrors)
+        self.logger.log("BROWSE_MIRROR_CREATE", dest, detail=source)
+        self.status_label.setText(t("browse.mirror_created", dest=dest))
+
+    # --- drag & drop ---------------------------------------------------------
+
+    def _drag_mime_data(self) -> QMimeData | None:
+        """Text/uri-list of the corresponding local files, when they exist.
+
+        The plain-text fallback always carries the local path even when the
+        file has not been downloaded yet, so dragging a row out is still useful.
+        """
+        entries = self._selected_entries()
+        if not entries:
+            return None
+        paths = [str(self._entry_local_path(entry)) for entry in entries]
+        mime = QMimeData()
+        urls = [QUrl.fromLocalFile(path) for path in paths if Path(path).exists()]
+        if urls:
+            mime.setUrls(urls)
+        mime.setText("\n".join(paths))
+        return mime
+
+    def _upload_dropped_urls(self, urls: list[str]) -> None:
+        """Stage dropped files in the local NASBox folder and let sync push them.
+
+        Using the engine's own queue (rather than a raw rsync from this tab)
+        keeps the shared NAS lock, preflight, journal and conflict handling in
+        one place -- the same guarantees a normal local file edit gets.
+        """
+        if self._busy:
+            return
+        root = self.cfg.local_root()
+        if not root:
+            QMessageBox.warning(
+                self, t("browse.upload_failed_title"), t("browse.upload_not_configured")
+            )
+            return
+        sources: list[Path] = []
+        for value in urls:
+            path = Path(value)
+            if path.name and path.exists() and (path.is_file() or path.is_dir()):
+                sources.append(path)
+        if not sources:
+            return
+
+        destinations = [
+            Path(root, self._relative_path_for_name(source.name)) for source in sources
+        ]
+        # Guard against dragging a file from the NASBox folder back into itself
+        # (and against copying a folder into its own subtree, which would
+        # recurse forever).
+        pairs = []
+        for source, destination in zip(sources, destinations):
+            source_real = source.resolve()
+            destination_real = destination.resolve()
+            if source_real == destination_real:
+                continue
+            try:
+                inside_source = os.path.commonpath(
+                    (str(destination_real), str(source_real))
+                ) == str(source_real)
+            except ValueError:
+                inside_source = False
+            if source.is_dir() and inside_source:
+                continue
+            pairs.append((source, destination))
+        if not pairs:
+            return
+
+        names = ", ".join(source.name for source, _dest in pairs)
+        has_collision = any(destination.exists() for _source, destination in pairs)
+        body_key = "browse.upload_overwrite_body" if has_collision else "browse.upload_confirm_body"
+        if QMessageBox.question(
+            self, t("browse.upload_confirm_title"),
+            t(body_key, names=names, path=self._path or "/"),
+        ) != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            for source, destination in pairs:
+                if source.is_dir():
+                    shutil.copytree(source, destination, dirs_exist_ok=True)
+                else:
+                    destination.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(source, destination)
+        except OSError as exc:
+            QMessageBox.warning(self, t("browse.upload_failed_title"), str(exc))
+            return
+
+        relative_paths = [
+            self._relative_path_for_name(source.name) for source, _dest in pairs
+        ]
+        self.sync_state.mark_pending(relative_paths)
+        self.engine.wake()
+        self.logger.log("BROWSE_UPLOAD_QUEUED", ", ".join(relative_paths))
+        QMessageBox.information(
+            self, t("browse.upload_queued_title"),
+            t("browse.upload_queued_body", count=len(pairs)),
+        )
+        # No refresh here: the NAS does not have the files yet. The engine's
+        # successful upload is reported through the normal transfer/history UI.
 
     # --- download (read-only, no restrictions) ---
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import subprocess
 import time
 from collections import deque
@@ -8,15 +9,25 @@ from PyQt6.QtCore import QPointF, QTimer, Qt
 from PyQt6.QtGui import QColor, QPainter, QPen, QPolygonF
 from PyQt6.QtWidgets import (
     QFormLayout, QFrame, QGridLayout, QGroupBox, QHBoxLayout, QLabel,
-    QPushButton, QScrollArea, QVBoxLayout, QWidget,
+    QProgressBar, QPushButton, QScrollArea, QVBoxLayout, QWidget,
 )
 
 from ..config import Config
 from ..engine import SyncEngine
 from ..i18n import t
-from ..metrics_worker import MetricsCollector, MetricsFetchResult, NasMetrics
+from ..metrics_worker import (
+    MetricsCollector, MetricsFetchResult, NasMetrics, StorageInsights,
+    collect_storage_insights,
+)
 from .async_utils import run_in_background
 from .format_utils import human_size
+
+
+# Auto-analysis only runs when the tab is visible, and never twice within this
+# window. It is deliberately much longer than the NAS health refresh interval:
+# a filesystem walk plus hashing is expensive and must not become a background
+# habit just because the user glanced at the tab.
+STORAGE_COOLDOWN_SECONDS = 10 * 60
 
 
 class MetricHistoryPlot(QFrame):
@@ -82,6 +93,10 @@ class MetricsTab(QWidget):
         self._active = False
         self._stopping = False
         self._metrics_proc = None
+        self._storage_busy = False
+        self._storage_call = None
+        self._storage_result: StorageInsights | None = None
+        self._storage_last_finished = 0.0
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -178,6 +193,8 @@ class MetricsTab(QWidget):
         cpu_chart_layout.addWidget(self.cpu_plot)
         charts.addWidget(cpu_chart_box)
         root.addLayout(charts)
+
+        self._build_storage_section(root)
         root.addStretch(1)
 
         self._timer = QTimer(self)
@@ -193,6 +210,174 @@ class MetricsTab(QWidget):
         form.addRow(label, value)
         grid.addWidget(box, row, column)
         return value
+
+    # --- Storage insights ---------------------------------------------------
+
+    def _build_storage_section(self, root: QVBoxLayout) -> None:
+        box = QGroupBox(t("storage.title"))
+        layout = QVBoxLayout(box)
+
+        toolbar = QHBoxLayout()
+        self.storage_analyze_btn = QPushButton(t("storage.analyze_btn"))
+        self.storage_analyze_btn.clicked.connect(lambda: self._analyze_storage(force=True))
+        toolbar.addWidget(self.storage_analyze_btn)
+        self.storage_status_label = QLabel(t("storage.status_idle"))
+        self.storage_status_label.setWordWrap(True)
+        toolbar.addWidget(self.storage_status_label, 1)
+        layout.addLayout(toolbar)
+
+        self.storage_progress = QProgressBar()
+        self.storage_progress.setRange(0, 1)
+        self.storage_progress.setValue(0)
+        self.storage_progress.setVisible(False)
+        layout.addWidget(self.storage_progress)
+
+        self.storage_last_label = QLabel()
+        layout.addWidget(self.storage_last_label)
+
+        folders_box = QGroupBox(t("storage.folders_title"))
+        folders_layout = QVBoxLayout(folders_box)
+        self.storage_folders_label = QLabel()
+        self.storage_folders_label.setWordWrap(True)
+        self.storage_folders_label.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+        )
+        folders_layout.addWidget(self.storage_folders_label)
+        layout.addWidget(folders_box)
+
+        duplicates_box = QGroupBox(t("storage.duplicates_title"))
+        duplicates_layout = QVBoxLayout(duplicates_box)
+        self.storage_duplicates_label = QLabel()
+        self.storage_duplicates_label.setWordWrap(True)
+        self.storage_duplicates_label.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+        )
+        duplicates_layout.addWidget(self.storage_duplicates_label)
+        layout.addWidget(duplicates_box)
+
+        trash_box = QGroupBox(t("storage.trash_title"))
+        trash_layout = QVBoxLayout(trash_box)
+        self.storage_trash_label = QLabel()
+        self.storage_trash_label.setWordWrap(True)
+        trash_layout.addWidget(self.storage_trash_label)
+        layout.addWidget(trash_box)
+
+        root.addWidget(box)
+        self._render_storage_empty()
+
+    def _render_storage_empty(self) -> None:
+        self.storage_status_label.setText(t("storage.status_idle"))
+        self.storage_last_label.setText(t("storage.never_updated"))
+        self.storage_folders_label.setText(t("storage.empty_folders"))
+        self.storage_duplicates_label.setText(t("storage.empty_duplicates"))
+        self.storage_trash_label.setText(t("storage.empty_trash"))
+
+    def _render_storage_error(self, detail: str) -> None:
+        self.storage_status_label.setText(t("storage.error", detail=detail))
+
+    def _render_storage(self, result: StorageInsights) -> None:
+        if result.top_folders:
+            lines = [
+                t("storage.folder_row", path=folder.path, size=human_size(folder.size_bytes),
+                  count=folder.file_count)
+                for folder in result.top_folders
+            ]
+            if result.scan_errors:
+                lines.append(t("storage.scan_errors", count=result.scan_errors))
+            self.storage_folders_label.setText("\n".join(lines))
+        else:
+            self.storage_folders_label.setText(t("storage.empty_folders"))
+
+        if result.duplicates:
+            lines = [
+                t("storage.duplicate_row", size=human_size(group.size_bytes),
+                  count=len(group.paths), paths=", ".join(group.paths))
+                for group in result.duplicates[:10]
+            ]
+            lines.append(t(
+                "storage.duplicate_summary", groups=len(result.duplicates),
+                wasted=human_size(result.duplicate_wasted_bytes),
+                candidates=result.duplicate_candidates,
+            ))
+            if result.candidates_limit_reached:
+                lines.append(t("storage.limited_notice"))
+            self.storage_duplicates_label.setText("\n".join(lines))
+        else:
+            self.storage_duplicates_label.setText(t("storage.empty_duplicates"))
+
+        history = result.trash
+        if history.version_count:
+            self.storage_trash_label.setText(t(
+                "storage.trash_summary", count=history.version_count,
+                size=human_size(history.total_bytes), expired=history.expired_count,
+                expired_size=human_size(history.expired_bytes),
+                days=f"{history.retention_days:g}",
+            ))
+        else:
+            self.storage_trash_label.setText(t("storage.empty_trash"))
+
+        self.storage_status_label.setText(t("storage.status_done", files=result.scanned_files))
+        self.storage_last_label.setText(t(
+            "storage.last_updated",
+            time=time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(result.collected_at)),
+        ))
+
+    def _storage_cooldown_ok(self, now: float | None = None) -> bool:
+        if self._storage_last_finished <= 0:
+            return True
+        current = time.monotonic() if now is None else now
+        return (current - self._storage_last_finished) >= STORAGE_COOLDOWN_SECONDS
+
+    def _maybe_auto_analyze(self) -> bool:
+        """Only called when the tab becomes visible; never called at startup."""
+        if self._stopping or self._storage_busy or not self._active:
+            return False
+        if self._is_minimized_or_hidden():
+            return False
+        return self._analyze_storage(force=False)
+
+    def _analyze_storage(self, force: bool = False) -> bool:
+        if self._stopping or self._storage_busy:
+            return False
+        if not force and not self._storage_cooldown_ok():
+            return False
+        root = self.cfg.local_root() or ""
+        if not root or not os.path.isdir(root):
+            self._render_storage_error(t("storage.missing_root"))
+            return False
+
+        self._storage_busy = True
+        self.storage_analyze_btn.setEnabled(False)
+        self.storage_progress.setVisible(True)
+        self.storage_progress.setRange(0, 0)  # indeterminate until the scan finishes
+        self.storage_status_label.setText(t("storage.analyzing"))
+        run_in_background(
+            self, "_storage_call",
+            lambda emit: collect_storage_insights(self.cfg, progress=emit, local_root=root),
+            self._on_storage_done,
+            on_progress=self._on_storage_progress,
+        )
+        return True
+
+    def _on_storage_progress(self, value) -> None:
+        if isinstance(value, (int, float)):
+            self.storage_status_label.setText(t("storage.progress", count=int(value)))
+
+    def _on_storage_done(self, result: StorageInsights | None, exc: Exception | None) -> None:
+        self._storage_busy = False
+        self.storage_analyze_btn.setEnabled(True)
+        self.storage_progress.setVisible(False)
+        self.storage_progress.setRange(0, 1)
+        self.storage_progress.setValue(0)
+        if self._stopping:
+            return
+        if exc is not None or result is None:
+            detail = str(exc) if exc is not None else t("storage.invalid_result")
+            self._render_storage_error(detail)
+            return
+        self._storage_result = result
+        self._storage_last_finished = time.monotonic()
+        self._render_storage(result)
 
     def on_connection_changed(self, connection) -> None:
         if self._connection_initialized and connection == self._connection:
@@ -238,6 +423,7 @@ class MetricsTab(QWidget):
             return
         if self._connected and not self._busy:
             self._timer.start(0)
+        self._maybe_auto_analyze()
 
     def hideEvent(self, event) -> None:
         super().hideEvent(event)
@@ -267,6 +453,9 @@ class MetricsTab(QWidget):
         call = getattr(self, "_metrics_call", None)
         if call is not None and call.isRunning():
             call.wait(3000)
+        storage_call = getattr(self, "_storage_call", None)
+        if storage_call is not None and storage_call.isRunning():
+            storage_call.wait(3000)
 
     def _refresh_interval_ms(self) -> int:
         try:

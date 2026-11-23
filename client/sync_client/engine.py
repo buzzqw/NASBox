@@ -159,15 +159,31 @@ class SyncEngine(QThread):
         def run() -> None:
             try:
                 mismatches = rsync_ops.integrity_check(self.cfg, self._conn)
+                checked = self.sync_state.entry_count() if self.sync_state else 0
             except Exception as exc:
+                self.cfg.set("last_integrity_error", str(exc), persist=True)
                 self.logger.log("ERROR", "-", f"controllo integrità non riuscito: {exc}")
                 return
             finally:
                 self._integrity_running.clear()
+            self.cfg.set("last_integrity_check_ts", time.time(), persist=True)
+            self.cfg.set("last_integrity_mismatches", len(mismatches), persist=True)
+            self.cfg.set("last_integrity_files", checked, persist=True)
+            self.cfg.set("last_integrity_error", "", persist=True)
+            self.logger.log(
+                "INFO", "-",
+                f"verifica integrità completata: {checked} file confrontati, "
+                f"{len(mismatches)} differenze",
+            )
             for item in mismatches:
                 self.log_event.emit("INTEGRITY_MISMATCH", item.path, item.direction)
 
         threading.Thread(target=run, name="nasbox-integrity", daemon=True).start()
+
+    def verify_integrity_now(self) -> None:
+        """Run a full checksum verification on demand, ignoring the interval."""
+        self._last_integrity_check = 0.0
+        self._maybe_integrity_check(time.time())
 
     def confirm_deletions(self) -> int:
         """Explicitly allow a large, intentional deletion batch for a short time."""
@@ -177,6 +193,31 @@ class SyncEngine(QThread):
 
     def delete_safety_snapshot(self) -> dict:
         return delete_safety.shared().snapshot(self.cfg)
+
+    def assurance_snapshot(self) -> dict:
+        """Facts that answer one question: 'is everything synced?'."""
+        scheduler = self.transfer_scheduler.snapshot() if self.transfer_scheduler else {}
+        pending = self._pending_summary or {}
+        try:
+            tracked = self.sync_state.entry_count() if self.sync_state else 0
+        except (OSError, RuntimeError):
+            tracked = 0
+        return {
+            "tracked_files": tracked,
+            "pending_count": int(pending.get("count", 0) or 0),
+            "queue_count": int(scheduler.get("count", 0) or 0),
+            "active_kind": scheduler.get("active_kind") or "",
+            "last_integrity_check_ts": float(self.cfg.get("last_integrity_check_ts") or 0),
+            "last_integrity_files": int(self.cfg.get("last_integrity_files") or 0),
+            "last_integrity_mismatches": int(self.cfg.get("last_integrity_mismatches") or 0),
+            "last_integrity_error": str(self.cfg.get("last_integrity_error") or ""),
+            "manifest_revision": int(self.cfg.get("last_manifest_revision") or -1),
+            "server_health": self._server_health,
+            "repository_ready": bool(self.cfg.get("remote_repository_ready")),
+            "journal_ready": bool(self.cfg.get("remote_journal_ready")),
+            "delete_used": delete_safety.shared().snapshot(self.cfg).get("used", 0),
+            "delete_limit": delete_safety.shared().snapshot(self.cfg).get("limit", 0),
+        }
 
     def prune_now(self) -> int:
         removed = trash.prune_local(self.cfg, self.logger)
@@ -256,6 +297,7 @@ class SyncEngine(QThread):
             "scheduler": self.transfer_scheduler.snapshot() if self.transfer_scheduler else {},
             "server_health": self._server_health,
             "cycle_ts": now,
+            "assurance": self.assurance_snapshot(),
         })
 
         if now - self._last_prune > PRUNE_INTERVAL_SECONDS:

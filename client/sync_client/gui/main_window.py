@@ -4,7 +4,7 @@ import threading
 import time
 from pathlib import Path
 
-from PyQt6.QtCore import QEvent, Qt, QTimer
+from PyQt6.QtCore import QByteArray, QEvent, Qt, QSettings, QTimer
 from PyQt6.QtGui import QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QApplication, QFrame, QHBoxLayout, QLabel, QMainWindow, QProgressDialog,
@@ -55,6 +55,11 @@ class MainWindow(QMainWindow):
         self.setWindowIcon(icons.app_icon())
         self.resize(1280, 760)
         self.setMinimumSize(720, 520)
+        self._settings = QSettings("NASBox", "NASBox")
+        geometry = self._settings.value("window/geometry")
+        if isinstance(geometry, QByteArray):
+            self.restoreGeometry(geometry)
+
         self._is_shutting_down = False
         self._shutdown_thread: threading.Thread | None = None
         self._shutdown_dialog: QProgressDialog | None = None
@@ -146,6 +151,7 @@ class MainWindow(QMainWindow):
         self.status_tab = StatusTab(
             self.cfg, self.engine, self.scan_worker, logger=self.logger,
         )
+        self.status_tab.assurance_status.connect(self._on_assurance_status)
         self.metrics_tab = MetricsTab(self.cfg, self.engine)
         self.settings_tab = SettingsTab(self.cfg, self.engine)
         self.transfers_tab = TransfersTab()
@@ -272,6 +278,29 @@ class MainWindow(QMainWindow):
         self._update_check_timer.setInterval(UPDATE_CHECK_INTERVAL_MS)
         self._update_check_timer.timeout.connect(self._check_for_client_update_quietly)
         self._update_check_timer.start()
+        QTimer.singleShot(1200, self._maybe_show_whats_new)
+
+    def _maybe_show_whats_new(self) -> None:
+        """Show release notes once after an update, then remember the version."""
+        if not self.cfg.is_configured():
+            return
+        seen = str(self.cfg.get("last_seen_release_notes_version") or "")
+        if seen == APP_VERSION:
+            return
+        self.cfg.set("last_seen_release_notes_version", APP_VERSION, persist=True)
+        notes_file = Path(__file__).resolve().parents[2] / "RELEASE_NOTES.md"
+        notes = ""
+        try:
+            notes = notes_file.read_text(encoding="utf-8").strip()
+        except OSError:
+            notes = t("main_window.whats_new_fallback")
+        QMessageBox.information(
+            self, t("main_window.whats_new_title", version=APP_VERSION),
+            f"{t('main_window.whats_new_intro')}\n\n{notes[:4000]}",
+        )
+
+    def _on_assurance_status(self, headline: str, proof: str) -> None:
+        self.tray.set_assurance(headline, proof)
 
     def _show_window(self) -> None:
         """Bring the main window back (same action as the tray menu item)."""
@@ -394,6 +423,7 @@ class MainWindow(QMainWindow):
         self._update_metrics_tab_active()
 
     def closeEvent(self, event) -> None:
+        self._settings.setValue("window/geometry", self.saveGeometry())
         # Minimize to tray instead of quitting, like most sync clients.
         if self.tray.isVisible():
             event.ignore()

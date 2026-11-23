@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import os
+from datetime import date, timedelta
 from pathlib import Path
 
+from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QAbstractItemView, QComboBox, QFileDialog, QGroupBox, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMessageBox,
     QPushButton, QSpinBox, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
@@ -17,8 +19,20 @@ from .async_utils import run_in_background
 from .dialogs import FileVersionDialog
 from .format_utils import human_size
 
-ROOT_GROUP_KEY = ""  # dirname() of a file directly in the NASBox root
 VERSION_ROLE = 100  # Qt.ItemDataRole.UserRole -- holds a TrashVersion on leaf rows
+
+
+def day_label(day: date, today: date | None = None) -> str:
+    """Header text for a day group: Oggi / Ieri / localised calendar date."""
+    reference = today or date.today()
+    if day == reference:
+        return t("history.today_label")
+    if day == reference - timedelta(days=1):
+        return t("history.yesterday_label")
+    try:
+        return day.strftime(t("history.date_format"))
+    except ValueError:  # a broken translation must not take down the tab
+        return day.isoformat()
 
 
 class HistoryTab(QWidget):
@@ -75,6 +89,20 @@ class HistoryTab(QWidget):
         self.prune_local_status.setVisible(False)
         root.addWidget(self.prune_local_status)
 
+        # "How much can I free?" -- always shows the space taken by the rows
+        # currently on screen (so it follows search/scope), and cleans through
+        # the very same retention path used above, with an explicit confirm.
+        reclaim_box = QGroupBox(t("history.reclaim_title"))
+        reclaim_layout = QHBoxLayout(reclaim_box)
+        self.reclaim_size_label = QLabel()
+        self.reclaim_size_label.setWordWrap(True)
+        reclaim_layout.addWidget(self.reclaim_size_label, 1)
+        self.reclaim_clean_btn = QPushButton()
+        self.reclaim_clean_btn.clicked.connect(self._clean_old_reclaim)
+        reclaim_layout.addWidget(self.reclaim_clean_btn)
+        root.addWidget(reclaim_box)
+        self.local_spin.valueChanged.connect(lambda _value: self._update_reclaim_button())
+
         search_row = QHBoxLayout()
         search_row.addWidget(QLabel(t("history.search_label")))
         self.search_edit = QLineEdit()
@@ -100,21 +128,21 @@ class HistoryTab(QWidget):
         self.scope_label.setWordWrap(True)
         root.addWidget(self.scope_label)
 
-        # A tree, not a flat table: top-level rows are folders (grouped by the
-        # version's containing directory), children are individual historical
-        # versions of one file. Selecting a folder and restoring brings back
-        # the most recent trashed version of every file in it in one go;
-        # selecting a single version underneath restores just that file --
-        # see _restore_selected().
+        # A tree, not a flat table: top-level rows are calendar days (Oggi,
+        # Ieri, ...), children are individual historical versions. Selecting a
+        # day and restoring brings back the most recent trashed version of
+        # every file from that day; selecting single leaves (Ctrl/Shift) does
+        # the same for just those files -- see _restore_selected(). The full
+        # original path is kept in each leaf's tooltip.
         cols = [t("history.col_name"), t("history.col_version"), t("history.col_size"), t("history.col_age")]
         self.tree = QTreeWidget()
         self.tree.setColumnCount(len(cols))
         self.tree.setHeaderLabels(cols)
         self.tree.header().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self.tree.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
-        # Double-click restores immediately -- a file (or a whole folder) you
-        # just spotted in the list shouldn't need a select-then-find-the-button
-        # round trip. The button below stays for discoverability/keyboard use.
+        # Double-click restores immediately -- a file (or a whole day group)
+        # you just spotted in the list shouldn't need a select-then-find-the-
+        # button round trip. The buttons stay for discoverability/keyboard use.
         self.tree.itemDoubleClicked.connect(lambda item, _col: self._restore_item(item))
         root.addWidget(self.tree)
 
@@ -127,6 +155,10 @@ class HistoryTab(QWidget):
         self.restore_btn.setToolTip(t("history.restore_tooltip"))
         self.restore_btn.clicked.connect(self._restore_selected)
         buttons_row.addWidget(self.restore_btn)
+        self.restore_elsewhere_btn = QPushButton(t("history.restore_elsewhere_btn"))
+        self.restore_elsewhere_btn.setToolTip(t("history.restore_elsewhere_tooltip"))
+        self.restore_elsewhere_btn.clicked.connect(self._restore_selected_elsewhere)
+        buttons_row.addWidget(self.restore_elsewhere_btn)
         self.file_versions_btn = QPushButton(t("history.file_versions_btn"))
         self.file_versions_btn.setToolTip(t("history.file_versions_tooltip"))
         self.file_versions_btn.clicked.connect(self._file_versions_selected)
@@ -137,9 +169,11 @@ class HistoryTab(QWidget):
         buttons_row.addWidget(self.delete_btn)
         root.addLayout(buttons_row)
 
-        self._versions: list[trash.TrashVersion | trash.RemoteTrashVersion] = []
+        self._versions: list[trash.HistoryVersion] = []
+        self._empty_item: QTreeWidgetItem | None = None
         self._prune_local_busy = False
         self._prune_remote_busy = False
+        self._update_reclaim_button()
         self.refresh()
 
     def refresh(self) -> None:
@@ -195,50 +229,57 @@ class HistoryTab(QWidget):
         needle = self.search_edit.text().strip().lower()
         all_versions = self._versions
         total_count = len(all_versions)
-        total_size = sum(v.size for v in all_versions)
+        total_bytes = trash.total_size(all_versions)
 
         versions = all_versions
         if needle:
             versions = [v for v in versions if needle in v.relative_path.lower()]
-
-        groups: dict[str, list[trash.TrashVersion]] = {}
-        for version in versions:
-            key = os.path.dirname(version.relative_path)
-            groups.setdefault(key, []).append(version)
+        filtered_count = len(versions)
+        filtered_bytes = trash.total_size(versions)
 
         self.tree.clear()
-        for key in sorted(groups.keys()):
-            group_versions = groups[key]
-            label = key if key != ROOT_GROUP_KEY else t("history.root_group_label")
-            distinct_files = len({v.relative_path for v in group_versions})
-            group_size = sum(v.size for v in group_versions)
-            group_item = QTreeWidgetItem([
-                t("history.group_label", name=label, count=distinct_files),
-                "", human_size(group_size), "",
-            ])
-            self.tree.addTopLevelItem(group_item)
-            for version in sorted(group_versions, key=lambda v: v.age_days):
-                leaf = QTreeWidgetItem([
-                    os.path.basename(version.relative_path),
-                    version.timestamp,
-                    human_size(version.size),
-                    f"{version.age_days:.1f}",
+        self._empty_item = None
+        if not versions:
+            # An empty tree looks like a broken tab; say why and what to try.
+            empty_text = t("history.empty_state_filtered") if needle else t("history.empty_state")
+            empty_item = QTreeWidgetItem([empty_text])
+            empty_item.setFirstColumnSpanned(True)
+            empty_item.setFlags(Qt.ItemFlag.NoItemFlags)  # not selectable/restorable
+            self.tree.addTopLevelItem(empty_item)
+            self._empty_item = empty_item
+        else:
+            # One top-level row per calendar day, newest day first; leaves keep
+            # the old age sort (newest version first) and the original search
+            # filter above. Full relative paths live in the tooltips so the
+            # folder a version came from stays visible even without a folder
+            # level in the tree.
+            for day, group_versions in trash.group_by_day(versions).items():
+                group_item = QTreeWidgetItem([
+                    t("history.day_group_label", label=day_label(day), count=len(group_versions)),
+                    "", human_size(trash.total_size(group_versions)), "",
                 ])
-                leaf.setData(0, VERSION_ROLE, version)
-                group_item.addChild(leaf)
-        self.tree.expandAll()
+                self.tree.addTopLevelItem(group_item)
+                for version in sorted(group_versions, key=lambda v: v.age_days):
+                    leaf = QTreeWidgetItem([
+                        os.path.basename(version.relative_path),
+                        version.timestamp,
+                        human_size(version.size),
+                        f"{version.age_days:.1f}",
+                    ])
+                    leaf.setData(0, VERSION_ROLE, version)
+                    leaf.setToolTip(0, version.relative_path)
+                    group_item.addChild(leaf)
+            self.tree.expandAll()
 
-        filtered_count = len(versions)
-        filtered_size = sum(v.size for v in versions)
-        folders_count = len(groups)
+        folders_count = len({os.path.dirname(v.relative_path) for v in all_versions})
         if needle:
             self.totals_label.setText(
                 t(
                     "history.totals_filtered",
                     versions=filtered_count,
-                    size=human_size(filtered_size),
+                    size=human_size(filtered_bytes),
                     total_versions=total_count,
-                    total_size=human_size(total_size),
+                    total_size=human_size(total_bytes),
                 )
             )
         else:
@@ -246,10 +287,42 @@ class HistoryTab(QWidget):
                 t(
                     "history.totals_summary",
                     versions=total_count,
-                    size=human_size(total_size),
+                    size=human_size(total_bytes),
                     folders=folders_count,
                 )
             )
+        self.reclaim_size_label.setText(
+            t("history.reclaim_summary", size=human_size(filtered_bytes), count=filtered_count)
+        )
+
+    # --- "how much space can I free?" ---
+
+    def _reclaim_days(self) -> int:
+        """The saved local retention: the value prune_local() actually uses."""
+        try:
+            return int(self.cfg.get("retention_days_local") or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    def _update_reclaim_button(self) -> None:
+        days = self._reclaim_days()
+        self.reclaim_clean_btn.setText(t("history.reclaim_clean_btn", days=days))
+        self.reclaim_clean_btn.setToolTip(t("history.reclaim_clean_tooltip", days=days))
+
+    def _clean_old_reclaim(self) -> None:
+        """Run the existing retention path, but only after an explicit confirm."""
+        if self._showing_remote:
+            body = t("history.reclaim_confirm_remote")
+        else:
+            body = t("history.reclaim_confirm_local", days=self._reclaim_days())
+        if QMessageBox.question(
+            self, t("history.reclaim_title"), body,
+        ) != QMessageBox.StandardButton.Yes:
+            return
+        if self._showing_remote:
+            self._prune_remote()
+        else:
+            self._prune_local()
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
@@ -265,6 +338,7 @@ class HistoryTab(QWidget):
 
     def _save_retention(self) -> None:
         self.cfg.set("retention_days_local", self.local_spin.value())
+        self._update_reclaim_button()
         QMessageBox.information(self, t("history.saved_title"), t("history.saved_body"))
 
     def _prune_local(self) -> None:
@@ -361,7 +435,7 @@ class HistoryTab(QWidget):
         else:
             QMessageBox.warning(self, t("history.prune_remote_failed_title"), detail)
 
-    # --- restore: a single version (leaf) or a whole folder (top-level group) ---
+    # --- restore: one version, a day group, or a multi-selection ---
 
     def _restore_selected(self) -> None:
         versions = self._selected_versions(latest_per_path=True)
@@ -383,6 +457,32 @@ class HistoryTab(QWidget):
         ) != QMessageBox.StandardButton.Yes:
             return
         self._restore_local_many(versions, local_root)
+
+    def _restore_selected_elsewhere(self) -> None:
+        """Restore the (possibly multi-) selection under a chosen folder.
+
+        Uses the same version selection/de-duplication as the normal restore;
+        only the destination root changes. Remote versions go through the
+        existing batched download path with the directory already chosen.
+        """
+        versions = self._selected_versions(latest_per_path=True)
+        if not versions:
+            return
+        default_root = self.cfg.local_root() or str(Path.home())
+        destination_root = QFileDialog.getExistingDirectory(
+            self, t("history.restore_elsewhere_picker_title"), default_root,
+        )
+        if not destination_root:
+            return
+        if isinstance(versions[0], trash.RemoteTrashVersion):
+            self._restore_remote_many(versions, default_root, destination_root=destination_root)
+            return
+        if QMessageBox.question(
+            self, t("history.confirm_restore_title"),
+            t("history.confirm_restore_elsewhere_body", count=len(versions), destination=destination_root),
+        ) != QMessageBox.StandardButton.Yes:
+            return
+        self._restore_local_many(versions, destination_root)
 
     def _file_versions_selected(self) -> None:
         """Open the focused version timeline (local + NAS) for the selected file."""
@@ -411,7 +511,9 @@ class HistoryTab(QWidget):
             return
 
         if item.parent() is None:
-            self._restore_folder(item, local_root)
+            if item is self._empty_item:
+                return
+            self._restore_group(item, local_root)
         else:
             self._restore_one(item.data(0, VERSION_ROLE), local_root)
 
@@ -447,10 +549,14 @@ class HistoryTab(QWidget):
             lambda result, exc: self._on_restore_remote_done(version, destination, result, exc),
         )
 
-    def _restore_remote_many(self, versions: list[trash.RemoteTrashVersion], local_root: str) -> None:
-        destination_root = QFileDialog.getExistingDirectory(
-            self, t("history.remote_restore_many_picker_title"), local_root,
-        )
+    def _restore_remote_many(
+        self, versions: list[trash.RemoteTrashVersion], local_root: str,
+        destination_root: str | None = None,
+    ) -> None:
+        if destination_root is None:
+            destination_root = QFileDialog.getExistingDirectory(
+                self, t("history.remote_restore_many_picker_title"), local_root,
+            )
         if not destination_root:
             return
         if QMessageBox.question(
@@ -499,15 +605,14 @@ class HistoryTab(QWidget):
         else:
             QMessageBox.warning(self, t("history.restore_failed_title"), detail)
 
-    def _restore_folder(self, group_item: QTreeWidgetItem, local_root: str) -> None:
+    def _restore_group(self, group_item: QTreeWidgetItem, local_root: str) -> None:
         if self._showing_remote:
             QMessageBox.information(self, t("history.remote_restore_one_title"), t("history.remote_restore_one_body"))
             return
         # One version per distinct file, the most recent one -- restoring a
-        # folder means "bring back the latest known state of everything in
-        # it", not literally replaying every historical version on top of
-        # each other (restore_version always overwrites, so only the last
-        # write per path would matter anyway).
+        # day group means "bring back the latest known state of everything
+        # from that day", not replaying every historical version on top of
+        # each other (restore_version always overwrites).
         latest_by_path: dict[str, trash.TrashVersion] = {}
         for i in range(group_item.childCount()):
             version = group_item.child(i).data(0, VERSION_ROLE)
@@ -516,10 +621,10 @@ class HistoryTab(QWidget):
                 latest_by_path[version.relative_path] = version
 
         count = len(latest_by_path)
-        folder_label = group_item.text(0)
+        group_label = group_item.text(0)
         if QMessageBox.question(
-            self, t("history.confirm_restore_folder_title"),
-            t("history.confirm_restore_folder_body", count=count, folder=folder_label),
+            self, t("history.confirm_restore_group_title"),
+            t("history.confirm_restore_group_body", count=count, label=group_label),
         ) != QMessageBox.StandardButton.Yes:
             return
 
@@ -552,8 +657,8 @@ class HistoryTab(QWidget):
             QMessageBox.information(self, t("history.restore_done_title"), t("history.restore_all_done_body", count=restored))
 
     # --- permanent delete: a single version (leaf) or every version in a
-    # folder (top-level group) -- independent of retention_days_local, for
-    # "I want this gone now" instead of "gone once it's old enough". ---
+    # day group -- independent of retention_days_local, for "I want this gone
+    # now" instead of "gone once it's old enough". ---
 
     def _delete_selected(self) -> None:
         versions = self._selected_versions(latest_per_path=False)
@@ -620,19 +725,22 @@ class HistoryTab(QWidget):
         else:
             QMessageBox.information(self, t("history.delete_done_title"), t("history.delete_all_done_body", count=deleted))
 
-    def _selected_versions(self, latest_per_path: bool) -> list[trash.TrashVersion | trash.RemoteTrashVersion]:
-        """Collect leaves from selected rows, expanding selected folder groups.
+    def _selected_versions(self, latest_per_path: bool) -> list[trash.HistoryVersion]:
+        """Collect leaves from selected rows, expanding selected day groups.
 
         A group and one of its leaves can both be selected, so de-duplicate the
         concrete historical versions before optionally keeping only the newest
         selected version of each original file for restores.
         """
-        versions: list[trash.TrashVersion | trash.RemoteTrashVersion] = []
+        versions: list[trash.HistoryVersion] = []
         for item in self.tree.selectedItems():
             if item.parent() is None:
-                versions.extend(item.child(index).data(0, VERSION_ROLE) for index in range(item.childCount()))
+                versions.extend(
+                    item.child(index).data(0, VERSION_ROLE) for index in range(item.childCount())
+                )
             else:
                 versions.append(item.data(0, VERSION_ROLE))
+        versions = [version for version in versions if version is not None]
 
         unique = {}
         for version in versions:

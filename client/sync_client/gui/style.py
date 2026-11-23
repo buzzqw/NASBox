@@ -69,6 +69,38 @@ QGroupBox::title {
     padding: 0 6px;
 }
 QGroupBox#statusCard { border-color: #8ab4ff; }
+QGroupBox#assuranceCard {
+    border: 2px solid #2f7d55;
+    border-radius: 6px;
+    background-color: #f1faf5;
+    margin-top: 4px;
+}
+QLabel#assuranceHeadline {
+    font-size: 18px;
+    font-weight: 700;
+    color: #1d6b45;
+    padding: 4px 2px 2px 2px;
+}
+QLabel#assuranceHeadline[state="ok"] { color: #1d6b45; }
+QLabel#assuranceHeadline[state="active"] { color: #1d6b45; }
+QLabel#assuranceHeadline[state="warning"] {
+    color: #9a6200;
+    border-bottom: 2px dashed #9a6200;
+}
+QLabel#assuranceHeadline[state="error"] {
+    color: #c12c3d;
+    border-bottom: 2px solid #c12c3d;
+}
+QLabel#assuranceProof {
+    font-size: 12px;
+    color: #35524a;
+    padding: 2px 2px 6px 2px;
+}
+QLabel#assuranceChecks {
+    font-size: 12px;
+    color: #2f4c44;
+    padding: 2px 2px 6px 2px;
+}
 QLabel#statusMessage {
     font-size: 17px;
     font-weight: 700;

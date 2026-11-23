@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 from PyQt6.QtCore import Qt, QTimer, QUrl, pyqtSignal
 from PyQt6.QtGui import QDesktopServices, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
-    QGroupBox, QHBoxLayout, QLabel, QMessageBox, QProgressBar, QPushButton, QSizePolicy,
+    QGridLayout, QGroupBox, QHBoxLayout, QLabel, QMessageBox, QProgressBar, QPushButton, QSizePolicy,
     QScrollArea, QToolButton, QVBoxLayout, QWidget,
 )
 
@@ -55,6 +55,7 @@ class StatusTab(QWidget):
     instead -- keeping this one uncluttered is the whole point of it."""
 
     attention_action_requested = pyqtSignal(str)
+    assurance_status = pyqtSignal(str, str)  # headline, proof
 
     def __init__(
         self, cfg: Config, engine: SyncEngine, scan_worker: ScanWorker,
@@ -110,6 +111,44 @@ class StatusTab(QWidget):
         root = QVBoxLayout(content)
         root.setContentsMargins(4, 8, 4, 4)
         root.setSpacing(14)
+
+        # --- sync assurance: answer "is everything synced?" before anything else ---
+        self.assurance_box = QGroupBox(t("assurance.title"))
+        self.assurance_box.setObjectName("assuranceCard")
+        assurance_layout = QVBoxLayout(self.assurance_box)
+        self.assurance_headline = QLabel(t("assurance.checking"))
+        self.assurance_headline.setObjectName("assuranceHeadline")
+        self.assurance_headline.setAccessibleName(t("a11y.assurance_headline"))
+        self.assurance_headline.setWordWrap(True)
+        assurance_layout.addWidget(self.assurance_headline)
+        self.assurance_proof = QLabel(t("assurance.waiting_proof"))
+        self.assurance_proof.setObjectName("assuranceProof")
+        self.assurance_proof.setWordWrap(True)
+        assurance_layout.addWidget(self.assurance_proof)
+        self.assurance_checks = QLabel("")
+        self.assurance_checks.setObjectName("assuranceChecks")
+        self.assurance_checks.setWordWrap(True)
+        assurance_layout.addWidget(self.assurance_checks)
+        self.assurance_activity = QLabel(t("assurance.activity_empty"))
+        self.assurance_activity.setObjectName("assuranceActivity")
+        self.assurance_activity.setWordWrap(True)
+        assurance_layout.addWidget(self.assurance_activity)
+        assurance_grid = QGridLayout()
+        self.assurance_stats: dict[str, QLabel] = {}
+        for index, key in enumerate(("tracked", "pending", "queue", "conflicts", "revision", "lastcheck")):
+            caption = QLabel(t(f"assurance.stat_{key}"))
+            value = QLabel(t("assurance.unknown_short"))
+            value.setObjectName(f"assuranceStat_{key}")
+            assurance_grid.addWidget(caption, index // 3, (index % 3) * 2)
+            assurance_grid.addWidget(value, index // 3, (index % 3) * 2 + 1)
+            self.assurance_stats[key] = value
+        assurance_layout.addLayout(assurance_grid)
+        self.verify_now_btn = QPushButton(t("assurance.verify_now"))
+        self.verify_now_btn.setObjectName("secondaryButton")
+        self.verify_now_btn.setToolTip(t("assurance.verify_now_tooltip"))
+        self.verify_now_btn.clicked.connect(self._verify_now)
+        assurance_layout.addWidget(self.verify_now_btn)
+        root.addWidget(self.assurance_box)
 
         # --- status ---
         status_box = QGroupBox(t("status.group_title"))
@@ -447,6 +486,83 @@ class StatusTab(QWidget):
 
     # --- signal from engine ---
 
+    def _verify_now(self) -> None:
+        self.verify_now_btn.setEnabled(False)
+        self.assurance_proof.setText(t("assurance.verifying"))
+        self.engine.verify_integrity_now()
+        QTimer.singleShot(1500, lambda: self.verify_now_btn.setEnabled(True))
+
+    def _refresh_assurance(self, data: dict) -> None:
+        if not isinstance(data, dict) or not data:
+            return
+        pending = data.get("pending_count", 0)
+        queued = data.get("queue_count", 0)
+        conflicts = self._conflict_count
+        mismatch = data.get("last_integrity_mismatches", 0)
+        checked = data.get("last_integrity_files", 0)
+        last = data.get("last_integrity_check_ts", 0)
+        active = data.get("active_kind") or ""
+        healthy = (
+            self._connected and data.get("server_health") == "ok"
+            and data.get("repository_ready") and data.get("journal_ready")
+        )
+        clean = healthy and not pending and not queued and not conflicts and not mismatch
+        if active and not clean:
+            headline = t("assurance.in_progress", kind=active)
+            state = "active"
+        elif clean:
+            headline = t("assurance.all_synced")
+            state = "ok"
+        elif self._connected:
+            headline = t("assurance.needs_attention")
+            state = "warning"
+        else:
+            headline = t("assurance.offline")
+            state = "error"
+        self.assurance_headline.setText(headline)
+        self.assurance_headline.setProperty("state", state)
+        self.assurance_headline.style().unpolish(self.assurance_headline)
+        self.assurance_headline.style().polish(self.assurance_headline)
+
+        if last:
+            age = max(0, int(time.time() - last))
+            ago = t("assurance.seconds_ago", seconds=age) if age < 120 else t(
+                "assurance.minutes_ago", minutes=age // 60,
+            )
+            self.assurance_proof.setText(t(
+                "assurance.proof", when=ago, files=checked, mismatches=mismatch,
+            ))
+        else:
+            self.assurance_proof.setText(t("assurance.waiting_proof"))
+
+        checks = [
+            ("connected", self._connected),
+            ("repository", bool(data.get("repository_ready"))),
+            ("journal", bool(data.get("journal_ready"))),
+            ("queue", not queued and not pending),
+            ("conflicts", not conflicts),
+            ("integrity", bool(last) and not mismatch),
+            ("errors", not any(p[0] == "event_error" for p in self.attention_problems)),
+        ]
+        rows = []
+        for key, ok in checks:
+            rows.append(t("assurance.check_line", mark="✓" if ok else "✗", text=t(f"assurance.check_{key}")))
+        self.assurance_checks.setText("\n".join(rows))
+
+        values = {
+            "tracked": f"{data.get('tracked_files', 0)}",
+            "pending": f"{pending}",
+            "queue": f"{queued}",
+            "conflicts": f"{conflicts}",
+            "revision": f"{data.get('manifest_revision', -1)}",
+            "lastcheck": t("assurance.unknown_short") if not last else t(
+                "assurance.minutes_ago", minutes=max(0, int((time.time() - last) // 60)),
+            ),
+        }
+        for key, value in values.items():
+            self.assurance_stats[key].setText(value)
+        self.assurance_status.emit(headline, self.assurance_proof.text())
+
     def on_status_changed(self, status: dict) -> None:
         paused = status.get("paused", False)
         remaining = status.get("pause_remaining")
@@ -512,6 +628,7 @@ class StatusTab(QWidget):
         self._refresh_queue_label()
         self._refresh_pending_summary(status)
         self._refresh_attention()
+        self._refresh_assurance(status.get("assurance") or {})
         if self._connected and not self._diagnostics_auto_loaded:
             self._diagnostics_auto_loaded = True
             self._refresh_diagnostics()
@@ -915,6 +1032,18 @@ class StatusTab(QWidget):
         self._refresh_attention()
 
     def _load_recent_events(self, events) -> None:
+        now = time.time()
+        activity = {"UPLOAD": 0, "DOWNLOAD": 0, "DELETE_REMOTE": 0, "DELETE_LOCAL": 0}
+        for event in events:
+            if now - event.ts <= 86400 and event.action in activity:
+                activity[event.action] += 1
+        if any(activity.values()) and hasattr(self, "assurance_activity"):
+            self.assurance_activity.setText(t(
+                "assurance.activity",
+                uploads=activity["UPLOAD"] + activity["DELETE_REMOTE"],
+                downloads=activity["DOWNLOAD"] + activity["DELETE_LOCAL"],
+                deletes=activity["DELETE_REMOTE"] + activity["DELETE_LOCAL"],
+            ))
         for event in events:
             if event.action in ("UPLOAD", "DELETE_REMOTE"):
                 candidate = (event.ts, "upload")

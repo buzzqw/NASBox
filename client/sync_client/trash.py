@@ -16,8 +16,9 @@ from __future__ import annotations
 import re
 import shutil
 import time
+from collections.abc import Iterable
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable
 
@@ -47,6 +48,47 @@ class RemoteTrashVersion:
     remote_trash_relative_path: str
     age_days: float
     size: int = 0
+
+
+#: Both local and remote history rows are displayed the same way in the GUI.
+HistoryVersion = TrashVersion | RemoteTrashVersion
+
+
+def version_date(version: HistoryVersion, today: date | None = None) -> date:
+    """Calendar day a trashed version was created.
+
+    The timestamp embedded in the trash filename is authoritative: deriving
+    the day from ``age_days`` would drift across midnight (age_days is a float
+    computed when the list was read, not a calendar date). Older entries with
+    an unparseable suffix fall back to the recorded age.
+    """
+    timestamp = getattr(version, "timestamp", "") or ""
+    if len(timestamp) >= 10:
+        try:
+            return datetime.strptime(timestamp[:10], "%Y-%m-%d").date()
+        except ValueError:
+            pass
+    reference = today or date.today()
+    return reference - timedelta(days=max(0.0, float(version.age_days)))
+
+
+def group_by_day(
+    versions: Iterable[HistoryVersion], today: date | None = None,
+) -> dict[date, list[HistoryVersion]]:
+    """Group history entries by calendar day, most recent day first.
+
+    Entries keep their original (age) order within a day, so callers can still
+    sort leaves by age without changing the relative order of equal entries.
+    """
+    grouped: dict[date, list[HistoryVersion]] = {}
+    for version in versions:
+        grouped.setdefault(version_date(version, today), []).append(version)
+    return {day: grouped[day] for day in sorted(grouped, reverse=True)}
+
+
+def total_size(versions: Iterable[HistoryVersion]) -> int:
+    """Bytes occupied by the given local/remote history versions."""
+    return sum(version.size for version in versions)
 
 
 def _parse_suffix(name: str) -> tuple[str, float] | None:

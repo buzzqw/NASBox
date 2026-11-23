@@ -4,6 +4,31 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 1.28.0 - 2026-11-23
+
+Sprint interfaccia: la certezza che tutto sia sincronizzato diventa il dato
+principale, non un dettaglio tecnico.
+
+- **Garanzia di sincronizzazione**: nuova card in cima alla scheda Stato con
+  "Tutto sincronizzato", ultima verifica dei checksum, file confrontati,
+  differenze, code, conflitti, repository, journal e stato del NAS. Pulsante
+  "Verifica adesso" e stessa sintesi nel tooltip della tray.
+- **Novità dopo l'aggiornamento**: finestra con le note di rilascio, letta da
+  `RELEASE_NOTES.md` inclusa nel bundle.
+- **Esplora NAS**: menu contestuale (copia percorsi, apri cartella locale,
+  escludi/includi, modalità di sync, crea mirror), drag & drop per upload che
+  passa dalla coda normale, empty state.
+- **Storico/Cestino**: raggruppamento per data, ripristino multiplo e in un'altra
+  cartella, spazio recuperabile.
+- **Impostazioni**: ricerca con Ctrl+K, sezioni collassabili, valori rilevati
+  dal NAS, export del bundle diagnostico senza segreti.
+- **Trasferimenti**: raggruppamento per operazione, priorità e aging visibili.
+- **Metriche**: storage insights con cartelle più grandi, duplicati e spazio
+  recuperabile dallo storico.
+- **Conflitti**: confronto affiancato, pulsanti grandi, merge a tre vie per
+  testo e anteprima del nome della copia.
+- Memorizzazione della geometria della finestra.
+
 ## 1.27.0 - 2026-11-23
 
 Client 1.27.0 / server 3.24.0. Hardening di sicurezza, test e prestazioni.

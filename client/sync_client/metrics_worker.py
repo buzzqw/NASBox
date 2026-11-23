@@ -7,10 +7,14 @@ Qt GUI slot.
 """
 from __future__ import annotations
 
+import hashlib
+import os
 import time
+from collections import defaultdict
 from dataclasses import dataclass, replace
+from pathlib import Path
 
-from . import rsync_ops
+from . import rsync_ops, trash
 from .config import Config
 from .rsync_ops import NasConnection
 
@@ -249,3 +253,262 @@ class MetricsCollector:
                 disk_write_rate=max(0, result.metrics.disk_write_bytes - old.disk_write_bytes) / elapsed,
             ),
         )
+
+
+# ---------------------------------------------------------------------------
+# Storage insights (local filesystem only, read-only).
+#
+# These helpers are pure: no Qt, no SSH, no writes. The caller runs them on a
+# background thread (see MetricsTab._analyze_storage) because scanning a large
+# NASBox tree and hashing candidate duplicates can take a while. Every loop is
+# bounded so a pathological tree cannot block the scan forever, and permission
+# errors are counted instead of aborting the whole analysis.
+# ---------------------------------------------------------------------------
+
+STORAGE_TOP_FOLDERS = 20
+STORAGE_MAX_DUPLICATE_CANDIDATES = 2000
+STORAGE_MAX_FILES = 50_000
+STORAGE_MAX_FILES_PER_DIR = 10_000
+STORAGE_MAX_DIRS = 20_000
+_STORAGE_HASH_CHUNK = 1024 * 1024
+_STORAGE_PROGRESS_EVERY = 250
+
+
+@dataclass(frozen=True)
+class FolderSize:
+    """Subtree size of one directory below the local NASBox root."""
+
+    path: str          # relative to the local root ("." for the root itself)
+    size_bytes: int
+    file_count: int
+
+
+@dataclass(frozen=True)
+class DuplicateGroup:
+    """Files with identical size *and* sha256 digest."""
+
+    size_bytes: int
+    sha256: str
+    paths: tuple[str, ...]   # relative paths, sorted for stable display
+
+    @property
+    def wasted_bytes(self) -> int:
+        """Bytes reclaimable by keeping a single copy of this group."""
+        return self.size_bytes * (len(self.paths) - 1)
+
+
+@dataclass(frozen=True)
+class TrashInsight:
+    """Read-only view of the local .sync-trash version history."""
+
+    version_count: int
+    total_bytes: int
+    expired_count: int
+    expired_bytes: int
+    retention_days: float
+
+
+@dataclass(frozen=True)
+class StorageInsights:
+    """Snapshot returned by :func:`collect_storage_insights`."""
+
+    root: str
+    collected_at: float
+    scanned_files: int
+    scan_errors: int
+    candidates_limit_reached: bool
+    top_folders: tuple[FolderSize, ...]
+    duplicates: tuple[DuplicateGroup, ...]
+    duplicate_candidates: int
+    duplicate_wasted_bytes: int
+    trash: TrashInsight
+
+
+def _empty_insights(root: Path, retention_days: float = 0.0) -> StorageInsights:
+    return StorageInsights(
+        root=str(root),
+        collected_at=time.time(),
+        scanned_files=0,
+        scan_errors=0,
+        candidates_limit_reached=False,
+        top_folders=(),
+        duplicates=(),
+        duplicate_candidates=0,
+        duplicate_wasted_bytes=0,
+        trash=TrashInsight(0, 0, 0, 0, retention_days),
+    )
+
+
+def _hash_file(path: str) -> str | None:
+    digest = hashlib.sha256()
+    try:
+        with open(path, "rb") as handle:
+            for chunk in iter(lambda: handle.read(_STORAGE_HASH_CHUNK), b""):
+                digest.update(chunk)
+    except OSError:
+        return None
+    return digest.hexdigest()
+
+
+def _scan_folders(root: Path, progress) -> tuple[list[FolderSize], list[tuple[str, str, int]], int]:
+    """Walk *root* once with os.scandir, returning folder stats and file records.
+
+    Symlinks are skipped (no loops / leaving the tree), unreadable entries are
+    counted as errors, and traversal is bounded by the module constants. File
+    records are ``(relative_path, absolute_path, size)`` tuples.
+    """
+    root_str = os.path.normpath(str(root))
+    dir_sizes: dict[str, list[int]] = {root_str: [0, 0]}  # abs dir -> [bytes, files]
+    dir_parent: dict[str, str | None] = {root_str: None}
+    per_dir_files: dict[str, int] = defaultdict(int)
+    files: list[tuple[str, str, int]] = []
+    errors = 0
+    stack = [root_str]
+
+    while stack:
+        current = stack.pop()
+        try:
+            with os.scandir(current) as iterator:
+                entries = sorted(iterator, key=lambda entry: entry.name)
+        except (PermissionError, OSError):
+            errors += 1
+            continue
+
+        subdirs: list[str] = []
+        for entry in entries:
+            try:
+                if entry.is_symlink():
+                    continue
+                if entry.is_dir(follow_symlinks=False):
+                    child = os.path.normpath(entry.path)
+                    if len(dir_sizes) >= STORAGE_MAX_DIRS:
+                        continue
+                    dir_sizes[child] = [0, 0]
+                    dir_parent[child] = current
+                    subdirs.append(child)
+                elif entry.is_file(follow_symlinks=False):
+                    if (per_dir_files[current] >= STORAGE_MAX_FILES_PER_DIR
+                            or len(files) >= STORAGE_MAX_FILES):
+                        continue
+                    per_dir_files[current] += 1
+                    try:
+                        size = entry.stat(follow_symlinks=False).st_size
+                    except OSError:
+                        errors += 1
+                        continue
+                    dir_sizes[current][0] += size
+                    dir_sizes[current][1] += 1
+                    files.append((os.path.relpath(entry.path, root_str), entry.path, size))
+                    if progress is not None and len(files) % _STORAGE_PROGRESS_EVERY == 0:
+                        progress(len(files))
+            except (PermissionError, OSError):
+                errors += 1
+
+        # Reverse so the alphabetical first folder is popped first.
+        stack.extend(reversed(subdirs))
+
+    # Accumulate descendant sizes into ancestors, deepest directories first.
+    for directory in sorted(dir_sizes, key=lambda item: item.count(os.sep), reverse=True):
+        parent = dir_parent.get(directory)
+        if parent is not None and parent in dir_sizes:
+            dir_sizes[parent][0] += dir_sizes[directory][0]
+            dir_sizes[parent][1] += dir_sizes[directory][1]
+
+    folders = [
+        FolderSize(
+            path=os.path.relpath(directory, root_str),
+            size_bytes=values[0],
+            file_count=values[1],
+        )
+        for directory, values in dir_sizes.items()
+        if values[1] > 0  # skip empty directories (and an entirely empty root)
+    ]
+    folders.sort(key=lambda folder: (-folder.size_bytes, folder.path))
+    return folders[:STORAGE_TOP_FOLDERS], files, errors
+
+
+def _find_duplicates(
+    files: list[tuple[str, str, int]], progress=None,
+) -> tuple[int, tuple[DuplicateGroup, ...], int, bool]:
+    """Group a bounded sample of files by (size, sha256)."""
+    # Empty files are ignored: they are not meaningful reclaimable space.
+    non_empty = [record for record in files if record[2] > 0]
+    candidates = non_empty[:STORAGE_MAX_DUPLICATE_CANDIDATES]
+    limited = len(non_empty) > len(candidates)
+
+    by_size: dict[int, list[tuple[str, str, int]]] = defaultdict(list)
+    for record in candidates:
+        by_size[record[2]].append(record)
+
+    groups: list[DuplicateGroup] = []
+    for size, records in by_size.items():
+        if len(records) < 2:
+            continue
+        by_digest: dict[str, list[str]] = defaultdict(list)
+        for relative, absolute, _size in records:
+            digest = _hash_file(absolute)
+            if digest is not None:
+                by_digest[digest].append(relative)
+        for digest, paths in by_digest.items():
+            if len(paths) >= 2:
+                groups.append(DuplicateGroup(size, digest, tuple(sorted(paths))))
+
+    groups.sort(key=lambda group: (-group.wasted_bytes, group.paths))
+    wasted = sum(group.wasted_bytes for group in groups)
+    if progress is not None:
+        progress(len(candidates))
+    return len(candidates), tuple(groups[:STORAGE_TOP_FOLDERS]), wasted, limited
+
+
+def _retention(cfg: Config) -> float:
+    try:
+        return float(cfg.get("retention_days_local") or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _trash_insight(cfg: Config) -> TrashInsight:
+    """Summarise local version history without ever pruning or modifying it."""
+    retention = _retention(cfg)
+    try:
+        versions = trash.list_local_versions()
+    except OSError:
+        versions = []
+    expired = [version for version in versions if retention > 0 and version.age_days > retention]
+    return TrashInsight(
+        version_count=len(versions),
+        total_bytes=sum(version.size for version in versions),
+        expired_count=len(expired),
+        expired_bytes=sum(version.size for version in expired),
+        retention_days=retention,
+    )
+
+
+def collect_storage_insights(
+    cfg: Config, *, progress=None, local_root: str | None = None,
+) -> StorageInsights:
+    """Collect storage insights from the local NASBox folder (read-only).
+
+    ``progress``, when given, is called with an integer number of examined
+    files every :data:`_STORAGE_PROGRESS_EVERY` files. ``local_root`` exists so
+    tests can point the scan at a temporary tree; by default the configured
+    ``local_root`` is used.
+    """
+    root = Path(local_root if local_root is not None else (cfg.local_root() or ""))
+    if not root.is_dir():
+        return _empty_insights(root, _retention(cfg))
+
+    folders, files, errors = _scan_folders(root, progress)
+    candidates, groups, wasted, limited = _find_duplicates(files, progress)
+    return StorageInsights(
+        root=str(root),
+        collected_at=time.time(),
+        scanned_files=len(files),
+        scan_errors=errors,
+        candidates_limit_reached=limited,
+        top_folders=tuple(folders),
+        duplicates=groups,
+        duplicate_candidates=candidates,
+        duplicate_wasted_bytes=wasted,
+        trash=_trash_insight(cfg),
+    )

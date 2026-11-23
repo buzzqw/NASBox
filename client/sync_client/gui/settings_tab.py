@@ -1,12 +1,17 @@
 from __future__ import annotations
 
+import json
+import re
+import zipfile
+from datetime import datetime
+
 from PyQt6.QtCore import Qt, QUrl
-from PyQt6.QtGui import QDesktopServices
+from PyQt6.QtGui import QDesktopServices, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QAbstractItemView, QApplication, QBoxLayout, QCheckBox, QComboBox, QDialog,
-    QDialogButtonBox, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit,
-    QListWidget, QListWidgetItem, QMessageBox, QPushButton, QScrollArea, QSpinBox,
-    QVBoxLayout, QWidget,
+    QDialogButtonBox, QFileDialog, QFormLayout, QGroupBox, QHBoxLayout, QLabel,
+    QLineEdit, QListWidget, QListWidgetItem, QMessageBox, QPushButton, QScrollArea,
+    QSpinBox, QVBoxLayout, QWidget,
 )
 
 from pathlib import Path
@@ -67,6 +72,25 @@ EXCLUSION_PROFILES = [
     ]),
 ]
 
+# Dynamic-property marker used to tint fields that match the settings search.
+_SEARCH_MATCH_PROPERTY = "settingsSearchMatch"
+_SEARCH_MATCH_STYLE = (
+    'QWidget[settingsSearchMatch="true"] {'
+    ' background-color: #fff2cc; border-radius: 3px; }'
+)
+
+# A diagnostic bundle is meant to be pasted into an issue: never dump secrets
+# or a full known_hosts file, even if a key happens to have an unexpected name.
+_SENSITIVE_KEY_TOKENS = (
+    "password", "passwd", "token", "secret", "credential", "private",
+    "known_hosts", "api_key", "apikey",
+)
+_BUNDLE_LOG_LINES = 200
+_BUNDLE_INNER_NAME = "diagnostics.txt"
+_PRIVATE_KEY_LINE = re.compile(r"BEGIN [A-Z ]*PRIVATE KEY")
+_SSH_KEY_BLOB = re.compile(r"\b(?:ssh-(?:rsa|ed25519)|ecdsa-sha2-\S+|sk-ssh-ed25519) [A-Za-z0-9+/=]+")
+_LOG_SECRET = re.compile(r"(?i)\b(password|passwd|token|secret|api[_-]?key)\b(\s*[=:]\s*)(\S+)")
+
 
 class SettingsTab(QWidget):
     """Everything you set up once and rarely touch again: how to reach the
@@ -87,6 +111,14 @@ class SettingsTab(QWidget):
         self._schedule_windows = cfg.pause_schedule()
         self._selective_excludes = cfg.selective_sync_excludes()
 
+        # Search + collapsible sections bookkeeping (see _make_section and
+        # _apply_search_filter). Kept on the instance so helpers can be unit
+        # tested without rebuilding the whole tab.
+        self._sections: list[QGroupBox] = []
+        self._section_keys: dict[int, str] = {}
+        self._collapse_state: dict[QGroupBox, bool] | None = None
+        self._highlighted: set[QWidget] = set()
+
         # This tab stacks a lot of group boxes -- without a scroll area, Qt's
         # layout system reports their combined minimum height as *this tab's*
         # minimum height, which propagates all the way up to the main window
@@ -103,7 +135,22 @@ class SettingsTab(QWidget):
 
         container = QWidget()
         scroll.setWidget(container)
+        # The highlight rules are added on top of the application stylesheet,
+        # so the light/dark theme keeps styling every other widget.
+        container.setStyleSheet(_SEARCH_MATCH_STYLE)
         root = QVBoxLayout(container)
+
+        # --- settings search (Ctrl+K) ---
+        self.search_edit = QLineEdit()
+        self.search_edit.setObjectName("settingsSearchEdit")
+        self.search_edit.setClearButtonEnabled(True)
+        self.search_edit.setPlaceholderText(t("settings.search_placeholder"))
+        self.search_edit.setToolTip(t("settings.search_tooltip"))
+        self.search_edit.setAccessibleName(t("settings.search_placeholder"))
+        self.search_edit.textChanged.connect(self._apply_search_filter)
+        root.addWidget(self.search_edit)
+        self.search_shortcut = QShortcut(QKeySequence("Ctrl+K"), self)
+        self.search_shortcut.activated.connect(self._focus_search)
 
         # Two columns instead of one long stack: NAS connection is the one
         # genuinely long group (10+ fields), so it gets a column to itself:
@@ -120,7 +167,7 @@ class SettingsTab(QWidget):
         root.addLayout(columns)
 
         # --- NAS connection ---
-        nas_box = QGroupBox(t("settings.nas_box_title"))
+        nas_box = self._make_section("nas", t("settings.nas_box_title"))
         nas_form = QFormLayout(nas_box)
         self.nas_lan = QLineEdit(str(cfg.get("nas_lan") or ""))
         self.nas_lan.setPlaceholderText(t("settings.nas_lan_placeholder"))
@@ -220,7 +267,7 @@ class SettingsTab(QWidget):
         left_col.addWidget(nas_box)
 
         # --- bandwidth ---
-        bw_box = QGroupBox(t("settings.bandwidth_title"))
+        bw_box = self._make_section("bandwidth", t("settings.bandwidth_title"))
         bw_layout = QHBoxLayout(bw_box)
         bw_layout.addWidget(QLabel(t("settings.upload_label")))
         self.bw_upload_spin = QSpinBox()
@@ -239,7 +286,7 @@ class SettingsTab(QWidget):
         right_col.addWidget(bw_box)
 
         # --- sync cadence ---
-        cadence_box = QGroupBox(t("settings.cadence_title"))
+        cadence_box = self._make_section("cadence", t("settings.cadence_title"))
         cadence_form = QFormLayout(cadence_box)
         self.poll_spin = QSpinBox()
         self.poll_spin.setRange(5, 3600)
@@ -282,7 +329,7 @@ class SettingsTab(QWidget):
         right_col.addWidget(cadence_box)
 
         # --- scheduled pause ---
-        schedule_box = QGroupBox(t("settings.schedule_title"))
+        schedule_box = self._make_section("schedule", t("settings.schedule_title"))
         schedule_layout = QVBoxLayout(schedule_box)
         self.schedule_enabled = QCheckBox(t("settings.schedule_enabled_checkbox"))
         self.schedule_enabled.setChecked(bool(cfg.get("pause_schedule_enabled")))
@@ -315,7 +362,7 @@ class SettingsTab(QWidget):
         right_col.addWidget(schedule_box)
 
         # --- sync feedback ---
-        feedback_box = QGroupBox(t("settings.feedback_title"))
+        feedback_box = self._make_section("feedback", t("settings.feedback_title"))
         feedback_layout = QVBoxLayout(feedback_box)
         self.notify_sync_checkbox = QCheckBox(t("settings.notify_sync_checkbox"))
         self.notify_sync_checkbox.setChecked(bool(cfg.get("notify_sync_completion")))
@@ -342,7 +389,7 @@ class SettingsTab(QWidget):
         right_col.addWidget(feedback_box)
 
         # --- language ---
-        language_box = QGroupBox(t("settings.language_title"))
+        language_box = self._make_section("language", t("settings.language_title"))
         language_form = QFormLayout(language_box)
         self.language_combo = QComboBox()
         current_lang = cfg.language()
@@ -358,7 +405,7 @@ class SettingsTab(QWidget):
         right_col.addWidget(language_box)
 
         # --- theme: light stays the default so the existing look is preserved ---
-        theme_box = QGroupBox(t("settings.theme_title"))
+        theme_box = self._make_section("theme", t("settings.theme_title"))
         theme_form = QFormLayout(theme_box)
         self.theme_combo = QComboBox()
         current_theme = cfg.get("theme", "light")
@@ -375,7 +422,7 @@ class SettingsTab(QWidget):
         right_col.addWidget(theme_box)
 
         # --- info ---
-        info_box = QGroupBox(t("settings.info_title"))
+        info_box = self._make_section("info", t("settings.info_title"))
         info_form = QFormLayout(info_box)
         info_form.addRow(t("settings.info_version_label"), QLabel(f"{APP_NAME} {APP_VERSION}"))
         info_form.addRow(t("settings.info_min_server_label"), QLabel(rsync_ops.EXPECTED_SERVER_VERSION))
@@ -387,10 +434,32 @@ class SettingsTab(QWidget):
         log_path_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         log_path_label.setWordWrap(True)
         info_form.addRow(t("settings.info_log_label"), log_path_label)
+        self.export_diag_btn = QPushButton(t("settings.export_diagnostics_btn"))
+        self.export_diag_btn.setToolTip(t("settings.export_diagnostics_tooltip"))
+        self.export_diag_btn.clicked.connect(self._export_diagnostics)
+        info_form.addRow(self.export_diag_btn)
         right_col.addWidget(info_box)
 
+        # --- NAS-reported values (read-only, never re-fetched here) ---
+        nas_facts_box = self._make_section("nas_facts", t("settings.nas_facts_title"))
+        nas_facts_form = QFormLayout(nas_facts_box)
+        self.nas_fact_retention = QLabel()
+        self.nas_fact_retention.setWordWrap(True)
+        nas_facts_form.addRow(t("settings.nas_fact_retention_label"), self.nas_fact_retention)
+        self.nas_fact_server_version = QLabel()
+        self.nas_fact_server_version.setWordWrap(True)
+        nas_facts_form.addRow(t("settings.nas_fact_server_version_label"), self.nas_fact_server_version)
+        self.nas_fact_lock = QLabel()
+        self.nas_fact_lock.setWordWrap(True)
+        nas_facts_form.addRow(t("settings.nas_fact_lock_label"), self.nas_fact_lock)
+        nas_facts_note = QLabel(t("settings.nas_facts_note"))
+        nas_facts_note.setWordWrap(True)
+        nas_facts_form.addRow(nas_facts_note)
+        self._refresh_nas_facts()
+        right_col.addWidget(nas_facts_box)
+
         # --- maintenance ---
-        maint_box = QGroupBox(t("settings.maint_title"))
+        maint_box = self._make_section("maintenance", t("settings.maint_title"))
         maint_layout = QVBoxLayout(maint_box)
         maint_note = QLabel(t("settings.maint_conflict_note"))
         maint_note.setWordWrap(True)
@@ -413,7 +482,7 @@ class SettingsTab(QWidget):
         right_col.addWidget(maint_box)
         # --- selective sync (full width: the list benefits from it, and it
         #     doesn't pair well height-wise with anything above) ---
-        exclude_box = QGroupBox(t("settings.exclude_title"))
+        exclude_box = self._make_section("exclude", t("settings.exclude_title"))
         exclude_layout = QVBoxLayout(exclude_box)
         exclude_note = QLabel(t("settings.exclude_note"))
         exclude_note.setWordWrap(True)
@@ -492,7 +561,309 @@ class SettingsTab(QWidget):
 
         root.addStretch(1)
         self._connect_dirty_signals()
+        self._apply_search_filter("")
         self._update_column_layout(self.width())
+
+    # --- search / collapsible sections ---
+
+    def _make_section(self, key: str, title: str) -> QGroupBox:
+        """A checkable group: the title checkbox collapses/expands its fields.
+
+        The check state is only a view preference -- it never touches cfg, so
+        collapsing a section cannot alter the value of any setting inside it.
+        """
+        box = QGroupBox(title)
+        box.setObjectName(f"settingsSection_{key}")
+        box.setCheckable(True)
+        box.setChecked(True)
+        box.toggled.connect(
+            lambda checked, section=box: self._on_section_toggled(section, checked)
+        )
+        self._sections.append(box)
+        self._section_keys[id(box)] = key
+        return box
+
+    @staticmethod
+    def _section_fields(section: QGroupBox) -> list[QWidget]:
+        # Direct children only: findChildren() would also return the private
+        # popups of QComboBox/QListView and showing/hiding those is not ours to do.
+        return [child for child in section.children() if isinstance(child, QWidget)]
+
+    def _on_section_toggled(self, section: QGroupBox, checked: bool) -> None:
+        # QGroupBox disables its children when unchecked; hiding them as well
+        # makes the group genuinely collapse (and reclaim layout space).
+        for child in self._section_fields(section):
+            child.setVisible(checked)
+
+    def _focus_search(self) -> None:
+        self.search_edit.setFocus(Qt.FocusReason.ShortcutFocusReason)
+        self.search_edit.selectAll()
+
+    @staticmethod
+    def _widget_search_text(widget: QWidget) -> str:
+        """Every bit of visible text attached to a field, for search/highlight."""
+        parts: list[str] = [widget.toolTip(), widget.accessibleName()]
+        text_getter = getattr(widget, "text", None)
+        if callable(text_getter):
+            try:
+                parts.append(str(text_getter()))
+            except (TypeError, ValueError):
+                pass
+        placeholder = getattr(widget, "placeholderText", None)
+        if callable(placeholder):
+            parts.append(placeholder())
+        if isinstance(widget, QComboBox):
+            parts.extend(
+                widget.itemText(index) for index in range(widget.count())
+            )
+        if isinstance(widget, QGroupBox):
+            parts.append(widget.title())
+        return " ".join(part for part in parts if part).casefold()
+
+    def _section_search_text(self, section: QGroupBox) -> str:
+        parts = [section.title(), section.toolTip()]
+        parts.extend(
+            self._widget_search_text(child) for child in self._section_fields(section)
+        )
+        return " ".join(part for part in parts if part).casefold()
+
+    def _set_match_highlight(self, widget: QWidget, matched: bool) -> None:
+        widget.setProperty(_SEARCH_MATCH_PROPERTY, matched)
+        if matched:
+            self._highlighted.add(widget)
+        else:
+            self._highlighted.discard(widget)
+        style = widget.style()
+        style.unpolish(widget)
+        style.polish(widget)
+        widget.update()
+
+    def _clear_highlights(self, section: QGroupBox | None = None) -> None:
+        widgets = (
+            list(self._highlighted)
+            if section is None
+            else [w for w in self._highlighted if section.isAncestorOf(w)]
+        )
+        for widget in widgets:
+            self._set_match_highlight(widget, False)
+
+    def _apply_search_filter(self, query: str) -> None:
+        """Hide non-matching sections and tint the matching fields."""
+        needle = query.strip().casefold()
+        if not needle:
+            if self._collapse_state is not None:
+                for section, was_checked in self._collapse_state.items():
+                    section.setChecked(was_checked)
+                self._collapse_state = None
+            for section in self._sections:
+                section.setVisible(True)
+            self._clear_highlights()
+            return
+
+        if self._collapse_state is None:
+            # Remember the user's collapse choices so clearing the search puts
+            # them back exactly as they were.
+            self._collapse_state = {
+                section: section.isChecked() for section in self._sections
+            }
+        self._clear_highlights()
+        for section in self._sections:
+            matched = needle in self._section_search_text(section)
+            section.setVisible(matched)
+            if not matched:
+                continue
+            if not section.isChecked():
+                section.setChecked(True)  # toggled handler also reveals fields
+            for child in self._section_fields(section):
+                if needle in self._widget_search_text(child):
+                    self._set_match_highlight(child, True)
+
+    # --- NAS-reported values (cfg only, no network) ---
+
+    def _nas_reported(self, value: str) -> str:
+        return t("settings.nas_reported_value", value=value)
+
+    def _refresh_nas_facts(self) -> None:
+        cfg = self.cfg
+        retention = cfg.get("retention_days_remote", 0)
+        try:
+            days = int(retention or 0)
+        except (TypeError, ValueError):
+            days = 0
+        retention_text = (
+            t("settings.retention_never") if days <= 0
+            else t("settings.retention_days", days=days)
+        )
+        self.nas_fact_retention.setText(self._nas_reported(retention_text))
+
+        server_version = str(cfg.get("server_version", "") or "").strip()
+        if not server_version:
+            version_text = t("settings.nas_not_reported")
+        else:
+            version_text = self._nas_reported(server_version)
+            if rsync_ops.server_is_outdated(server_version):
+                version_text += " " + t(
+                    "settings.outdated_version_note",
+                    version=server_version,
+                    expected=rsync_ops.EXPECTED_SERVER_VERSION,
+                )
+        self.nas_fact_server_version.setText(version_text)
+
+        if cfg.get("server_lock_held"):
+            owner = str(cfg.get("server_lock_owner_id", "") or "").strip()
+            host = str(cfg.get("server_lock_owner_host", "") or "").strip()
+            owner_text = " / ".join(part for part in (owner, host) if part)
+            if not owner_text:
+                owner_text = str(cfg.get("server_lock_owner_pid", "") or "?")
+            age = cfg.get("server_lock_age_seconds", 0)
+            lock_text = t(
+                "settings.nas_lock_held", owner=owner_text, age=str(age or 0)
+            )
+        else:
+            lock_text = t("settings.nas_lock_free")
+        self.nas_fact_lock.setText(self._nas_reported(lock_text))
+
+    # --- diagnostic bundle ---
+
+    @staticmethod
+    def _is_sensitive_key(key: str) -> bool:
+        lowered = key.casefold()
+        return (
+            any(token in lowered for token in _SENSITIVE_KEY_TOKENS)
+            or lowered.endswith("_key")
+            or lowered == "key"
+        )
+
+    @classmethod
+    def _redact_text(cls, text: str) -> str:
+        redacted = t("settings.export_redacted")
+        result: list[str] = []
+        in_private_key = False
+        for line in text.splitlines():
+            if _PRIVATE_KEY_LINE.search(line):
+                in_private_key = True
+                result.append(redacted)
+                continue
+            if in_private_key:
+                if "PRIVATE KEY" in line:  # the -----END ...----- line
+                    in_private_key = False
+                result.append(redacted)
+                continue
+            if _SSH_KEY_BLOB.search(line):
+                result.append(_SSH_KEY_BLOB.sub(redacted, line))
+                continue
+            result.append(
+                _LOG_SECRET.sub(
+                    lambda m: f"{m.group(1)}{m.group(2)}{redacted}", line
+                )
+            )
+        return "\n".join(result)
+
+    def _sanitize_value(self, value: object) -> object:
+        """Strip secrets from nested dict/list config values too (e.g. mirrors)."""
+        if isinstance(value, dict):
+            return {
+                str(key): (
+                    t("settings.export_redacted") if self._is_sensitive_key(str(key))
+                    else self._sanitize_value(item)
+                )
+                for key, item in value.items()
+            }
+        if isinstance(value, list):
+            return [self._sanitize_value(item) for item in value]
+        return value
+
+    def _config_snapshot(self) -> dict[str, object]:
+        """cfg as plain data, with credentials and host keys stripped out."""
+        data = getattr(self.cfg, "_data", None)
+        if not isinstance(data, dict):
+            return {}
+        snapshot: dict[str, object] = {}
+        for key in sorted(data):
+            if self._is_sensitive_key(str(key)):
+                snapshot[str(key)] = t("settings.export_redacted")
+            else:
+                snapshot[str(key)] = self._sanitize_value(data[key])
+        return snapshot
+
+    def _diagnostic_bundle_text(self) -> str:
+        lines = [
+            t("settings.export_bundle_title"),
+            "=" * 40,
+            t("settings.export_generated", timestamp=datetime.now().isoformat(timespec="seconds")),
+            "",
+            f"[{t('settings.export_section_versions')}]",
+            f"{t('settings.info_version_label')} {APP_NAME} {APP_VERSION}",
+            f"{t('settings.info_min_server_label')} {rsync_ops.EXPECTED_SERVER_VERSION}",
+            f"{t('settings.nas_fact_server_version_label')} "
+            f"{self.nas_fact_server_version.text()}",
+            "",
+            f"[{t('settings.export_section_config')}]",
+        ]
+        snapshot = self._config_snapshot()
+        for key, value in snapshot.items():
+            rendered = value if isinstance(value, str) else json.dumps(
+                value, ensure_ascii=False, default=str
+            )
+            lines.append(f"{key} = {self._redact_text(rendered)}")
+        lines.extend([
+            "",
+            f"[{t('settings.export_section_nas_stats')}]",
+        ])
+        nas_keys = [
+            key for key in snapshot
+            if key.startswith(("server_lock_", "remote_", "journal_", "repository_", "retention_days_"))
+        ]
+        for key in nas_keys:
+            lines.append(f"{key} = {snapshot[key]}")
+        if not nas_keys:
+            lines.append(t("settings.export_no_nas_stats"))
+
+        log_path = paths.log_file()
+        lines.extend(["", f"[{t('settings.export_section_log', count=_BUNDLE_LOG_LINES)}]"])
+        try:
+            log_lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError:
+            log_lines = []
+        if not log_lines:
+            lines.append(t("settings.export_no_log"))
+        else:
+            # Redact the whole tail at once: a private-key block spans lines and
+            # per-line redaction would lose that state.
+            tail = self._redact_text("\n".join(log_lines[-_BUNDLE_LOG_LINES:]))
+            lines.extend(tail.splitlines())
+        return "\n".join(lines) + "\n"
+
+    def _export_diagnostics(self) -> None:
+        """Let the user pick a .txt/.zip path and write a redacted bundle there."""
+        path, _selected_filter = QFileDialog.getSaveFileName(
+            self,
+            t("settings.export_dialog_title"),
+            "",
+            t("settings.export_filter"),
+        )
+        if not path:
+            return
+        target = Path(path)
+        if not target.suffix:
+            target = target.with_suffix(".txt")
+        try:
+            bundle = self._diagnostic_bundle_text()
+            if target.suffix.casefold() == ".zip":
+                with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as archive:
+                    archive.writestr(_BUNDLE_INNER_NAME, bundle)
+            else:
+                target.write_text(bundle, encoding="utf-8")
+        except (OSError, ValueError, zipfile.BadZipFile) as exc:
+            QMessageBox.warning(
+                self, t("settings.export_failed_title"),
+                t("settings.export_failed_body", detail=str(exc)),
+            )
+            return
+        QMessageBox.information(
+            self, t("settings.export_done_title"),
+            t("settings.export_done_body", path=str(target)),
+        )
 
     # --- actions ---
 
@@ -863,7 +1234,10 @@ class SettingsTab(QWidget):
         self._save_settings()
 
         status_line = t("settings.daemon_active") if running else t("settings.daemon_inactive")
-        version = values.get("VERSION", "")
+        version = str(values.get("VERSION", "") or "")
+        # Already fetched above: keep it so the Settings tab (and the export)
+        # can show the effective server version without another SSH call.
+        self.cfg.set("server_version", version, persist=False)
         version_line = ""
         if version and rsync_ops.server_is_outdated(version):
             version_line = t("settings.outdated_version_note", version=version, expected=rsync_ops.EXPECTED_SERVER_VERSION)
@@ -877,6 +1251,8 @@ class SettingsTab(QWidget):
                 version_line=version_line,
             ),
         )
+        # Detection just refreshed the cfg keys we display; no new SSH call.
+        self._refresh_nas_facts()
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
