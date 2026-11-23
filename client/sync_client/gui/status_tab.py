@@ -138,6 +138,23 @@ class StatusTab(QWidget):
         self.assurance_activity.setObjectName("assuranceActivity")
         self.assurance_activity.setWordWrap(True)
         assurance_layout.addWidget(self.assurance_activity)
+        self.audit_row = QHBoxLayout()
+        self.audit_label = QLabel(t("audit.never"))
+        self.audit_label.setObjectName("auditSummary")
+        self.audit_label.setWordWrap(True)
+        self.audit_label.setAccessibleName(t("a11y.audit_summary"))
+        self.audit_row.addWidget(self.audit_label, 1)
+        self.audit_btn = QPushButton(t("audit.run_now"))
+        self.audit_btn.setObjectName("auditRunNow")
+        self.audit_btn.setToolTip(t("audit.run_now_tooltip"))
+        self.audit_btn.clicked.connect(self._run_audit)
+        self.audit_row.addWidget(self.audit_btn)
+        assurance_layout.addLayout(self.audit_row)
+        self.audit_progress = QProgressBar()
+        self.audit_progress.setObjectName("auditProgress")
+        self.audit_progress.setRange(0, 100)
+        self.audit_progress.hide()
+        assurance_layout.addWidget(self.audit_progress)
         assurance_grid = QGridLayout()
         assurance_grid.setContentsMargins(0, 0, 0, 0)
         assurance_grid.setSpacing(4)
@@ -574,6 +591,44 @@ class StatusTab(QWidget):
 
     # --- signal from engine ---
 
+    def _run_audit(self) -> None:
+        self.audit_btn.setEnabled(False)
+        if not self.engine.run_full_audit():
+            self.audit_label.setText(t("audit.busy"))
+            QTimer.singleShot(3000, lambda: self.audit_btn.setEnabled(True))
+            return
+        self.audit_label.setText(t("audit.running"))
+        self.audit_progress.show()
+        QTimer.singleShot(1000, lambda: self.audit_btn.setEnabled(True))
+
+    def _refresh_audit(self, data: dict) -> None:
+        if not isinstance(data, dict) or not data:
+            return
+        if data.get("running"):
+            done, total = data.get("progress_done", 0), data.get("progress_total", 0)
+            self.audit_progress.setRange(0, max(1, total))
+            self.audit_progress.setValue(done)
+            self.audit_progress.show()
+            self.audit_label.setText(t("audit.running"))
+            return
+        self.audit_progress.hide()
+        last = data.get("last")
+        if not last:
+            self.audit_label.setText(t("audit.never"))
+            return
+        when = time.strftime("%Y-%m-%d %H:%M", time.localtime(last.get("finished_at", 0)))
+        if last.get("status") == "ok":
+            self.audit_label.setText(t(
+                "audit.ok", when=when, files=last.get("files_checked", 0),
+                duration=int(last.get("duration_seconds", 0)),
+            ))
+        elif last.get("status") == "differences":
+            self.audit_label.setText(t(
+                "audit.differences", when=when, count=last.get("differences", 0),
+            ))
+        else:
+            self.audit_label.setText(t("audit.error", detail=last.get("error") or ""))
+
     def _verify_now(self) -> None:
         self.verify_now_btn.setEnabled(False)
         self.assurance_proof.setText(t("assurance.verifying"))
@@ -718,6 +773,7 @@ class StatusTab(QWidget):
         self._refresh_pending_summary(status)
         self._refresh_attention()
         self._refresh_assurance(status.get("assurance") or {})
+        self._refresh_audit(status.get("audit") or {})
         if self._connected and not self._diagnostics_auto_loaded:
             self._diagnostics_auto_loaded = True
             self._refresh_diagnostics()

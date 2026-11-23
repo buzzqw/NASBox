@@ -4,6 +4,15 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 1.29.0 - 2026-11-23
+
+- **Certificato di coerenza**: audit completo settimanale a blocchi da 250
+  file, in background e senza lock; report persistente degli ultimi 5 audit
+  con data, durata, file confrontati e differenze.
+- Nuovo pannello nella scheda Stato con l'esito dell'ultimo audit e pulsante
+  "Audit completo ora".
+- L'audit è solo diagnostico: non modifica file né journal.
+
 ## 1.28.12 - 2026-11-23
 
 - Safety check: conteggio cancellazioni dal manifest in cache invece di un

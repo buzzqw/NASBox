@@ -27,7 +27,7 @@ from typing import Optional
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
-from . import delete_safety, rsync_ops, trash
+from . import delete_safety, integrity_audit, rsync_ops, trash
 from .config import Config
 from .logger import EventLogger
 from .pull_worker import PullWorker
@@ -84,6 +84,8 @@ class SyncEngine(QThread):
         self._last_pending_status = 0.0
         self._pending_summary: dict[str, object] = {}
         self._integrity_running = threading.Event()
+        self._audit_running = threading.Event()
+        self._audit_progress: tuple[int, int] = (0, 0)
         self._last_integrity_check = 0.0
         self._started_at = time.time()
         self._assurance_cache: tuple[float, int] | None = None
@@ -215,6 +217,94 @@ class SyncEngine(QThread):
         """Run a full checksum verification on demand, ignoring the interval."""
         self._maybe_integrity_check(time.time(), force=True)
 
+    def audit_snapshot(self) -> dict:
+        history = integrity_audit.load_history()
+        last = history[-1] if history else None
+        return {
+            "last": {
+                "status": last.status,
+                "finished_at": last.finished_at,
+                "duration_seconds": last.duration_seconds,
+                "files_checked": last.files_checked,
+                "differences": len(last.differences),
+                "error": last.error,
+            } if last else None,
+            "history_count": len(history),
+            "running": self._audit_running.is_set(),
+            "progress_done": self._audit_progress[0],
+            "progress_total": self._audit_progress[1],
+        }
+
+    def _fresh_manifest(self) -> dict | None:
+        if self._conn is None:
+            return None
+        try:
+            snapshot = rsync_ops.remote_manifest_snapshot(self.cfg, self._conn, -1)
+        except Exception:
+            return None
+        if snapshot is None:
+            return None
+        revision, entries = snapshot
+        if revision >= 0:
+            self.cfg.set("last_manifest_revision", revision, persist=False)
+        return entries
+
+    def _audit_is_idle(self) -> bool:
+        if self._conn is None or self._stop_flag.is_set() or self._audit_running.is_set():
+            return False
+        if self.transfer_scheduler is not None:
+            snapshot = self.transfer_scheduler.snapshot()
+            if snapshot.get("count", 0) or snapshot.get("active_kind"):
+                return False
+        if self.sync_state is not None:
+            try:
+                if self.sync_state.pending_paths():
+                    return False
+            except (OSError, RuntimeError):
+                pass
+        return True
+
+    def run_full_audit(self) -> bool:
+        """Run the rare, full-tree consistency audit in a background thread."""
+        if not self._audit_is_idle() and not self._audit_running.is_set():
+            return False
+        if self._audit_running.is_set():
+            return False
+        self._audit_running.set()
+        self._audit_progress = (0, 0)
+
+        def worker() -> None:
+            try:
+                report = integrity_audit.run_audit(
+                    self.cfg,
+                    get_manifest=lambda: rsync_ops.cached_manifest(self.cfg, max_age_seconds=3600)
+                    or self._fresh_manifest(),
+                    progress=lambda done, total: setattr(self, "_audit_progress", (done, total)),
+                    cancel=self._stop_flag.is_set,
+                )
+                integrity_audit.save_report(report)
+                self.logger.log(
+                    "INFO", "-",
+                    f"audit coerenza completato: {report.files_checked} file, "
+                    f"{len(report.differences)} differenze ({report.status})",
+                )
+            except Exception as exc:
+                self.logger.log("ERROR", "-", f"audit coerenza fallito: {exc}")
+            finally:
+                self._audit_running.clear()
+                self._audit_progress = (0, 0)
+
+        threading.Thread(target=worker, name="nasbox-integrity-audit", daemon=True).start()
+        return True
+
+    def _maybe_full_audit(self, now: float) -> None:
+        if now - self._started_at < max(300, self.cfg.get("integrity_audit_startup_delay_seconds", 1800)):
+            return
+        if self._audit_running.is_set() or not integrity_audit.is_due(self.cfg, now):
+            return
+        if self._audit_is_idle():
+            self.run_full_audit()
+
     def confirm_deletions(self) -> int:
         """Explicitly allow a large, intentional deletion batch for a short time."""
         until = delete_safety.shared().confirm(self.cfg)
@@ -290,6 +380,7 @@ class SyncEngine(QThread):
         now = time.time()
         self._reconcile_watcher()
         self._maybe_integrity_check(now)
+        self._maybe_full_audit(now)
 
         if now - self._last_pending_status >= PENDING_STATUS_INTERVAL_SECONDS:
             self._pending_summary = self.sync_state.pending_summary() if self.sync_state is not None else {}
@@ -336,6 +427,7 @@ class SyncEngine(QThread):
             "server_health": self._server_health,
             "cycle_ts": now,
             "assurance": self.assurance_snapshot(),
+            "audit": self.audit_snapshot(),
         })
 
         if now - self._last_prune > PRUNE_INTERVAL_SECONDS:

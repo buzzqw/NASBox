@@ -205,6 +205,10 @@ DEFAULTS: dict[str, Any] = {
     "last_integrity_error": "",
     "last_manifest_revision": -1,
     "last_seen_release_notes_version": "",
+    "integrity_audit_enabled": True,
+    "integrity_audit_interval_days": 7,
+    "integrity_audit_batch_size": 250,
+    "integrity_audit_startup_delay_seconds": 1800,
     "bandwidth_upload_kbps": 0,    # 0 = unlimited -- applies to push (this client -> NAS)
     "bandwidth_download_kbps": 0,  # 0 = unlimited -- applies to pull (NAS -> this client)
     "retention_days_local": 30,   # client-side trash retention
