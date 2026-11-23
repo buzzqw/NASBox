@@ -1,4 +1,5 @@
-# NASBox 1.28.8
+# NASBox 1.28.9
 
-- Tutti i tab scrollabili ora riservano sempre la barra verticale: passando da
-  un tab all'altro il contenuto non cambia più larghezza e non "salta".
+Corretto il loop di "PULL_DEFERRED": le cancellazioni locali già applicate sul
+NAS restavano nella coda `pending` e facevano rinviare il pull all'infinito.
+Ora vengono riconosciute e rimosse automaticamente.

@@ -4,6 +4,12 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 1.28.9 - 2026-11-23
+
+- Rotto il loop di `PULL_DEFERRED`: i percorsi di cancellazioni locali il cui
+  file è già assente anche sul NAS vengono ora rimossi dalla coda `pending`
+  invece di bloccare ogni pull successivo.
+
 ## 1.28.8 - 2026-11-23
 
 - Barra verticale sempre riservata nei tab scrollabili: elimina il salto

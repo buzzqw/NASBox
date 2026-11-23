@@ -111,6 +111,7 @@ class PullWorker(TransferWorker):
 
     def _defer_if_local_changes_pending(
         self, watcher, *, full_pull_required: bool, tombstone_count: int,
+        remote_entries: dict[str, object] | None = None,
     ) -> None:
         """Never let a delete-enabled pull erase a local change the watcher missed.
 
@@ -141,6 +142,24 @@ class PullWorker(TransferWorker):
         # _cancel_check below; apply it to the durable queue too.
         own_paths = self._self_written_snapshot()
         root = self.cfg.local_root()
+        def _already_applied(path: str) -> bool:
+            # A local deletion whose NAS counterpart is already gone is a
+            # no-op. Leaving it in the durable queue made every pull defer
+            # forever even though there was nothing left to transfer.
+            if Path(root, path).exists() or Path(root, path).is_symlink():
+                return False
+            if remote_entries is None:
+                return False
+            state = remote_entries.get(path)
+            return state is None or getattr(state, "kind", None) == RemoteKind.TOMBSTONE
+
+        applied = {
+            path for path in pending
+            if path and _already_applied(path)
+        }
+        if applied:
+            self.sync_state.clear_pending(applied)
+            pending -= applied
         pending = {
             path for path in pending
             if path
@@ -373,6 +392,7 @@ class PullWorker(TransferWorker):
                         watcher,
                         full_pull_required=full_pull_required,
                         tombstone_count=tombstone_count,
+                        remote_entries=manifest_entries,
                     )
 
                     def _cancel_check(w=watcher) -> bool:
