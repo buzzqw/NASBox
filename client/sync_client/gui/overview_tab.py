@@ -71,6 +71,11 @@ class OverviewTab(QWidget):
         banner_font.setBold(True)
         self.banner.setFont(banner_font)
         root.addWidget(self.banner)
+        self.reason_label = QLabel("")
+        self.reason_label.setObjectName("overviewReason")
+        self.reason_label.setWordWrap(True)
+        self.reason_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        root.addWidget(self.reason_label)
 
         # --- four numeric tiles in a single fixed-height row ---
         tiles = QHBoxLayout()
@@ -203,6 +208,27 @@ class OverviewTab(QWidget):
         style = self.banner.style()
         style.unpolish(self.banner)
         style.polish(self.banner)
+
+        reasons: list[str] = []
+        if paused:
+            reasons.append(t("overview.reason_paused"))
+        if pending:
+            reasons.append(t("overview.reason_pending", count=pending))
+        if queued:
+            reasons.append(t("overview.reason_queued", count=queued))
+        if conflicts:
+            reasons.append(t("overview.reason_conflicts", count=conflicts))
+        if mismatches:
+            reasons.append(t("overview.reason_checksum", count=mismatches))
+        if audit_differences:
+            reasons.append(t("overview.reason_audit", count=audit_differences))
+        if assurance.get("server_health") not in ("ok", None):
+            reasons.append(str(assurance.get("server_health")))
+        if not assurance.get("journal_ready"):
+            reasons.append(t("overview.reason_journal"))
+        self.reason_label.setText(
+            t("overview.reason", detail=" · ".join(reasons)) if reasons else ""
+        )
 
         if audit_running:
             audit_text = t("overview.audit_running")

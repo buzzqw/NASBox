@@ -1,14 +1,10 @@
-# NASBox 1.30.0
+# NASBox 1.30.1
 
-Tre evoluzioni richieste dal piano di sviluppo:
+Corretto il falso allarme "Attenzione": audit e verifica checksum ora ignorano
+le cartelle escluse dalla sincronizzazione (es. `sync-daemon/`), che generavano
+centinaia di differenze inesistenti.
 
-- **Tab Panoramica**: prima tab, fissa e senza scroll, con banner "Tutto
-  sincronizzato", 4 contatori, ultimo audit, dispositivi e pulsante "Apri
-  dettagli".
-- **Attività multi-PC**: il Monitor NAS mostra i dispositivi che hanno
-  sincronizzato di recente (host, attivo/ultimo accesso), con aggiornamento
-  manuale.
-- **Pulizia guidata duplicati**: dall'analisi storage si apre un dialog in cui
-  scegliere quali copie spostare nel cestino; per ogni gruppo il file
-  "Mantieni" resta intatto e i percorsi fuori dalla cartella NASBox vengono
-  rifiutati.
+- Gli audit passati con sole differenze escluse vengono automaticamente
+  considerati puliti.
+- La Panoramica mostra ora una riga "Motivo:" con la causa concreta dello stato
+  di attenzione.

@@ -163,9 +163,15 @@ def run_audit(
 
             fingerprint = SyncStateStore(cfg).fingerprint
 
+        from . import rsync_ops
+
+        # Excluded trees (notably the repo checkout under sync-daemon/) are
+        # intentionally not mirrored: comparing them produces hundreds of
+        # phantom differences and keeps the dashboard permanently on "attention".
         candidates = [
             (path, state) for path, state in entries.items()
             if state.kind == RemoteKind.FILE
+            and path and not rsync_ops.path_is_excluded(cfg, path)
         ]
         total = len(candidates)
         checked = 0

@@ -51,6 +51,25 @@ def test_run_audit_reports_differences_and_keeps_them_bounded(tmp_path, monkeypa
         assert progress and progress[-1][0] == progress[-1][1]
 
 
+def test_audit_ignores_excluded_paths(tmp_path, monkeypatch):
+    with ClientEnvironment():
+        cfg = Config()
+        cfg.set_local_root(str(tmp_path))
+        cfg.set_exclude_patterns(["sync-daemon/"])
+        monkeypatch.setattr(integrity_audit, "report_file", lambda: tmp_path / "audit.json")
+        entries = {
+            "sync-daemon/client/main.py": RemoteState(RemoteKind.FILE, "a" * 64, 1, 1, None),
+            "documenti/reale.txt": RemoteState(RemoteKind.FILE, "b" * 64, 1, 1, None),
+        }
+        report = integrity_audit.run_audit(
+            cfg, get_manifest=lambda: entries,
+            fingerprint=lambda path: Fingerprint("b" * 64, 1, 1),
+        )
+        assert report.status == "ok"
+        assert report.files_checked == 1
+        assert report.differences == []
+
+
 def test_report_history_is_persistent_and_bounded(tmp_path, monkeypatch):
     with ClientEnvironment():
         monkeypatch.setattr(integrity_audit, "report_file", lambda: tmp_path / "audit.json")

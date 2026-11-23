@@ -4,6 +4,14 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 1.30.1 - 2026-11-23
+
+- Audit e verifica checksum rispettano le esclusioni di sincronizzazione: le
+  differenze in cartelle come `sync-daemon/` non vengono più conteggiate.
+- I report di audit precedenti con sole differenze escluse sono considerati
+  puliti senza bisogno di rieseguire l'audit.
+- La tab Panoramica mostra il motivo specifico dello stato di attenzione.
+
 ## 1.30.0 - 2026-11-23
 
 - Nuova tab **Panoramica**: schermata fissa con stato di sincronizzazione,

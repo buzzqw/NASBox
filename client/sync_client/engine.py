@@ -241,13 +241,23 @@ class SyncEngine(QThread):
     def audit_snapshot(self) -> dict:
         history = integrity_audit.load_history()
         last = history[-1] if history else None
+        # Old reports may contain paths that are excluded today (the repo
+        # checkout is never mirrored). Count only actionable differences so a
+        # stale report cannot keep the dashboard on "attention" forever.
+        real_differences = [
+            item for item in (last.differences if last else [])
+            if not rsync_ops.path_is_excluded(self.cfg, str(item.get("path") or ""))
+        ]
+        status = last.status if last else "unknown"
+        if last and last.status == "differences" and not real_differences:
+            status = "ok"
         return {
             "last": {
-                "status": last.status,
+                "status": status,
                 "finished_at": last.finished_at,
                 "duration_seconds": last.duration_seconds,
                 "files_checked": last.files_checked,
-                "differences": len(last.differences),
+                "differences": len(real_differences),
                 "error": last.error,
             } if last else None,
             "history_count": len(history),

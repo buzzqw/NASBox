@@ -2303,7 +2303,9 @@ def integrity_check(cfg: Config, conn: NasConnection) -> list[TransferItem]:
         if entries is None:
             return []
         paths = sorted(
-            path for path, state in entries.items() if state.kind == RemoteKind.FILE
+            path for path, state in entries.items()
+            if state.kind == RemoteKind.FILE
+            and path and not path_is_excluded(cfg, path)
         )
         if not paths:
             return []
