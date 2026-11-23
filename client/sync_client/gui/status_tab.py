@@ -159,6 +159,13 @@ class StatusTab(QWidget):
         self.devices_label.setAccessibleName(t("a11y.devices_label"))
         self._last_devices_refresh = 0.0
         status_layout.addWidget(self.devices_label)
+        self.confirm_deletes_btn = QToolButton()
+        self.confirm_deletes_btn.setObjectName("confirmDeletes")
+        self.confirm_deletes_btn.setText(t("status.confirm_deletes_btn"))
+        self.confirm_deletes_btn.setToolTip(t("status.confirm_deletes_tooltip"))
+        self.confirm_deletes_btn.setAccessibleName(t("a11y.confirm_deletes_btn"))
+        self.confirm_deletes_btn.clicked.connect(self._confirm_deletions)
+        status_layout.addWidget(self.confirm_deletes_btn)
         self.watcher_label = QLabel(t("status.watcher_starting"))
         self.watcher_label.setObjectName("statusWatcher")
         self.watcher_label.setWordWrap(True)
@@ -544,6 +551,9 @@ class StatusTab(QWidget):
         self._remote_lock_age = age
         self.remote_lock_label.setText(t("status.remote_lock_held", age=age, owner=owner))
         self._refresh_nas_activity()
+
+    def _confirm_deletions(self) -> None:
+        self.engine.confirm_deletions()
 
     def _on_devices_done(self, devices, exc: Exception | None) -> None:
         if exc is not None or not devices:

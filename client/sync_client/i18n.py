@@ -241,6 +241,9 @@ STRINGS: dict[str, dict[str, str]] = {
     "status.devices_seen": {"it": "Dispositivi NAS: {names}", "en": "NAS devices: {names}"},
     "status.device_active": {"it": "attivo", "en": "active"},
     "a11y.devices_label": {"it": "Dispositivi che hanno sincronizzato di recente", "en": "Devices that synced recently"},
+    "status.confirm_deletes_btn": {"it": "Conferma cancellazioni di massa", "en": "Confirm mass deletion"},
+    "status.confirm_deletes_tooltip": {"it": "Consente per 10 minuti una cancellazione che supera il limite cumulativo di sicurezza", "en": "Allow a deletion above the cumulative safety limit for 10 minutes"},
+    "a11y.confirm_deletes_btn": {"it": "Conferma cancellazioni di massa", "en": "Confirm mass deletion"},
     "status.remote_lock_held": {
         "it": "Lock NAS: occupato da circa {age}; proprietario {owner}.",
         "en": "NAS lock: held for about {age}; owner {owner}.",
