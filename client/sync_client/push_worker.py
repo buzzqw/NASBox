@@ -231,6 +231,27 @@ class PushWorker(TransferWorker):
                 self.sync_state.mark_pending({""})
                 dirty_paths = self.sync_state.changed_paths(self.cfg.local_root())
                 swept_paths = set(dirty_paths)
+                # A full sweep reports every locally missing file, including
+                # deletions whose NAS counterpart is already gone. Those are
+                # no-ops: tombstone them locally instead of queuing thousands
+                # of paths that would only block the next pull.
+                cached = rsync_ops.cached_manifest(self.cfg)
+                if cached:
+                    root = self.cfg.local_root()
+                    applied = {
+                        path for path in dirty_paths
+                        if not Path(root, path).exists() and not Path(root, path).is_symlink()
+                        and (
+                            path not in cached
+                            or getattr(cached[path], "kind", None) in (
+                                rsync_ops.RemoteKind.ABSENT, rsync_ops.RemoteKind.TOMBSTONE,
+                            )
+                        )
+                    }
+                    if applied:
+                        self.sync_state.record_fingerprints({path: None for path in applied})
+                        dirty_paths -= applied
+                        swept_paths -= applied
             dirty_paths = {
                 path for path in dirty_paths
                 if path and not rsync_ops.path_is_excluded(self.cfg, path)

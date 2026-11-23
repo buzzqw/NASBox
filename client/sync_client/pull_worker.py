@@ -95,6 +95,7 @@ class PullWorker(TransferWorker):
         # exports the remote manifest over SSH, which is the expensive part of a
         # pull. Wait a little (or until PushWorker wakes us) before retrying.
         self._defer_retry_at = 0.0
+        self._last_defer_log: tuple[float, str] | None = None
 
     def _wake_now(self) -> None:
         self._wake.set()
@@ -339,6 +340,7 @@ class PullWorker(TransferWorker):
                     manifest_revision, manifest_entries = snapshot
                     if manifest_entries is not None:
                         self._last_manifest_entries = manifest_entries
+                        rsync_ops.cache_manifest(self.cfg, manifest_revision, manifest_entries)
                     if manifest_entries is not None:
                         # Mirror destinations are locally authoritative. Ignore
                         # NAS-side edits there instead of downloading them and
@@ -659,10 +661,22 @@ class PullWorker(TransferWorker):
             if self._cancel_dirty_paths:
                 paths = ", ".join(sorted(self._cancel_dirty_paths)[:5])
                 detail = f"{detail} ({paths})"
-            self._log(
-                "PULL_DEFERRED", "-",
-                detail,
-            )
+            # The same blocked paths repeat on every retry. Logging each one
+            # turns a normal wait into a wall of identical lines and makes the
+            # client look stuck. Report once, then only when the blocking set
+            # changes or after a longer quiet period.
+            if self._cancel_dirty_paths:
+                signature = "|".join(sorted(self._cancel_dirty_paths)[:5])
+            else:
+                signature = "unknown"
+            now_log = time.time()
+            if (
+                self._last_defer_log is None
+                or self._last_defer_log[1] != signature
+                or now_log - self._last_defer_log[0] > 300
+            ):
+                self._last_defer_log = (now_log, signature)
+                self._log("PULL_DEFERRED", "-", detail)
             # Wait for PushWorker (which was woken above) instead of exporting
             # the manifest again every TICK_SECONDS.
             self._defer_retry_at = time.time() + PULL_DEFERRED_RETRY_SECONDS

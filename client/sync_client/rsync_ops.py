@@ -1375,6 +1375,26 @@ def remote_manifest_state(
     return True, digest
 
 
+# The pull already downloads (or incrementally updates) the authoritative
+# manifest. Share it with the push planner for a few minutes so a full local
+# sweep can recognise deletions that are already applied on the NAS instead of
+# queueing thousands of no-op paths that keep PullWorker deferred.
+_manifest_cache: dict[str, tuple[float, dict[str, "RemoteState"]]] = {}
+
+
+def cache_manifest(cfg: Config, revision: int, entries: dict[str, "RemoteState"] | None) -> None:
+    if entries is None:
+        return
+    _manifest_cache[cfg.local_root()] = (time.time(), entries)
+
+
+def cached_manifest(cfg: Config, max_age_seconds: float = 300) -> dict[str, "RemoteState"] | None:
+    item = _manifest_cache.get(cfg.local_root())
+    if item is None or time.time() - item[0] > max_age_seconds:
+        return None
+    return item[1]
+
+
 def _decode_manifest_path(value: bytes) -> str:
     # Encoding order on the server is %, tab, newline, carriage return; decode
     # controls first and % last so a literal name such as "%0A" stays literal.

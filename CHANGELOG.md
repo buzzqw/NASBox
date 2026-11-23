@@ -4,6 +4,13 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 1.28.11 - 2026-11-23
+
+- Manifest condiviso tra PullWorker e PushWorker (cache con scadenza 5 minuti):
+  la scansione completa tombstonae subito le cancellazioni già presenti sul
+  NAS invece di accodarle e far rinviare il pull.
+- Log `PULL_DEFERRED` deduplicato per insieme di percorsi bloccanti.
+
 ## 1.28.10 - 2026-11-23
 
 - Completamento del fix del loop `PULL_DEFERRED`: le cancellazioni già
