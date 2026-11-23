@@ -9,6 +9,28 @@ import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
+#: Override the server script used by the contract tests (useful when the
+#: tests run against a source tree that has no server/ checkout next to it).
+SERVER_SCRIPT_ENV = "NASBOX_TEST_SERVER_SCRIPT"
+
+
+def server_script_path() -> Path | None:
+    """Locate sync-daemon-server.sh, or return None when it is not available."""
+    configured = os.environ.get(SERVER_SCRIPT_ENV, "").strip()
+    if configured:
+        # An explicit override is authoritative: honour it even when it is
+        # wrong, so a broken configuration is reported instead of silently
+        # testing some other script.
+        candidate = Path(configured).expanduser()
+        return candidate.resolve() if candidate.is_file() else None
+    # Default layout: <repo>/client/tests/support.py -> <repo>/server/...
+    candidate = (
+        Path(__file__).resolve().parents[2] / "server" / "sync-daemon-server.sh"
+    )
+    return candidate.resolve() if candidate.is_file() else None
+
 
 class ClientEnvironment:
     """Temporary XDG directories for tests that instantiate Config/SyncStateStore."""
@@ -39,11 +61,16 @@ class ServerSandbox:
     """Run the real server script against a disposable share and state directory."""
 
     def __init__(self, **config: object) -> None:
+        source = server_script_path()
+        if source is None:
+            pytest.skip(
+                "Server contract tests need sync-daemon-server.sh: place it in "
+                "<repo>/server/ or set NASBOX_TEST_SERVER_SCRIPT to its path."
+            )
         self._temporary = tempfile.TemporaryDirectory(prefix="nasbox-server-test-")
         self.root = Path(self._temporary.name)
         self.share = self.root / "share"
         self.share.mkdir()
-        source = Path(__file__).resolve().parents[2] / "server" / "sync-daemon-server.sh"
         self.script = self.root / "server.sh"
         shutil.copy2(source, self.script)
         self.script.chmod(0o755)

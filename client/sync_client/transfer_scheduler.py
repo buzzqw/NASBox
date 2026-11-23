@@ -21,6 +21,16 @@ class _Request:
 AGING_SECONDS = 30.0
 
 
+def cancellable(lock: Any, cancel_event: Any | None) -> Any:
+    """Return a context manager that can be interrupted on stop/cancel.
+
+    Tests (and embedders) may supply a plain threading.Lock instead of a
+    TransferPermit; keep that working instead of requiring with_cancel().
+    """
+    with_cancel = getattr(lock, "with_cancel", None)
+    return with_cancel(cancel_event) if with_cancel is not None else lock
+
+
 class TransferScheduler:
     """Allow one operation at a time with priority aging.
 
@@ -49,7 +59,8 @@ class TransferScheduler:
             raise ValueError(f"tipo scheduler sconosciuto: {kind}")
         return TransferPermit(self, kind)
 
-    def _acquire(self, kind: str, blocking: bool = True, timeout: float | None = None) -> bool:
+    def _acquire(self, kind: str, blocking: bool = True, timeout: float | None = None,
+                 cancel_event: Any | None = None) -> bool:
         with self._condition:
             queued_at = time.monotonic()
             request = _Request(
@@ -74,8 +85,15 @@ class TransferScheduler:
                     self._waiting.remove(request)
                     self._persist_remove(request)
                     return False
+                # Never wait forever on a bare Condition: stop()/cancel must be
+                # able to release a worker stuck behind a long mirror transfer.
+                if cancel_event is not None and cancel_event.is_set():
+                    self._waiting.remove(request)
+                    self._persist_remove(request)
+                    self._condition.notify_all()
+                    return False
                 if deadline is None:
-                    self._condition.wait()
+                    self._condition.wait(0.5)
                 else:
                     remaining = deadline - time.monotonic()
                     if remaining <= 0:
@@ -83,7 +101,7 @@ class TransferScheduler:
                         self._persist_remove(request)
                         self._condition.notify_all()
                         return False
-                    self._condition.wait(remaining)
+                    self._condition.wait(min(remaining, 0.5))
 
     def _release(self) -> None:
         with self._condition:
@@ -143,9 +161,16 @@ class TransferPermit:
         self.scheduler = scheduler
         self.kind = kind
         self._held = False
+        self._cancel_event: Any | None = None
 
-    def acquire(self, blocking: bool = True, timeout: float | None = None) -> bool:
-        self._held = self.scheduler._acquire(self.kind, blocking, timeout)
+    def with_cancel(self, event: Any | None) -> "TransferPermit":
+        """Bind a stop/cancel event so a blocking wait can be interrupted."""
+        self._cancel_event = event
+        return self
+
+    def acquire(self, blocking: bool = True, timeout: float | None = None,
+                cancel_event: Any | None = None) -> bool:
+        self._held = self.scheduler._acquire(self.kind, blocking, timeout, cancel_event)
         return self._held
 
     def release(self) -> None:
@@ -154,7 +179,7 @@ class TransferPermit:
             self.scheduler._release()
 
     def __enter__(self) -> "TransferPermit":
-        if not self.acquire():
+        if not self.acquire(cancel_event=self._cancel_event):
             raise RuntimeError("impossibile acquisire il token scheduler")
         return self
 

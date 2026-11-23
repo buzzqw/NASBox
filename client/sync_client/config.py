@@ -193,6 +193,10 @@ DEFAULTS: dict[str, Any] = {
     "tray_single_click": "menu",  # "menu" (compatibility default) or "window"
     "delete_enabled": False,
     "max_delete_files": 1000,       # safety stop for unexpectedly large delete batches
+    "max_delete_files_per_window": 1000,  # cumulative stop across batches inside one window
+    "delete_safety_window_seconds": 3600,
+    "delete_confirmation_seconds": 600,
+    "integrity_check_interval_seconds": 86400,  # automatic checksum audit (0 disables)
     "bandwidth_upload_kbps": 0,    # 0 = unlimited -- applies to push (this client -> NAS)
     "bandwidth_download_kbps": 0,  # 0 = unlimited -- applies to pull (NAS -> this client)
     "retention_days_local": 30,   # client-side trash retention

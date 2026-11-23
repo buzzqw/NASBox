@@ -27,7 +27,7 @@ from typing import Optional
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
-from . import rsync_ops, trash
+from . import delete_safety, rsync_ops, trash
 from .config import Config
 from .logger import EventLogger
 from .pull_worker import PullWorker
@@ -83,6 +83,8 @@ class SyncEngine(QThread):
         self._last_version_warning = 0.0
         self._last_pending_status = 0.0
         self._pending_summary: dict[str, object] = {}
+        self._integrity_running = threading.Event()
+        self._last_integrity_check = 0.0
         self._offered_server_update = ""
         self._server_health = "unknown"
 
@@ -128,6 +130,54 @@ class SyncEngine(QThread):
         if self._pull_worker:
             self._pull_worker.cancel_current_transfer()
 
+    def _maybe_integrity_check(self, now: float) -> None:
+        """Periodic, read-only checksum audit of both directions.
+
+        Runs in a separate thread and only while nothing else is transferring:
+        a full-tree checksum is intentionally expensive and must not steal the
+        lease from a pending push or pull.
+        """
+        try:
+            interval = int(self.cfg.get("integrity_check_interval_seconds") or 0)
+        except (TypeError, ValueError):
+            interval = 0
+        if interval <= 0 or now - self._last_integrity_check < interval:
+            return
+        if self._conn is None or self._stop_flag.is_set() or self._integrity_running.is_set():
+            return
+        if self.transfer_scheduler is not None and self.transfer_scheduler.snapshot().get("count", 0):
+            return
+        if self.sync_state is not None:
+            try:
+                if self.sync_state.pending_paths():
+                    return
+            except (OSError, RuntimeError):
+                pass
+        self._last_integrity_check = now
+        self._integrity_running.set()
+
+        def run() -> None:
+            try:
+                mismatches = rsync_ops.integrity_check(self.cfg, self._conn)
+            except Exception as exc:
+                self.logger.log("ERROR", "-", f"controllo integrità non riuscito: {exc}")
+                return
+            finally:
+                self._integrity_running.clear()
+            for item in mismatches:
+                self.log_event.emit("INTEGRITY_MISMATCH", item.path, item.direction)
+
+        threading.Thread(target=run, name="nasbox-integrity", daemon=True).start()
+
+    def confirm_deletions(self) -> int:
+        """Explicitly allow a large, intentional deletion batch for a short time."""
+        until = delete_safety.shared().confirm(self.cfg)
+        self.logger.log("INFO", "-", "cancellazioni di massa confermate dall'utente")
+        return until
+
+    def delete_safety_snapshot(self) -> dict:
+        return delete_safety.shared().snapshot(self.cfg)
+
     def prune_now(self) -> int:
         removed = trash.prune_local(self.cfg, self.logger)
         self._last_prune = time.time()
@@ -160,6 +210,7 @@ class SyncEngine(QThread):
     def _tick(self) -> None:
         now = time.time()
         self._reconcile_watcher()
+        self._maybe_integrity_check(now)
 
         if now - self._last_pending_status >= PENDING_STATUS_INTERVAL_SECONDS:
             self._pending_summary = self.sync_state.pending_summary() if self.sync_state is not None else {}

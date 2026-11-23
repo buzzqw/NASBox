@@ -6,7 +6,11 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CANONICAL_ROOT="${HOME:?}/NASBox/sync-daemon"
+# The runnable client lives in one stable location, independent of any repo
+# checkout. This matches the path used by the auto-updater and by the launcher
+# installed on the clients: pointing at an old checkout would make the launcher
+# exec a non-existent main.py after re-running this installer.
+CANONICAL_ROOT="${XDG_DATA_HOME:-${HOME:?}/.local/share}/nasbox"
 CANONICAL_CLIENT_DIR="$CANONICAL_ROOT/client"
 INSTALL_BIN="${HOME:?}/.local/bin"
 DESKTOP_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/applications"

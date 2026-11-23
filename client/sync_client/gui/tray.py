@@ -262,7 +262,8 @@ class TrayIcon(QSystemTrayIcon):
             conflict_action.triggered.connect(self._show_conflicts)
         menu.addSeparator()
 
-        sync_now_act = menu.addAction("⚡ Sincronizza adesso")
+        sync_now_act = menu.addAction(t("tray.sync_now"))
+        sync_now_act.setShortcut(t("tray.sync_now_shortcut"))
         sync_now_act.setEnabled(bool(self._connected and not self._paused))
         sync_now_act.triggered.connect(self._sync_now)
 
@@ -297,6 +298,7 @@ class TrayIcon(QSystemTrayIcon):
         menu.addSeparator()
 
         show_action = menu.addAction(t("tray.show_window"))
+        show_action.setShortcut(t("tray.show_window_shortcut"))
         show_action.triggered.connect(self._show_window)
 
         menu.addSeparator()

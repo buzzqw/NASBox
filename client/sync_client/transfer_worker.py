@@ -43,6 +43,11 @@ class TransferWorker(QThread):
         self._transfer_active = transfer_active
         self._stop_flag = threading.Event()
         self._cancel_requested = threading.Event()
+        self._cancel_epoch = 0
+        # The SSH session holding the NAS lease is tracked separately from the
+        # rsync process: cancelling a transfer must not silently drop the lease
+        # while the rest of the operation keeps running without coordination.
+        self._lock_proc = None
         self._conn: rsync_ops.NasConnection | None = None
         self._connection_lock = threading.RLock()
         self._operation_conn: rsync_ops.NasConnection | None = None
@@ -122,21 +127,26 @@ class TransferWorker(QThread):
         self._stop_flag.set()
         self._cancel_requested.set()
         self._wake_now()
-        proc = self._current_proc
-        if proc is not None and proc.poll() is None:
-            try:
-                proc.terminate()
-            except OSError:
-                pass
+        for proc in (self._current_proc, self._lock_proc):
+            if proc is not None and proc.poll() is None:
+                try:
+                    proc.terminate()
+                except OSError:
+                    pass
         self.wait(10_000)
-        if self.isRunning() and proc is not None and proc.poll() is None:
-            try:
-                proc.kill()
-            except OSError:
-                pass
+        if self.isRunning():
+            for proc in (self._current_proc, self._lock_proc):
+                if proc is not None and proc.poll() is None:
+                    try:
+                        proc.kill()
+                    except OSError:
+                        pass
             self.wait(5_000)
 
     def cancel_current_transfer(self) -> None:
+        # Increment first: a cancel that lands while a worker is still acquiring
+        # the lease must survive the cleanup at the start of the rsync call.
+        self._cancel_epoch += 1
         self._cancel_requested.set()
         proc = self._current_proc
         if proc is not None and proc.poll() is None:
@@ -183,6 +193,7 @@ class TransferWorker(QThread):
         could run to completion without on_progress ever firing at all -- no
         progress lines, no chance to react. A watchdog on its own timer reacts
         within CANCEL_CHECK_INTERVAL regardless of how chatty (or silent) rsync is."""
+        epoch_at_entry = self._cancel_epoch
         direction = (
             "upload"
             if transfer_fn in (rsync_ops.push, rsync_ops.push_to_staging)
@@ -196,6 +207,13 @@ class TransferWorker(QThread):
             self._reset_self_written_paths()
         # A cancel belongs to one rsync invocation. Keep it observable while
         # that process is being reaped, then allow the next retry to start fresh.
+        # If a cancel arrived after this call started (typically while waiting
+        # for the NAS lease), do NOT swallow it: abort before launching rsync.
+        if self._cancel_epoch != epoch_at_entry:
+            return rsync_ops.TransferResult(
+                ok=False, items=[], cancelled=True,
+                raw_error="trasferimento annullato prima dell'avvio",
+            )
         self._cancel_requested.clear()
         watchdog_stop = threading.Event()
 

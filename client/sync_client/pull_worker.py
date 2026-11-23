@@ -34,7 +34,7 @@ from pathlib import Path
 
 from PyQt6.QtCore import pyqtSignal
 
-from . import rsync_ops
+from . import delete_safety, rsync_ops
 from .config import Config, SYNC_MODE_PULL_ONLY
 from .i18n import t
 from .lock_coordinator import LockCoordinator
@@ -42,6 +42,7 @@ from .logger import EventLogger
 from .repository_safety import RepositorySafetyError
 from .reconcile import RemoteKind
 from .scan_worker import ScanWorker
+from .transfer_scheduler import cancellable
 from .transfer_worker import TransferWorker
 from .sync_state import Fingerprint, SyncStateStore
 from .watcher import WatcherHandle
@@ -84,6 +85,9 @@ class PullWorker(TransferWorker):
         self._last_pull = 0.0
         self._last_full_pull = 0.0
         self._last_manifest_revision = -1
+        # Kept so the next change can be fetched as a manifest delta instead of
+        # downloading the whole 10 MB snapshot over SSH.
+        self._last_manifest_entries: dict[str, rsync_ops.RemoteState] = {}
         self._skip_change_feed_once = False
         self._self_cancelled = False  # set by the cancel_check right before it terminates the process
         self._cancel_dirty_paths: set[str] = set()
@@ -100,6 +104,7 @@ class PullWorker(TransferWorker):
             # A reconnect may point at a different route or repository. Never
             # carry the old feed cursor into that session.
             self._last_manifest_revision = -1
+            self._last_manifest_entries = {}
             self._last_full_pull = 0.0
             self._skip_change_feed_once = False
         super().set_connection(conn)
@@ -252,7 +257,7 @@ class PullWorker(TransferWorker):
         # Blocks only if a push is currently running -- there's only ever one
         # NASBox folder, so this is the only pair that can conflict.
         self.transfer_preparing.emit("download")
-        with self.transfer_lock:
+        with cancellable(self.transfer_lock, self._stop_flag):
             try:
                 self._cancel_dirty_paths = set()
                 self.transfer_waiting_for_lock.emit("download")
@@ -304,10 +309,13 @@ class PullWorker(TransferWorker):
                     snapshot = rsync_ops.remote_manifest_snapshot(
                         self.cfg, self._conn, self._last_manifest_revision,
                         known_revision=known_revision,
+                        previous_entries=self._last_manifest_entries,
                     )
                     if snapshot is None:
                         raise rsync_ops.RemoteLockError("impossibile leggere la revisione del manifest NAS")
                     manifest_revision, manifest_entries = snapshot
+                    if manifest_entries is not None:
+                        self._last_manifest_entries = manifest_entries
                     if manifest_entries is not None:
                         # Mirror destinations are locally authoritative. Ignore
                         # NAS-side edits there instead of downloading them and
@@ -520,6 +528,23 @@ class PullWorker(TransferWorker):
                                 else:
                                     safe_checksum_paths.add(path)
                             checksum_paths = safe_checksum_paths
+                        # The authoritative pull above already downloaded every
+                        # changed file it could see. Re-fetching those same paths
+                        # in the forced pass doubled the traffic and left a
+                        # duplicate .sync-trash backup for each one. Only the
+                        # paths rsync skipped (e.g. local mtime newer than the
+                        # NAS, which --update deliberately protects) need the
+                        # forced --ignore-times pass.
+                        if result.ok:
+                            already_downloaded = {
+                                item.path for item in result.items
+                                if item.direction == "download"
+                            }
+                            if already_downloaded:
+                                checksum_paths = {
+                                    path for path in checksum_paths
+                                    if path not in already_downloaded
+                                }
                         if result.ok and not self._self_cancelled and checksum_paths:
                             self.transfer_phase.emit("download", "transferring", 0, len(checksum_paths))
                             lock.set_activity("transferring", 0, len(checksum_paths))
@@ -535,6 +560,11 @@ class PullWorker(TransferWorker):
                     if self._scan_worker:
                         self._scan_worker.wake()
                     if result.ok:
+                        local_deletes = sum(
+                            1 for item in result.items if item.direction == "delete_local"
+                        )
+                        if local_deletes:
+                            delete_safety.shared().record(self.cfg, local_deletes, "download")
                         self.transfer_phase.emit("download", "confirming", 0, len(result.items))
                         lock.set_activity("confirming", 0, len(result.items))
                         # Pulls only adopt the NAS authority; they must not create
@@ -626,4 +656,6 @@ class PullWorker(TransferWorker):
         self._log("ERROR", "-", result.raw_error or "trasferimento fallito")
 
     def _set_current_process(self, proc) -> None:
-        self._current_proc = proc
+        # See TransferWorker: the lease SSH session is tracked separately so a
+        # transfer cancel does not drop the lock mid-operation.
+        self._lock_proc = proc

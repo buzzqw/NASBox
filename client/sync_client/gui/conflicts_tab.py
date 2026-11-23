@@ -116,6 +116,7 @@ class ConflictsTab(QWidget):
         action_row.addStretch(1)
         self.search_edit = QLineEdit()
         self.search_edit.setPlaceholderText(t("conflicts.search_placeholder"))
+        self.search_edit.setAccessibleName(t("a11y.conflict_search"))
         self.search_edit.setClearButtonEnabled(True)
         self.search_edit.textChanged.connect(self._on_filter_changed)
         action_row.addWidget(self.search_edit, 1)
@@ -136,6 +137,7 @@ class ConflictsTab(QWidget):
         left_layout = QVBoxLayout(left)
         left_layout.setContentsMargins(0, 0, 0, 0)
         self.tree = QTreeWidget()
+        self.tree.setAccessibleName(t("a11y.conflict_tree"))
         self.tree.setColumnCount(5)
         self.tree.setHeaderLabels([
             t("conflicts.col_original"),
@@ -174,12 +176,12 @@ class ConflictsTab(QWidget):
         self.detail_meta.setWordWrap(True)
         right_layout.addWidget(self.detail_meta)
 
-        self.compare_box = QGroupBox("Dettaglio Versioni in Conflitto")
+        self.compare_box = QGroupBox(t("conflicts.detail_title"))
         compare_layout = QVBoxLayout(self.compare_box)
-        self.orig_info_label = QLabel("Originale: -")
+        self.orig_info_label = QLabel(t("conflicts.original_placeholder"))
         self.orig_info_label.setWordWrap(True)
         compare_layout.addWidget(self.orig_info_label)
-        self.alt_info_label = QLabel("Alternativa: -")
+        self.alt_info_label = QLabel(t("conflicts.alternative_placeholder"))
         self.alt_info_label.setWordWrap(True)
         compare_layout.addWidget(self.alt_info_label)
         self.recommend_label = QLabel("")
@@ -190,6 +192,7 @@ class ConflictsTab(QWidget):
         choose_row = QHBoxLayout()
         choose_row.addWidget(QLabel(t("conflicts.keep_label")))
         self.candidate_combo = QComboBox()
+        self.candidate_combo.setAccessibleName(t("conflicts.keep_label"))
         self.candidate_combo.currentIndexChanged.connect(lambda _index: self._update_preview())
         choose_row.addWidget(self.candidate_combo, 1)
         right_layout.addLayout(choose_row)
@@ -197,6 +200,7 @@ class ConflictsTab(QWidget):
         preview_box = QGroupBox(t("conflicts.preview_title"))
         preview_layout = QVBoxLayout(preview_box)
         self.preview = QPlainTextEdit()
+        self.preview.setAccessibleName(t("a11y.conflict_preview"))
         self.preview.setReadOnly(True)
         self.preview.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
         self.preview.setObjectName("conflictPreview")
@@ -204,18 +208,18 @@ class ConflictsTab(QWidget):
         right_layout.addWidget(preview_box, 1)
 
         direct_actions = QHBoxLayout()
-        self.keep_orig_btn = QPushButton("🟢 Mantieni Originale")
-        self.keep_orig_btn.setToolTip("Conserva il file originale ed elimina la copia di conflitto")
+        self.keep_orig_btn = QPushButton(t("conflicts.keep_original_btn"))
+        self.keep_orig_btn.setToolTip(t("conflicts.keep_original_tooltip"))
         self.keep_orig_btn.clicked.connect(self._resolve_selected_keep_original)
         direct_actions.addWidget(self.keep_orig_btn)
 
-        self.keep_alt_btn = QPushButton("🔵 Usa Alternativa")
-        self.keep_alt_btn.setToolTip("Sostituisce l'originale con la versione alternativa selezionata")
+        self.keep_alt_btn = QPushButton(t("conflicts.keep_alternative_btn"))
+        self.keep_alt_btn.setToolTip(t("conflicts.keep_alternative_tooltip"))
         self.keep_alt_btn.clicked.connect(self._keep_selected)
         direct_actions.addWidget(self.keep_alt_btn)
 
-        self.keep_both_btn = QPushButton("🟡 Conserva entrambe")
-        self.keep_both_btn.setToolTip("Rinomina la copia alternativa come file normale (copia archiviata), senza perdere nulla")
+        self.keep_both_btn = QPushButton(t("conflicts.keep_both_btn"))
+        self.keep_both_btn.setToolTip(t("conflicts.keep_both_tooltip"))
         self.keep_both_btn.clicked.connect(self._keep_both_action)
         direct_actions.addWidget(self.keep_both_btn)
         right_layout.addLayout(direct_actions)
@@ -242,6 +246,14 @@ class ConflictsTab(QWidget):
         self.resolve_all_btn.setToolTip(t("conflicts.resolve_all_tooltip"))
         self.resolve_all_btn.clicked.connect(self._resolve_selected_keep_original)
         right_layout.addWidget(self.resolve_all_btn)
+
+        # Screen readers announce the same localised text shown on the buttons.
+        for button in (
+            self.refresh_btn, self.resolve_everything_btn, self.keep_orig_btn,
+            self.keep_alt_btn, self.keep_both_btn, self.open_btn, self.restore_btn,
+            self.discard_btn, self.keep_btn, self.resolve_all_btn,
+        ):
+            button.setAccessibleName(button.text())
 
         splitter.addWidget(right)
         splitter.setStretchFactor(0, 3)
@@ -458,8 +470,8 @@ class ConflictsTab(QWidget):
         if group is None:
             self.detail_path.setText(t("conflicts.no_selection"))
             self.detail_meta.clear()
-            self.orig_info_label.setText("Originale: -")
-            self.alt_info_label.setText("Alternativa: -")
+            self.orig_info_label.setText(t("conflicts.original_placeholder"))
+            self.alt_info_label.setText(t("conflicts.alternative_placeholder"))
             self.recommend_label.setText("")
             self.preview.clear()
             return
@@ -484,9 +496,14 @@ class ConflictsTab(QWidget):
                 orig_st = group.original.stat()
             except OSError:
                 orig_st = None
-        orig_time = time.strftime('%d/%m/%Y %H:%M:%S', time.localtime(orig_st.st_mtime)) if orig_st else "mancante"
+        orig_time = (
+            time.strftime('%d/%m/%Y %H:%M:%S', time.localtime(orig_st.st_mtime))
+            if orig_st else t("conflicts.time_missing")
+        )
         orig_size = human_size(orig_st.st_size) if orig_st else "0 B"
-        self.orig_info_label.setText(f"🖥️ Versione Locale (Originale): {orig_size} • Modificato: {orig_time}")
+        self.orig_info_label.setText(t(
+            "conflicts.original_version", size=orig_size, time=orig_time,
+        ))
 
         if candidate is not None and candidate.exists():
             try:
@@ -494,18 +511,21 @@ class ConflictsTab(QWidget):
                 c_time = time.strftime('%d/%m/%Y %H:%M:%S', time.localtime(c_st.st_mtime))
                 c_size = human_size(c_st.st_size)
             except OSError:
-                c_time = "sconosciuto"
+                c_time = t("conflicts.time_unknown")
                 c_size = "0 B"
-            origin = info.origin_device or "altro dispositivo"
-            self.alt_info_label.setText(f"☁️ Versione Alternativa: {c_size} • Modificato: {c_time} (Dispositivo: {origin})")
+            origin = info.origin_device or t("conflicts.origin_unknown")
+            self.alt_info_label.setText(t(
+                "conflicts.alternative_version",
+                size=c_size, time=c_time, origin=origin,
+            ))
             if info.recommended == candidate:
-                self.recommend_label.setText("★ Versione consigliata: Alternativa (più recente)")
+                self.recommend_label.setText(t("conflicts.recommend_alternative"))
             elif info.recommended == group.original:
-                self.recommend_label.setText("★ Versione consigliata: Originale locale (più recente)")
+                self.recommend_label.setText(t("conflicts.recommend_original"))
             else:
                 self.recommend_label.setText("")
         else:
-            self.alt_info_label.setText("☁️ Versione Alternativa: Seleziona una copia")
+            self.alt_info_label.setText(t("conflicts.alternative_unselected"))
             self.recommend_label.setText("")
 
         if candidate is None:

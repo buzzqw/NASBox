@@ -6,10 +6,10 @@ import time
 from datetime import datetime, timedelta
 
 from PyQt6.QtCore import Qt, QTimer, QUrl, pyqtSignal
-from PyQt6.QtGui import QDesktopServices
+from PyQt6.QtGui import QDesktopServices, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QGroupBox, QHBoxLayout, QLabel, QMessageBox, QProgressBar, QPushButton, QSizePolicy,
-    QScrollArea, QVBoxLayout, QWidget,
+    QScrollArea, QToolButton, QVBoxLayout, QWidget,
 )
 
 from ..config import Config
@@ -24,6 +24,7 @@ from .. import updater
 from .dialogs import FolderSetupDialog, PauseForDialog
 from .async_utils import run_in_background
 from .format_utils import human_size
+from .style import SHORTCUT_SYNC_NOW, set_status_text
 
 UPDATE_CHECK_INITIAL_DELAY_MS = 10_000
 UPDATE_CHECK_INTERVAL_MS = 60 * 60 * 1000
@@ -116,13 +117,16 @@ class StatusTab(QWidget):
         status_layout = QVBoxLayout(status_box)
         self.status_label = QLabel(t("status.starting"))
         self.status_label.setObjectName("statusMessage")
+        self.status_label.setAccessibleName(t("a11y.status_message"))
         self.status_label.setWordWrap(True)
         self.status_label.setProperty("state", "starting")
         status_layout.addWidget(self.status_label)
         self.sync_state_label = QLabel(t("status.sync_state_starting"))
+        self.sync_state_label.setAccessibleName(t("a11y.sync_state"))
         self.sync_state_label.setWordWrap(True)
         status_layout.addWidget(self.sync_state_label)
         self.sync_progress_bar = QProgressBar()
+        self.sync_progress_bar.setAccessibleName(t("a11y.sync_progress"))
         self.sync_progress_bar.setRange(0, 100)
         self.sync_progress_bar.setTextVisible(True)
         self.sync_progress_bar.hide()
@@ -131,21 +135,30 @@ class StatusTab(QWidget):
         # thousands of small files jumps 0 -> 100 for each of them and looks
         # frozen. This one moves once per completed file across the whole batch.
         self.batch_progress_bar = QProgressBar()
+        self.batch_progress_bar.setAccessibleName(t("a11y.batch_progress"))
         self.batch_progress_bar.setRange(0, 100)
         self.batch_progress_bar.setTextVisible(True)
         self.batch_progress_bar.hide()
         status_layout.addWidget(self.batch_progress_bar)
-        self.conflict_stat_label = QLabel()
+        self.conflict_stat_label = QToolButton()
         self.conflict_stat_label.setObjectName("statusConflictStat")
-        self.conflict_stat_label.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.conflict_stat_label.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
+        self.conflict_stat_label.setAccessibleName(t("a11y.conflict_badge"))
+        self.conflict_stat_label.setToolTip(t("status.conflict_stat_tooltip"))
         self.conflict_stat_label.hide()
-        self.conflict_stat_label.mousePressEvent = (
-            lambda _event: self.attention_action_requested.emit("conflicts")
+        self.conflict_stat_label.clicked.connect(
+            lambda: self.attention_action_requested.emit("conflicts")
         )
         status_layout.addWidget(self.conflict_stat_label)
         self.remote_lock_label = QLabel(t("status.remote_lock_free"))
         self.remote_lock_label.setWordWrap(True)
         status_layout.addWidget(self.remote_lock_label)
+        self.devices_label = QLabel(t("status.devices_unknown"))
+        self.devices_label.setObjectName("statusDevices")
+        self.devices_label.setWordWrap(True)
+        self.devices_label.setAccessibleName(t("a11y.devices_label"))
+        self._last_devices_refresh = 0.0
+        status_layout.addWidget(self.devices_label)
         self.watcher_label = QLabel(t("status.watcher_starting"))
         self.watcher_label.setObjectName("statusWatcher")
         self.watcher_label.setWordWrap(True)
@@ -167,6 +180,8 @@ class StatusTab(QWidget):
         # daily view. Keep them one click away and remember the last choice.
         self.details_toggle = QPushButton(t("status.details_show"))
         self.details_toggle.setObjectName("secondaryButton")
+        self.details_toggle.setAccessibleName(t("a11y.details_toggle"))
+        self.details_toggle.setToolTip(t("status.details_toggle_tooltip"))
         self.details_toggle.setCheckable(True)
         self.details_toggle.toggled.connect(self._toggle_details)
         status_layout.addWidget(self.details_toggle)
@@ -183,18 +198,24 @@ class StatusTab(QWidget):
         # Keep the update status on the same row as the version: showing a
         # separate label here changes the card height while the check runs.
         version_row = QHBoxLayout()
-        self.version_label = QLabel(f"{APP_NAME} v{APP_VERSION}")
+        self.version_label = QToolButton()
+        self.version_label.setText(f"{APP_NAME} v{APP_VERSION}")
         self.version_label.setObjectName("statusVersion")
-        self.version_label.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.version_label.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
+        self.version_label.setAccessibleName(t("a11y.version_badge"))
         self.version_label.setToolTip(t("status.version_tooltip"))
-        self.version_label.mousePressEvent = lambda _e: self._check_for_update()
+        self.version_label.clicked.connect(self._check_for_update)
         version_row.addWidget(self.version_label)
-        self.update_available_label = QLabel()
+        self.update_available_label = QToolButton()
         self.update_available_label.setObjectName("statusUpdateAvailable")
-        self.update_available_label.setWordWrap(False)
-        self.update_available_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.update_available_label.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
+        self.update_available_label.setAccessibleName(t("a11y.update_status"))
+        self.update_available_label.setToolTip(t("status.version_tooltip"))
+        self.update_available_label.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+        )
         self.update_available_label.hide()
-        self.update_available_label.mousePressEvent = lambda _e: self._check_for_update()
+        self.update_available_label.clicked.connect(self._check_for_client_update_clicked)
         version_row.addWidget(self.update_available_label, 1)
         status_layout.addLayout(version_row)
         # Shown only while a large first-time batch is being checksummed locally
@@ -203,10 +224,12 @@ class StatusTab(QWidget):
         # holding stale text from before the sync started.
         self.hash_progress_label = QLabel()
         self.hash_progress_label.setObjectName("statusHashProgress")
+        self.hash_progress_label.setAccessibleName(t("a11y.hash_progress"))
         self.hash_progress_label.hide()
         status_layout.addWidget(self.hash_progress_label)
         diagnostics_row = QHBoxLayout()
         self.diagnostics_label = QLabel(t("status.diagnostics_unknown"))
+        self.diagnostics_label.setAccessibleName(t("a11y.diagnostics_status"))
         self.diagnostics_label.setWordWrap(True)
         diagnostics_row.addWidget(self.diagnostics_label, 1)
         diagnostics_btn = QPushButton(t("status.diagnostics_refresh_btn"))
@@ -215,6 +238,7 @@ class StatusTab(QWidget):
         status_layout.addLayout(diagnostics_row)
         integrity_row = QHBoxLayout()
         self.integrity_label = QLabel(t("status.integrity_unknown"))
+        self.integrity_label.setAccessibleName(t("a11y.integrity_status"))
         self.integrity_label.setWordWrap(True)
         integrity_row.addWidget(self.integrity_label, 1)
         integrity_btn = QPushButton(t("status.integrity_btn"))
@@ -223,45 +247,58 @@ class StatusTab(QWidget):
         status_layout.addLayout(integrity_row)
 
         actions_row = QHBoxLayout()
-        sync_now_btn = QPushButton(t("status.sync_now_btn"))
-        sync_now_btn.setObjectName("primaryButton")
-        sync_now_btn.setToolTip(t("status.sync_now_tooltip"))
-        sync_now_btn.clicked.connect(self._sync_now)
-        actions_row.addWidget(sync_now_btn)
+        self.sync_now_btn = QPushButton(t("status.sync_now_btn"))
+        self.sync_now_btn.setObjectName("primaryButton")
+        self.sync_now_btn.setAccessibleName(t("status.sync_now_btn"))
+        self.sync_now_btn.setToolTip(t("status.sync_now_tooltip"))
+        # Keyboard access for the most common action; the shortcut text is
+        # included in the tooltip so it is discoverable without a menu.
+        self.sync_shortcut = QShortcut(QKeySequence(SHORTCUT_SYNC_NOW), self)
+        self.sync_shortcut.activated.connect(self._sync_now)
+        self.sync_now_btn.setToolTip(f"{t('status.sync_now_tooltip')} ({SHORTCUT_SYNC_NOW})")
+        self.sync_now_btn.clicked.connect(self._sync_now)
+        actions_row.addWidget(self.sync_now_btn)
         self.pause_btn = QPushButton(t("status.pause_btn"))
+        self.pause_btn.setAccessibleName(t("status.pause_btn"))
         self.pause_btn.setToolTip(t("status.pause_tooltip"))
         self.pause_btn.clicked.connect(self._toggle_pause)
         actions_row.addWidget(self.pause_btn)
         self.pause_for_btn = QPushButton(t("status.pause_for_btn"))
+        self.pause_for_btn.setAccessibleName(t("status.pause_for_btn"))
         self.pause_for_btn.setToolTip(t("status.pause_for_tooltip"))
         self.pause_for_btn.clicked.connect(self._pause_for)
         actions_row.addWidget(self.pause_for_btn)
         actions_row.addStretch(1)
         status_layout.addLayout(actions_row)
         self.sync_feedback_label = QLabel()
+        self.sync_feedback_label.setAccessibleName(t("a11y.sync_feedback"))
         self.sync_feedback_label.setWordWrap(True)
         self.sync_feedback_label.hide()
         status_layout.addWidget(self.sync_feedback_label)
         root.addWidget(status_box)
 
         # --- NAS status & overview ---
-        nas_box = QGroupBox("Stato e Risorse del NAS")
+        nas_box = QGroupBox(t("status.nas_overview_title"))
         nas_box.setObjectName("nasStatusBox")
         nas_layout = QVBoxLayout(nas_box)
 
-        self.nas_host_label = QLabel("Connessione NAS: In attesa di verifica...")
+        self.nas_host_label = QLabel(t("status.nas_connection_title"))
+        self.nas_host_label.setAccessibleName(t("a11y.nas_connection"))
         self.nas_host_label.setWordWrap(True)
         nas_layout.addWidget(self.nas_host_label)
 
-        self.nas_activity_label = QLabel("Attività NAS: A riposo")
+        self.nas_activity_label = QLabel(t("status.nas_activity_idle"))
+        self.nas_activity_label.setAccessibleName(t("a11y.nas_activity"))
         self.nas_activity_label.setWordWrap(True)
         nas_layout.addWidget(self.nas_activity_label)
 
-        self.nas_storage_label = QLabel("Spazio disco NAS: Calcolo in corso...")
+        self.nas_storage_label = QLabel(t("status.nas_storage_calculating"))
+        self.nas_storage_label.setAccessibleName(t("a11y.nas_storage"))
         self.nas_storage_label.setWordWrap(True)
         nas_layout.addWidget(self.nas_storage_label)
 
         self.nas_storage_bar = QProgressBar()
+        self.nas_storage_bar.setAccessibleName(t("a11y.nas_storage_bar"))
         self.nas_storage_bar.setRange(0, 100)
         self.nas_storage_bar.setTextVisible(True)
         self.nas_storage_bar.setValue(0)
@@ -282,6 +319,7 @@ class StatusTab(QWidget):
         folder_box.setObjectName("folderCard")
         folder_layout = QVBoxLayout(folder_box)
         self.folder_label = QLabel()
+        self.folder_label.setAccessibleName(t("a11y.folder_path"))
         self.folder_label.setWordWrap(True)
         folder_layout.addWidget(self.folder_label)
         folder_actions = QHBoxLayout()
@@ -390,7 +428,7 @@ class StatusTab(QWidget):
             try:
                 initialize_local_root(chosen, str(self.cfg.get("repository_id") or ""))
             except RepositorySafetyError as exc:
-                QMessageBox.warning(self, "Verifica cartella locale", str(exc))
+                QMessageBox.warning(self, t("status.folder_check_title"), str(exc))
                 return
             self.cfg.set_local_root(chosen)
             self.engine.wake()
@@ -430,36 +468,35 @@ class StatusTab(QWidget):
         if not connection_configured:
             text = t("status.not_configured_msg")
             state = "warning"
-            self.nas_host_label.setText("⚠️ Connessione NAS: Non configurata")
+            self.nas_host_label.setText(t("status.nas_connection_not_configured"))
         elif not connected:
             text = t("status.nas_unreachable_msg")
             state = "error"
-            self.nas_host_label.setText(f"❌ Connessione NAS: Non raggiungibile ({where})")
+            self.nas_host_label.setText(t("status.nas_connection_unreachable", where=where))
         elif manual_paused and remaining:
             mins = int(remaining // 60)
             secs = int(remaining % 60)
             text = t("status.paused_countdown_msg", mins=f"{mins:02d}", secs=f"{secs:02d}", where=where)
             state = "paused"
-            self.nas_host_label.setText(f"⏸️ Connessione NAS: Collegato a {where} (Pausa: {mins:02d}:{secs:02d})")
+            self.nas_host_label.setText(t(
+                "status.nas_connection_paused_countdown",
+                where=where, mins=f"{mins:02d}", secs=f"{secs:02d}",
+            ))
         elif manual_paused:
             text = t("status.paused_msg", where=where)
             state = "paused"
-            self.nas_host_label.setText(f"⏸️ Connessione NAS: Collegato a {where} (In pausa)")
+            self.nas_host_label.setText(t("status.nas_connection_paused", where=where))
         elif schedule_active:
             until = _clock_after(schedule_remaining)
             text = t("status.scheduled_pause_msg", until=until, where=where)
             state = "paused"
-            self.nas_host_label.setText(f"⏸️ Connessione NAS: Collegato a {where} (Pausa fino alle {until})")
+            self.nas_host_label.setText(t("status.nas_connection_scheduled", where=where, until=until))
         else:
             text = t("status.connected_msg", where=where)
             state = "active"
-            self.nas_host_label.setText(f"🖥️ Connessione NAS: Connesso a {where} (LAN/SSH attivo)")
+            self.nas_host_label.setText(t("status.nas_connection_connected", where=where))
 
-        self.status_label.setText(text)
-        if self.status_label.property("state") != state:
-            self.status_label.setProperty("state", state)
-            self.status_label.style().unpolish(self.status_label)
-            self.status_label.style().polish(self.status_label)
+        set_status_text(self.status_label, state, text)
         self._refresh_pause_button()
         self._refresh_sync_state(paused, remaining, schedule_active, schedule_remaining)
         self._refresh_remote_lock(status)
@@ -500,7 +537,7 @@ class StatusTab(QWidget):
         owner_id = str(status.get("server_lock_owner_id") or "")
         owner_host = str(status.get("server_lock_owner_host") or "")
         owner_pid = str(status.get("server_lock_owner_pid") or "")
-        owner = owner_host or owner_id or owner_pid or "sconosciuto"
+        owner = owner_host or owner_id or owner_pid or t("status.unknown_owner")
         if owner_host and owner_id:
             owner = f"{owner_host} / {owner_id}"
         self._remote_lock_owner = owner
@@ -508,10 +545,34 @@ class StatusTab(QWidget):
         self.remote_lock_label.setText(t("status.remote_lock_held", age=age, owner=owner))
         self._refresh_nas_activity()
 
+    def _on_devices_done(self, devices, exc: Exception | None) -> None:
+        if exc is not None or not devices:
+            self.devices_label.setText(t("status.devices_unknown"))
+            return
+        now = __import__("time").time()
+        parts = []
+        for device in devices[:5]:
+            name = device.get("host") or device.get("device")
+            age = max(0, int(now - int(device.get("last_seen") or 0)))
+            flag = t("status.device_active") if device.get("active") else f"{age}s"
+            parts.append(f"{name} ({flag})")
+        self.devices_label.setText(t("status.devices_seen", names=", ".join(parts)))
+
     def _refresh_nas_activity(self) -> None:
         if not self._connected:
-            self.nas_activity_label.setText("⚠️ Attività NAS: Disconnesso")
+            self.nas_activity_label.setText(t("status.nas_activity_offline"))
+            self.devices_label.setText(t("status.devices_unknown"))
             return
+        # Device presence is read-only and cheap, but it is still an SSH call:
+        # refresh it at most once a minute and never on the GUI thread.
+        now = __import__("time").time()
+        if now - self._last_devices_refresh >= 60 and self.engine.connection is not None:
+            self._last_devices_refresh = now
+            run_in_background(
+                self, "_devices_call",
+                lambda: rsync_ops.remote_devices(self.cfg, self.engine.connection),
+                self._on_devices_done,
+            )
         pending_retries = self._pending_retries()
         if pending_retries:
             _direction, remaining = pending_retries[0]
@@ -521,21 +582,33 @@ class StatusTab(QWidget):
             )
             return
         if self._remote_lock_held:
-            self.nas_activity_label.setText(f"🔒 Attività NAS: Sync in corso da altro client ({self._remote_lock_owner}, da {self._remote_lock_age})")
+            self.nas_activity_label.setText(t(
+                "status.nas_activity_locked",
+                owner=self._remote_lock_owner, age=self._remote_lock_age,
+            ))
         elif self._transfer_phases:
             direction = next(iter(self._transfer_phases))
-            dir_str = "Upload verso NAS" if direction == "upload" else "Download dal NAS"
+            dir_str = t(
+                "status.nas_activity_direction_upload" if direction == "upload"
+                else "status.nas_activity_direction_download"
+            )
             path = self._current_paths.get(direction, "")
             fname = os.path.basename(path) if path else ""
             speed_str = f" • {human_size(self._current_speed)}/s" if self._current_speed > 0 else ""
             pct_str = f" ({self._current_percent}%)" if self._current_percent > 0 else ""
             item_str = f": {fname}" if fname else ""
             batch_str = self._batch_position(direction)
-            self.nas_activity_label.setText(f"⚡ Attività NAS: {dir_str}{item_str}{batch_str}{pct_str}{speed_str}")
+            self.nas_activity_label.setText(t(
+                "status.nas_activity_transfer",
+                direction=dir_str, item=item_str, batch=batch_str,
+                pct=pct_str, speed=speed_str,
+            ))
         elif self._queue_items:
-            self.nas_activity_label.setText(f"⏳ Attività NAS: {len(self._queue_items)} file in coda")
+            self.nas_activity_label.setText(
+                t("status.nas_activity_queued", count=len(self._queue_items))
+            )
         else:
-            self.nas_activity_label.setText("💤 Attività NAS: A riposo (nessun trasferimento in corso)")
+            self.nas_activity_label.setText(t("status.nas_activity_idle_full"))
 
     def _refresh_pending_summary(self, status: dict) -> None:
         summary = status.get("pending_summary") or {}
@@ -550,7 +623,7 @@ class StatusTab(QWidget):
             return
         minutes, seconds = divmod(age_seconds, 60)
         age = f"{minutes}m {seconds:02d}s" if minutes else f"{seconds}s"
-        reason = str(summary.get("last_reason") or "nessun motivo registrato")
+        reason = str(summary.get("last_reason") or t("status.pending_reason_unknown"))
         self.pending_label.setText(t("status.pending_summary", count=count, age=age, reason=reason))
 
     def _refresh_watcher(self, status: dict) -> None:
@@ -570,11 +643,7 @@ class StatusTab(QWidget):
             state = "disabled"
         if detail and mode == "polling":
             text = t("status.watcher_polling_detail", detail=detail)
-        self.watcher_label.setText(text)
-        if self.watcher_label.property("state") != state:
-            self.watcher_label.setProperty("state", state)
-            self.watcher_label.style().unpolish(self.watcher_label)
-            self.watcher_label.style().polish(self.watcher_label)
+        set_status_text(self.watcher_label, state, text)
 
     def on_queue_updated(self, items) -> None:
         self._queue_items = list(items)
@@ -604,7 +673,7 @@ class StatusTab(QWidget):
             uploads=uploads,
             downloads=downloads,
             deletes=deletes,
-            active=active or "nessuna",
+            active=active or t("status.scheduler_active_none"),
             scheduler_waiting=waiting_count,
         ))
 
@@ -1015,14 +1084,16 @@ class StatusTab(QWidget):
         self._nas_available_bytes = None
         if exc is not None:
             self.diagnostics_label.setText(t("status.diagnostics_failed", detail=str(exc)))
-            self.nas_storage_label.setText(f"Spazio disco NAS: Errore lettura ({exc})")
+            self.nas_storage_label.setText(
+                t("status.storage_error", detail=exc)
+            )
             self.nas_storage_bar.hide()
             self._refresh_attention()
             return
         ok, values, detail = result
         if not ok:
             self.diagnostics_label.setText(t("status.diagnostics_failed", detail=detail))
-            self.nas_storage_label.setText(f"Spazio disco NAS: Errore ({detail})")
+            self.nas_storage_label.setText(t("status.storage_error_short", detail=detail))
             self.nas_storage_bar.hide()
             self._refresh_attention()
             return
@@ -1034,7 +1105,7 @@ class StatusTab(QWidget):
             count = int(values.get("TRASH_FILE_COUNT", "0"))
         except (TypeError, ValueError):
             self.diagnostics_label.setText(t("status.diagnostics_failed", detail=t("status.diagnostics_invalid")))
-            self.nas_storage_label.setText("Spazio disco NAS: Dati non validi")
+            self.nas_storage_label.setText(t("status.storage_invalid"))
             self.nas_storage_bar.hide()
             self._refresh_attention()
             return
@@ -1044,16 +1115,17 @@ class StatusTab(QWidget):
         if total_bytes > 0:
             total_str = human_size(total_bytes)
             pct = max(0, min(100, int((total_bytes - available_bytes) / total_bytes * 100)))
-            self.nas_storage_label.setText(
-                f"Spazio disco NAS: {free} liberi su {total_str} ({pct}% occupato) • Cestino: {trash_size} ({count} file)"
-            )
+            self.nas_storage_label.setText(t(
+                "status.storage_summary",
+                free=free, total=total_str, pct=pct, trash=trash_size, count=count,
+            ))
             self.nas_storage_bar.setValue(pct)
-            self.nas_storage_bar.setFormat(f"%p% occupato ({free} liberi)")
+            self.nas_storage_bar.setFormat(t("status.storage_bar_format", free=free))
             self.nas_storage_bar.show()
         else:
-            self.nas_storage_label.setText(
-                f"Spazio disco NAS: {free} liberi • Cestino: {trash_size} ({count} file)"
-            )
+            self.nas_storage_label.setText(t(
+                "status.storage_summary_no_total", free=free, trash=trash_size, count=count,
+            ))
             self.nas_storage_bar.hide()
         self._refresh_attention()
 
@@ -1108,9 +1180,15 @@ class StatusTab(QWidget):
         self.update_available_label.setText(
             t("status.update_available", version=candidate.version)
         )
-        self.update_available_label.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.update_available_label.mousePressEvent = lambda _e: self._install_update()
+        self.update_available_label.setToolTip(t("status.update_available_tooltip"))
         self.update_available_label.show()
+
+    def _check_for_client_update_clicked(self) -> None:
+        """Clicking the update badge installs a found update, otherwise it checks."""
+        if self._update_candidate is not None:
+            self._install_update()
+        else:
+            self._check_for_update()
 
     def _install_update(self) -> None:
         candidate = getattr(self, '_update_candidate', None)

@@ -4,6 +4,36 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 1.27.0 - 2026-11-23
+
+Client 1.27.0 / server 3.24.0. Hardening di sicurezza, test e prestazioni.
+
+- **Cancellazioni di massa**: limite cumulativo nella finestra di un'ora oltre
+  al limite per singolo batch, con conferma esplicita temporanea dalla scheda
+  Stato. Le cancellazioni da Sfoglia NAS usano un solo lease e aggiornano la
+  baseline locale.
+- **Integrità**: gli eventi di cancellazione vengono registrati solo dopo il
+  successo effettivo di rsync (`--delete-after`), non appena compaiono
+  nell'itemize. Aggiunto controllo automatico periodico dei checksum con
+  `integrity_check_interval_seconds` (default 24 h).
+- **Annullo affidabile**: l'attesa sullo scheduler è interrompibile; la
+  sessione SSH che detiene il lock non viene più uccisa da "Annulla" e un
+  annullo arrivato durante il preflight non viene più perso.
+- **Fingerprint**: la cache dei digest include `ctime` e viene invalidata dopo
+  ogni commit, evitando che una modifica con mtime preservato non venga mai
+  caricata.
+- **Pull**: il full pull non scarica più due volte gli stessi file né crea
+  backup duplicati.
+- **Aggiornamenti**: `requires_server` del manifest ora applicato, rollback
+  transazionale, conferma di avvio adattiva, versioni con suffisso gestite.
+- **Manifest incrementale**: il server 3.24.0 espone `--manifest-export-delta
+  SINCE`; il client scarica solo le voci cambiate con fallback al manifest
+  completo. Aggiunto `--devices` per la presence multi-PC, mostrata nella
+  scheda Stato.
+- **GUI e test**: accessibilità, tema scuro/sistema, i18n completato,
+  scorciatoie, `pytest.ini`/conftest per PyQt6 e skip esplicito dei test che
+  richiedono il server. Suite client 263 test, server 34 test.
+
 ## 1.26.14 - 2026-11-21
 
 Rende leggibile ciò che sta succedendo: messaggi più chiari e avanzamento

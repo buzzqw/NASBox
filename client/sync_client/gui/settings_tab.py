@@ -3,9 +3,10 @@ from __future__ import annotations
 from PyQt6.QtCore import Qt, QUrl
 from PyQt6.QtGui import QDesktopServices
 from PyQt6.QtWidgets import (
-    QAbstractItemView, QBoxLayout, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout,
-    QGroupBox, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem,
-    QMessageBox, QPushButton, QScrollArea, QSpinBox, QVBoxLayout, QWidget,
+    QAbstractItemView, QApplication, QBoxLayout, QCheckBox, QComboBox, QDialog,
+    QDialogButtonBox, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit,
+    QListWidget, QListWidgetItem, QMessageBox, QPushButton, QScrollArea, QSpinBox,
+    QVBoxLayout, QWidget,
 )
 
 from pathlib import Path
@@ -18,11 +19,18 @@ from ..version import APP_NAME, APP_VERSION
 from ..repository_safety import RepositorySafetyError, bind_repository
 from .async_utils import run_in_background
 from .dialogs import ScheduleWindowDialog, SelectiveSyncDialog, WEEKDAY_KEYS
+from .style import apply_style
 
 LANGUAGE_OPTIONS = [
     ("auto", "settings.language_auto"),
     ("it", "settings.language_it"),
     ("en", "settings.language_en"),
+]
+
+THEME_OPTIONS = [
+    ("system", "settings.theme_system"),
+    ("light", "settings.theme_light"),
+    ("dark", "settings.theme_dark"),
 ]
 
 TRAY_CLICK_OPTIONS = [
@@ -349,6 +357,23 @@ class SettingsTab(QWidget):
         language_form.addRow(language_note)
         right_col.addWidget(language_box)
 
+        # --- theme: light stays the default so the existing look is preserved ---
+        theme_box = QGroupBox(t("settings.theme_title"))
+        theme_form = QFormLayout(theme_box)
+        self.theme_combo = QComboBox()
+        current_theme = cfg.get("theme", "light")
+        for index, (value, label_key) in enumerate(THEME_OPTIONS):
+            self.theme_combo.addItem(t(label_key), userData=value)
+            if value == current_theme:
+                self.theme_combo.setCurrentIndex(index)
+        self.theme_combo.setToolTip(t("settings.theme_note"))
+        self.theme_combo.setAccessibleName(t("settings.theme_label"))
+        theme_form.addRow(t("settings.theme_label"), self.theme_combo)
+        theme_note = QLabel(t("settings.theme_note"))
+        theme_note.setWordWrap(True)
+        theme_form.addRow(theme_note)
+        right_col.addWidget(theme_box)
+
         # --- info ---
         info_box = QGroupBox(t("settings.info_title"))
         info_form = QFormLayout(info_box)
@@ -489,6 +514,7 @@ class SettingsTab(QWidget):
         ):
             checkbox.toggled.connect(self._mark_dirty)
         self.language_combo.currentIndexChanged.connect(self._mark_dirty)
+        self.theme_combo.currentIndexChanged.connect(self._mark_dirty)
         self.tray_click_combo.currentIndexChanged.connect(self._mark_dirty)
         self.compression_combo.currentIndexChanged.connect(self._mark_dirty)
         self.sync_mode_combo.currentIndexChanged.connect(self._mark_dirty)
@@ -663,12 +689,15 @@ class SettingsTab(QWidget):
         code = self.language_combo.currentData()
         if code:
             self.cfg.set("language", code, persist=False)
+        theme = self.theme_combo.currentData() or "light"
+        self.cfg.set("theme", theme, persist=False)
         patterns = [self.exclude_list.item(i).text() for i in range(self.exclude_list.count())]
         self.cfg.set("exclude_patterns", patterns, persist=False)
         self.cfg.set("pause_schedule_enabled", self.schedule_enabled.isChecked(), persist=False)
         self.cfg.set("pause_schedule", normalize_schedule(self._schedule_windows), persist=False)
         self.cfg.set("selective_sync_excludes", self._selective_excludes, persist=False)
         self.cfg.save()
+        apply_style(QApplication.instance(), theme)
         self.engine.wake()
         self._refresh_auto_exclude_label()
         self._dirty = False

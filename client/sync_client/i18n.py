@@ -10,8 +10,10 @@ takes effect on the next app start (see settings_tab.py's note about that).
 """
 from __future__ import annotations
 
-import locale
+import locale  # fallback only: getdefaultlocale() is deprecated
 from typing import Any
+
+from PyQt6.QtCore import QLocale
 
 DEFAULT_LANG = "it"
 SUPPORTED = ("it", "en")
@@ -235,6 +237,10 @@ STRINGS: dict[str, dict[str, str]] = {
     "status.sync_state_active": {"it": "{direction} in corso.", "en": "{direction} in progress."},
     "status.sync_state_file": {"it": "{direction} in corso: {path}", "en": "{direction} in progress: {path}"},
     "status.remote_lock_free": {"it": "Lock NAS: libero.", "en": "NAS lock: free."},
+    "status.devices_unknown": {"it": "Dispositivi NAS: non rilevati.", "en": "NAS devices: none detected."},
+    "status.devices_seen": {"it": "Dispositivi NAS: {names}", "en": "NAS devices: {names}"},
+    "status.device_active": {"it": "attivo", "en": "active"},
+    "a11y.devices_label": {"it": "Dispositivi che hanno sincronizzato di recente", "en": "Devices that synced recently"},
     "status.remote_lock_held": {
         "it": "Lock NAS: occupato da circa {age}; proprietario {owner}.",
         "en": "NAS lock: held for about {age}; owner {owner}.",
@@ -424,6 +430,101 @@ STRINGS: dict[str, dict[str, str]] = {
     },
     "status.problem_low_space": {"it": "Spazio disponibile sul NAS basso: {free}. Controlla lo storico e libera spazio.", "en": "Low available NAS space: {free}. Review history and free space."},
 
+    # --- status_tab.py: NAS status & resources card ---
+    "status.nas_overview_title": {"it": "Stato e Risorse del NAS", "en": "NAS Status and Resources"},
+    "status.nas_connection_title": {
+        "it": "Connessione NAS: In attesa di verifica...",
+        "en": "NAS connection: Waiting for verification...",
+    },
+    "status.nas_activity_idle": {"it": "Attività NAS: A riposo", "en": "NAS activity: Idle"},
+    "status.nas_storage_calculating": {
+        "it": "Spazio disco NAS: Calcolo in corso...",
+        "en": "NAS disk space: Calculating...",
+    },
+    "status.nas_connection_not_configured": {
+        "it": "⚠️ Connessione NAS: Non configurata",
+        "en": "⚠️ NAS connection: Not configured",
+    },
+    "status.nas_connection_unreachable": {
+        "it": "❌ Connessione NAS: Non raggiungibile ({where})",
+        "en": "❌ NAS connection: Unreachable ({where})",
+    },
+    "status.nas_connection_paused_countdown": {
+        "it": "⏸️ Connessione NAS: Collegato a {where} (Pausa: {mins}:{secs})",
+        "en": "⏸️ NAS connection: Connected to {where} (Paused: {mins}:{secs})",
+    },
+    "status.nas_connection_paused": {
+        "it": "⏸️ Connessione NAS: Collegato a {where} (In pausa)",
+        "en": "⏸️ NAS connection: Connected to {where} (Paused)",
+    },
+    "status.nas_connection_scheduled": {
+        "it": "⏸️ Connessione NAS: Collegato a {where} (Pausa fino alle {until})",
+        "en": "⏸️ NAS connection: Connected to {where} (Paused until {until})",
+    },
+    "status.nas_connection_connected": {
+        "it": "🖥️ Connessione NAS: Connesso a {where} (LAN/SSH attivo)",
+        "en": "🖥️ NAS connection: Connected to {where} (LAN/SSH active)",
+    },
+    "status.nas_activity_offline": {
+        "it": "⚠️ Attività NAS: Disconnesso",
+        "en": "⚠️ NAS activity: Disconnected",
+    },
+    "status.nas_activity_locked": {
+        "it": "🔒 Attività NAS: Sync in corso da altro client ({owner}, da {age})",
+        "en": "🔒 NAS activity: Sync running from another client ({owner}, for {age})",
+    },
+    "status.nas_activity_direction_upload": {"it": "Upload verso NAS", "en": "Upload to NAS"},
+    "status.nas_activity_direction_download": {"it": "Download dal NAS", "en": "Download from NAS"},
+    "status.nas_activity_transfer": {
+        "it": "⚡ Attività NAS: {direction}{item}{batch}{pct}{speed}",
+        "en": "⚡ NAS activity: {direction}{item}{batch}{pct}{speed}",
+    },
+    "status.nas_activity_queued": {
+        "it": "⏳ Attività NAS: {count} file in coda",
+        "en": "⏳ NAS activity: {count} files queued",
+    },
+    "status.nas_activity_idle_full": {
+        "it": "💤 Attività NAS: A riposo (nessun trasferimento in corso)",
+        "en": "💤 NAS activity: Idle (no transfer in progress)",
+    },
+    "status.unknown_owner": {"it": "sconosciuto", "en": "unknown"},
+    "status.pending_reason_unknown": {"it": "nessun motivo registrato", "en": "no reason recorded"},
+    "status.scheduler_active_none": {"it": "nessuna", "en": "none"},
+    "status.folder_check_title": {"it": "Verifica cartella locale", "en": "Local folder check"},
+    "status.storage_error": {
+        "it": "Spazio disco NAS: Errore lettura ({detail})",
+        "en": "NAS disk space: Read error ({detail})",
+    },
+    "status.storage_error_short": {
+        "it": "Spazio disco NAS: Errore ({detail})",
+        "en": "NAS disk space: Error ({detail})",
+    },
+    "status.storage_invalid": {
+        "it": "Spazio disco NAS: Dati non validi",
+        "en": "NAS disk space: Invalid data",
+    },
+    "status.storage_summary": {
+        "it": "Spazio disco NAS: {free} liberi su {total} ({pct}% occupato) • Cestino: {trash} ({count} file)",
+        "en": "NAS disk space: {free} free of {total} ({pct}% used) • Trash: {trash} ({count} files)",
+    },
+    "status.storage_summary_no_total": {
+        "it": "Spazio disco NAS: {free} liberi • Cestino: {trash} ({count} file)",
+        "en": "NAS disk space: {free} free • Trash: {trash} ({count} files)",
+    },
+    "status.storage_bar_format": {"it": "%p% occupato ({free} liberi)", "en": "%p% used ({free} free)"},
+    "status.update_available_tooltip": {
+        "it": "Clicca per installare l'aggiornamento e riavviare.",
+        "en": "Click to install the update and restart.",
+    },
+    "status.conflict_stat_tooltip": {
+        "it": "Apri il Conflict Center per rivedere i conflitti.",
+        "en": "Open the Conflict Center to review conflicts.",
+    },
+    "status.details_toggle_tooltip": {
+        "it": "Mostra o nascondi la diagnostica tecnica.",
+        "en": "Show or hide technical diagnostics.",
+    },
+
     # --- settings_tab.py ---
     "settings.nas_box_title": {"it": "Connessione al NAS", "en": "NAS connection"},
     "settings.nas_lan_placeholder": {"it": "es. nas.local", "en": "e.g. nas.local"},
@@ -546,8 +647,8 @@ STRINGS: dict[str, dict[str, str]] = {
               "version stays recoverable from history.",
     },
     "settings.save_all_tooltip": {
-        "it": "Salva insieme connessione, modalita', banda, frequenza, feedback, tray, lingua, esclusioni e cancellazioni.",
-        "en": "Saves connection, sync mode, bandwidth, cadence, feedback, tray, language, exclusions, and deletion settings together.",
+        "it": "Salva insieme connessione, modalita', banda, frequenza, feedback, tray, lingua, tema, esclusioni e cancellazioni.",
+        "en": "Saves connection, sync mode, bandwidth, cadence, feedback, tray, language, theme, exclusions, and deletion settings together.",
     },
     "settings.dirty_feedback": {"it": "Modifiche non ancora salvate.", "en": "Unsaved changes."},
     "settings.saved_feedback": {"it": "Tutte le impostazioni sono salvate.", "en": "All settings are saved."},
@@ -695,6 +796,16 @@ STRINGS: dict[str, dict[str, str]] = {
     "settings.language_auto": {"it": "Automatica (sistema)", "en": "Automatic (system)"},
     "settings.language_it": {"it": "Italiano", "en": "Italiano"},
     "settings.language_en": {"it": "English", "en": "English"},
+
+    "settings.theme_title": {"it": "Tema", "en": "Theme"},
+    "settings.theme_label": {"it": "Tema dell'app:", "en": "App theme:"},
+    "settings.theme_note": {
+        "it": "Il tema viene applicato subito, senza riavviare.",
+        "en": "The theme is applied immediately, no restart needed.",
+    },
+    "settings.theme_system": {"it": "Sistema", "en": "System"},
+    "settings.theme_light": {"it": "Chiaro", "en": "Light"},
+    "settings.theme_dark": {"it": "Scuro", "en": "Dark"},
 
     "settings.info_title": {"it": "Informazioni", "en": "About"},
     "settings.info_version_label": {"it": "Versione:", "en": "Version:"},
@@ -1149,6 +1260,9 @@ STRINGS: dict[str, dict[str, str]] = {
     "tray.pause": {"it": "Pausa", "en": "Pause"},
     "tray.pause_for": {"it": "Pausa per…", "en": "Pause for…"},
     "tray.show_window": {"it": "Apri finestra principale", "en": "Open main window"},
+    "tray.show_window_shortcut": {"it": "Ctrl+Shift+O", "en": "Ctrl+Shift+O"},
+    "tray.sync_now": {"it": "⚡ Sincronizza adesso", "en": "⚡ Sync now"},
+    "tray.sync_now_shortcut": {"it": "Ctrl+Shift+S", "en": "Ctrl+Shift+S"},
     "tray.quit": {"it": "Esci", "en": "Quit"},
     "tray.pending_suffix": {"it": " — {count} in coda", "en": " — {count} queued"},
     "tray.retry_suffix": {"it": " · riprovo tra {seconds}s", "en": " · retrying in {seconds}s"},
@@ -1465,6 +1579,50 @@ STRINGS: dict[str, dict[str, str]] = {
     "conflicts.original_present": {"it": "originale presente", "en": "original present"},
     "conflicts.original_missing": {"it": "originale mancante", "en": "original missing"},
     "conflicts.original_option": {"it": "Versione originale", "en": "Original version"},
+    "conflicts.detail_title": {
+        "it": "Dettaglio Versioni in Conflitto",
+        "en": "Conflicting Version Details",
+    },
+    "conflicts.original_placeholder": {"it": "Originale: -", "en": "Original: -"},
+    "conflicts.alternative_placeholder": {"it": "Alternativa: -", "en": "Alternative: -"},
+    "conflicts.original_version": {
+        "it": "🖥️ Versione Locale (Originale): {size} • Modificato: {time}",
+        "en": "🖥️ Local Version (Original): {size} • Modified: {time}",
+    },
+    "conflicts.alternative_version": {
+        "it": "☁️ Versione Alternativa: {size} • Modificato: {time} (Dispositivo: {origin})",
+        "en": "☁️ Alternative Version: {size} • Modified: {time} (Device: {origin})",
+    },
+    "conflicts.alternative_unselected": {
+        "it": "☁️ Versione Alternativa: Seleziona una copia",
+        "en": "☁️ Alternative Version: Select a copy",
+    },
+    "conflicts.time_missing": {"it": "mancante", "en": "missing"},
+    "conflicts.time_unknown": {"it": "sconosciuto", "en": "unknown"},
+    "conflicts.origin_unknown": {"it": "altro dispositivo", "en": "another device"},
+    "conflicts.recommend_alternative": {
+        "it": "★ Versione consigliata: Alternativa (più recente)",
+        "en": "★ Recommended version: Alternative (newer)",
+    },
+    "conflicts.recommend_original": {
+        "it": "★ Versione consigliata: Originale locale (più recente)",
+        "en": "★ Recommended version: Local original (newer)",
+    },
+    "conflicts.keep_original_btn": {"it": "🟢 Mantieni Originale", "en": "🟢 Keep Original"},
+    "conflicts.keep_original_tooltip": {
+        "it": "Conserva il file originale ed elimina la copia di conflitto",
+        "en": "Keeps the original file and deletes the conflict copy",
+    },
+    "conflicts.keep_alternative_btn": {"it": "🔵 Usa Alternativa", "en": "🔵 Use Alternative"},
+    "conflicts.keep_alternative_tooltip": {
+        "it": "Sostituisce l'originale con la versione alternativa selezionata",
+        "en": "Replaces the original with the selected alternative version",
+    },
+    "conflicts.keep_both_btn": {"it": "🟡 Conserva entrambe", "en": "🟡 Keep Both"},
+    "conflicts.keep_both_tooltip": {
+        "it": "Rinomina la copia alternativa come file normale (copia archiviata), senza perdere nulla",
+        "en": "Renames the alternative copy as a normal file (archived copy), losing nothing",
+    },
     "conflicts.confirm_title": {"it": "Risolvi conflitto", "en": "Resolve conflict"},
     "conflicts.confirm_body": {
         "it": "Mantenere questa versione come file principale?\n\n{path}\n\n"
@@ -1722,14 +1880,44 @@ STRINGS: dict[str, dict[str, str]] = {
         "it": "La cartella sorgente è autoritativa: le modifiche fatte sul NAS dentro una cartella mirror non vengono scaricate né trasformate in conflitti. Le cancellazioni locali vengono propagate solo se la propagazione delle cancellazioni è attiva.",
         "en": "The source folder is authoritative: NAS-side edits inside a mirror folder are neither downloaded nor turned into conflicts. Local deletions propagate only when delete propagation is enabled.",
     },
+
+    # --- accessibility: screen-reader names for primary controls ---
+    "a11y.main_tabs": {"it": "Schede principali", "en": "Main tabs"},
+    "a11y.version_badge": {
+        "it": "Versione client, clicca per cercare aggiornamenti",
+        "en": "Client version, click to check for updates",
+    },
+    "a11y.update_status": {"it": "Stato aggiornamenti client", "en": "Client update status"},
+    "a11y.conflict_badge": {"it": "Conflitti da rivedere", "en": "Conflicts to review"},
+    "a11y.status_message": {"it": "Messaggio di stato", "en": "Status message"},
+    "a11y.sync_state": {"it": "Stato sincronizzazione", "en": "Synchronization status"},
+    "a11y.sync_progress": {"it": "Avanzamento sincronizzazione file", "en": "File sync progress"},
+    "a11y.batch_progress": {"it": "Avanzamento batch di trasferimento", "en": "Transfer batch progress"},
+    "a11y.details_toggle": {"it": "Mostra dettagli tecnici", "en": "Show technical details"},
+    "a11y.diagnostics_status": {"it": "Stato diagnostica NAS", "en": "NAS diagnostics status"},
+    "a11y.integrity_status": {"it": "Stato verifica integrità", "en": "Integrity check status"},
+    "a11y.nas_connection": {"it": "Stato connessione NAS", "en": "NAS connection status"},
+    "a11y.nas_activity": {"it": "Attività NAS", "en": "NAS activity"},
+    "a11y.nas_storage": {"it": "Spazio disco NAS", "en": "NAS disk space"},
+    "a11y.nas_storage_bar": {"it": "Utilizzo spazio disco NAS", "en": "NAS disk usage"},
+    "a11y.folder_path": {"it": "Percorso cartella NASBox", "en": "NASBox folder path"},
+    "a11y.sync_feedback": {"it": "Feedback sincronizzazione", "en": "Synchronization feedback"},
+    "a11y.hash_progress": {"it": "Avanzamento verifica file locali", "en": "Local file check progress"},
+    "a11y.conflict_tree": {"it": "Elenco conflitti", "en": "Conflict list"},
+    "a11y.conflict_preview": {"it": "Anteprima confronto versioni", "en": "Version comparison preview"},
+    "a11y.conflict_search": {"it": "Filtra conflitti per percorso", "en": "Filter conflicts by path"},
 }
 
 
 def detect_system_language() -> str:
+    """Guess the UI language from the OS, without deprecated locale APIs."""
     try:
-        lang = locale.getdefaultlocale()[0] or ""
-    except (ValueError, TypeError):
-        lang = ""
+        lang = QLocale.system().name() or ""
+    except (AttributeError, TypeError, ValueError):  # pragma: no cover - Qt always has it
+        try:
+            lang = locale.getlocale()[0] or ""
+        except (ValueError, TypeError):
+            lang = ""
     return "it" if lang.lower().startswith("it") else "en"
 
 

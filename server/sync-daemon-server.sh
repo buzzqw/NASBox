@@ -33,7 +33,7 @@
 #
 set -uo pipefail
 
-VERSION="3.23.0"
+VERSION="3.24.0"
 SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -54,6 +54,10 @@ MANIFEST_FILE="$STATE_DIR/manifest.tsv"
 JOURNAL_LOCK_FILE="$STATE_DIR/transfer-journal.lock"
 MANIFEST_REVISION_FILE="$STATE_DIR/manifest.revision"
 MANIFEST_SWEEP_FILE="$STATE_DIR/manifest-sweep.stamp"
+# Single snapshot (revision + rendered rows) used by incremental exports.
+# Written atomically and only by --manifest-export-delta, never by the plain
+# read-only --manifest-export.
+MANIFEST_SNAPSHOT_FILE="$STATE_DIR/manifest.snapshot"
 TRANSACTION_DIR="$STATE_DIR/transactions"
 STAGING_DIRNAME=".nasbox-staging"
 CHANGE_WAIT_MAX_TIMEOUT_SECONDS=3600
@@ -653,6 +657,208 @@ cmd_manifest_export() {
     [[ "$lock_held" == "true" ]] && flock -u 9
     exec 9>&-
     printf '%s\n' "$rendered"
+}
+
+# Rendered (manifest + journal) state of the current revision. Stored in a
+# global because Bash 4.3 has no namerefs; callers hold the journal lock.
+RENDERED_MANIFEST=""
+read_rendered_manifest_unlocked() {
+    local journal_lines
+    journal_lines=$(wc -l < "$JOURNAL_FILE" 2>/dev/null || echo 0)
+    if (( journal_lines <= 1 )); then
+        RENDERED_MANIFEST=$(<"$MANIFEST_FILE")
+    else
+        RENDERED_MANIFEST=$(render_manifest_unlocked) || return 1
+    fi
+    return 0
+}
+
+# Print the revision stored in the snapshot, or fail if it is missing/corrupt.
+snapshot_revision() {
+    [[ -f "$MANIFEST_SNAPSHOT_FILE" ]] || return 1
+    local header rev
+    IFS= read -r header < "$MANIFEST_SNAPSHOT_FILE" || return 1
+    [[ "$header" == "NASBOX_MANIFEST_SNAPSHOT_V1" ]] || return 1
+    rev=$(sed -n '2s/^REVISION=//p' "$MANIFEST_SNAPSHOT_FILE")
+    [[ "$rev" =~ ^[0-9]{1,18}$ ]] || return 1
+    printf '%s\n' "$((10#$rev))"
+}
+
+# Replace the snapshot in one atomic step while holding the journal lock.
+write_manifest_snapshot_unlocked() {
+    local revision="$1" rendered="$2" tmp
+    mkdir -p "$STATE_DIR" || return 1
+    tmp="${MANIFEST_SNAPSHOT_FILE}.tmp.$$"
+    {
+        printf 'NASBOX_MANIFEST_SNAPSHOT_V1\n'
+        printf 'REVISION=%s\n' "$revision"
+        printf '%s\n' "$rendered" | awk 'NR == 1 && $0 == "NASBOX_MANIFEST_V1" { next } { print }'
+    } > "$tmp" || { rm -f "$tmp"; return 1; }
+    mv -f "$tmp" "$MANIFEST_SNAPSHOT_FILE" || { rm -f "$tmp"; return 1; }
+}
+
+print_empty_manifest_delta() {
+    printf 'NASBOX_MANIFEST_DELTA_V1\nBASE_REVISION=%s\nCURRENT_REVISION=%s\nCHANGED=0\nREMOVED=\n' "$1" "$2"
+}
+
+# Machine-readable incremental manifest export.
+#
+# Output:
+#   NASBOX_MANIFEST_DELTA_V1
+#   BASE_REVISION=<since>
+#   CURRENT_REVISION=<rev>
+#   [FALLBACK_FULL=1]        <-- only when no snapshot for <since> is available
+#   CHANGED=<n>
+#   <n rows, byte-identical to the full manifest rows, escaped path included>
+#   REMOVED=
+#   <removed paths, one per line, same escaping as the manifest path field>
+#
+# A "state" is encoded exactly as in a full manifest row: a normal file has a
+# 64-hex digest, a tombstone has an empty digest and zero size/mtime. Paths
+# that disappeared from the current snapshot altogether are listed after the
+# REMOVED= marker (the chosen alternative to a synthetic "D" TSV column).
+# With FALLBACK_FULL=1 the client must replace its whole state with the rows.
+cmd_manifest_export_delta() {
+    local requested="${1:-}" current base_rev="" use_snapshot="false"
+    local lock_held="false" status=0 changed_count=0 removed_count=0
+    local workdir="" changed_file="" removed_file="" counts_file="" base_file="" current_file=""
+    local rendered=""
+
+    if [[ ! "$requested" =~ ^[0-9]{1,18}$ ]]; then
+        printf 'manifest export delta: since_revision non valido\n' >&2
+        return 75
+    fi
+    requested=$((10#$requested))
+
+    read_manifest_revision || {
+        printf 'manifest export delta: manifest.revision non valido\n' >&2
+        return 75
+    }
+    current="$MANIFEST_REVISION"
+    if (( requested > current )); then
+        printf 'manifest export delta: since_revision %s successivo alla revisione corrente %s\n' "$requested" "$current" >&2
+        return 75
+    fi
+    # Nothing changed: do not touch the journal, the tree or any state file.
+    if (( requested == current )); then
+        print_empty_manifest_delta "$requested" "$current"
+        return 0
+    fi
+
+    ensure_journal_files
+    if command -v flock >/dev/null 2>&1; then
+        exec 9>"$JOURNAL_LOCK_FILE" 2>/dev/null || true
+        if flock -s 9 2>/dev/null; then
+            lock_held="true"
+        fi
+    fi
+
+    if ! read_manifest_revision; then
+        printf 'manifest export delta: manifest.revision non valido\n' >&2
+        status=75
+    else
+        current="$MANIFEST_REVISION"
+        if (( requested > current )); then
+            printf 'manifest export delta: since_revision %s successivo alla revisione corrente %s\n' "$requested" "$current" >&2
+            status=75
+        elif (( requested == current )); then
+            print_empty_manifest_delta "$requested" "$current"
+        elif ! read_rendered_manifest_unlocked; then
+            printf 'manifest export delta: rendering del manifest fallito\n' >&2
+            status=1
+        else
+            rendered="$RENDERED_MANIFEST"
+            base_rev=$(snapshot_revision 2>/dev/null) || base_rev=""
+            if [[ -n "$base_rev" && "$base_rev" == "$requested" ]]; then
+                use_snapshot="true"
+            fi
+
+            workdir=$(mktemp -d "${STATE_DIR}/.manifest-delta.$$.XXXXXX" 2>/dev/null) || status=1
+            if (( status == 0 )); then
+                changed_file="$workdir/changed"
+                removed_file="$workdir/removed"
+                counts_file="$workdir/counts"
+                base_file="$workdir/base"
+                current_file="$workdir/current"
+                if ! : > "$changed_file" || ! : > "$removed_file" || ! : > "$counts_file"; then
+                    status=1
+                fi
+            fi
+            if (( status == 0 )); then
+                printf '%s\n' "$rendered" | awk 'NR == 1 && $0 == "NASBOX_MANIFEST_V1" { next } { print }' > "$current_file" || status=1
+            fi
+            if (( status == 0 )); then
+                if [[ "$use_snapshot" == "true" ]]; then
+                    awk 'NR > 2 { print }' "$MANIFEST_SNAPSHOT_FILE" > "$base_file" || status=1
+                else
+                    : > "$base_file" || status=1
+                fi
+            fi
+            if (( status == 0 )); then
+                awk -F '\t' \
+                    -v changed_file="$changed_file" \
+                    -v removed_file="$removed_file" \
+                    -v counts_file="$counts_file" '
+                    FILENAME == ARGV[1] {
+                        if (NF < 6) next
+                        base[$1] = $0
+                        base_order[++base_count] = $1
+                        next
+                    }
+                    FILENAME == ARGV[2] {
+                        if (NF < 6) next
+                        current[$1] = $0
+                        if (!($1 in base) || base[$1] != $0) {
+                            print $0 > changed_file
+                            changed++
+                        }
+                        next
+                    }
+                    END {
+                        for (i = 1; i <= base_count; i++) {
+                            path = base_order[i]
+                            if (!(path in current)) {
+                                print path > removed_file
+                                removed++
+                            }
+                        }
+                        printf "%d %d\n", changed + 0, removed + 0 > counts_file
+                    }
+                ' "$base_file" "$current_file" > /dev/null || status=1
+            fi
+            if (( status == 0 )); then
+                read -r changed_count removed_count < "$counts_file" || status=1
+                [[ "$changed_count" =~ ^[0-9]+$ && "$removed_count" =~ ^[0-9]+$ ]] || status=1
+            fi
+            if (( status == 0 )); then
+                # The snapshot we just used (or the full export we just sent)
+                # becomes the base for the next request carrying this revision.
+                if [[ "$lock_held" == "true" ]] && ! flock -x 9; then
+                    status=1
+                fi
+                if (( status == 0 )); then
+                    write_manifest_snapshot_unlocked "$current" "$rendered" || status=1
+                fi
+            fi
+            if (( status == 0 )); then
+                if [[ "$use_snapshot" == "true" ]]; then
+                    printf 'NASBOX_MANIFEST_DELTA_V1\nBASE_REVISION=%s\nCURRENT_REVISION=%s\nCHANGED=%s\n' "$requested" "$current" "$changed_count"
+                else
+                    printf 'NASBOX_MANIFEST_DELTA_V1\nBASE_REVISION=%s\nCURRENT_REVISION=%s\nFALLBACK_FULL=1\nCHANGED=%s\n' "$requested" "$current" "$changed_count"
+                fi
+                cat "$changed_file"
+                printf 'REMOVED=\n'
+                if [[ "$use_snapshot" == "true" ]]; then
+                    cat "$removed_file"
+                fi
+            fi
+            [[ -n "$workdir" ]] && rm -rf "$workdir"
+        fi
+    fi
+
+    [[ "$lock_held" == "true" ]] && flock -u 9
+    exec 9>&-
+    return "$status"
 }
 
 cmd_manifest_get() {
@@ -2649,6 +2855,37 @@ cmd_diagnostics() {
     if [[ -w "$STATE_DIR" ]]; then echo "STATE_WRITABLE=true"; else echo "STATE_WRITABLE=false"; fi
 }
 
+# Read-only multi-device snapshot derived from committed transactions and the
+# current lease owner. The journal keeps one BEGIN row per transaction with
+# device id and server timestamp; that is enough to show last activity without
+# adding a new coordination channel between clients.
+cmd_devices() {
+    local now last=0 ops=0 device host="-" seen=0 active=""
+    now=$(date '+%s')
+    printf 'NASBOX_DEVICES_V1\n'
+    if [[ -f "$JOURNAL_FILE" ]]; then
+        awk -F '\t' '
+            $1 == "BEGIN" && NF >= 4 {
+                device = $4
+                if (!(device in last) || $3 > last[device]) last[device] = $3
+                ops[device]++
+            }
+            END {
+                for (device in last) printf "%s|%s|%d\n", device, last[device], ops[device]
+            }
+        ' "$JOURNAL_FILE" | sort -t'|' -k2,2nr
+    fi
+    if [[ -f "$SYNC_LOCK_OWNER_FILE" ]]; then
+        IFS='|' read -r active host seen _ < "$SYNC_LOCK_OWNER_FILE" || true
+        # Do not call sync_transfer_lock_is_held() here: it opens (and creates)
+        # the lock file, while --devices must stay strictly read-only.
+        if [[ -n "$active" && "$seen" =~ ^[0-9]+$ ]] && (( now - seen <= 300 )); then
+            printf '%s|%s|%d|ACTIVE\n' "$active" "${host:--}" "$seen"
+        fi
+    fi
+    return 0
+}
+
 cmd_metrics() {
     # Deliberately read only: this endpoint never walks SHARE_ROOT. The client
     # derives rates from cumulative counters across successive samples.
@@ -2768,13 +3005,16 @@ Uso:
   $(basename "$0") --run-foreground            Esegue il loop in questo terminale
   $(basename "$0") --run-once [--dry-run]      Un solo pass di pruning, poi esce
   $(basename "$0") --metrics                   Metriche read-only del carico NAS
+  $(basename "$0") --devices                   Dispositivi visti di recente e lease attivo
   $(basename "$0") --wait-for-revision REVISION TIMEOUT
                                                    Attende solo manifest.revision
   $(basename "$0") --print-config              Dump KEY=VALUE (per l'auto-configurazione dei client)
   $(basename "$0") --init-repository           Crea il marker persistente del repository
   $(basename "$0") --journal-append             Registra una transazione (input NUL)
   $(basename "$0") --journal-compact            Compatta il journal nel manifest
-  $(basename "$0") --manifest-export            Esporta il manifest corrente
+  $(basename "$0") --manifest-export [SINCE]    Esporta il manifest corrente; con SINCE, la delta
+   $(basename "$0") --manifest-export-delta SINCE
+                                                 Esporta solo le modifiche dalla revisione SINCE
   $(basename "$0") --manifest-get PATH          Legge lo stato di un percorso
   $(basename "$0") --file-states               Stato batch file/tombstone (input/output NUL)
    $(basename "$0") --checked-delete            Cancella solo la baseline attesa (input/output NUL)
@@ -2803,6 +3043,7 @@ while [[ $# -gt 0 ]]; do
         --run-foreground) ACTION="run_foreground" ;;
         --run-once) ACTION="run_once" ;;
         --metrics) ACTION="metrics" ;;
+        --devices) ACTION="devices" ;;
         --wait-for-revision) shift; WAIT_REVISION="${1:-}"; shift; WAIT_TIMEOUT="${1:-}"; ACTION="wait_revision" ;;
         --dry-run) DRY_RUN="true" ;;
         --status) ACTION="status" ;;
@@ -2810,7 +3051,8 @@ while [[ $# -gt 0 ]]; do
         --init-repository) ACTION="init_repository" ;;
         --journal-append) ACTION="journal_append" ;;
         --journal-compact) ACTION="journal_compact" ;;
-        --manifest-export) ACTION="manifest_export" ;;
+        --manifest-export) shift; MANIFEST_SINCE="${1:-}"; ACTION="manifest_export" ;;
+        --manifest-export-delta) shift; MANIFEST_SINCE="${1:-}"; ACTION="manifest_export_delta" ;;
         --manifest-get) shift; MANIFEST_PATH="${1:-}"; ACTION="manifest_get" ;;
         --file-states) ACTION="file_states" ;;
         --file-states-current) ACTION="file_states_current" ;;
@@ -2830,12 +3072,12 @@ while [[ $# -gt 0 ]]; do
     shift
 done
 
-if [[ "$ACTION" == "metrics" ]]; then
+if [[ "$ACTION" == "metrics" || "$ACTION" == "devices" ]]; then
     # A valid existing config is enough; unlike all daemon commands, metrics
     # must not create state/journal files as a side effect of being queried.
     [[ -f "$CONFIG_FILE" ]] || { printf 'Config non trovato: %s\n' "$CONFIG_FILE" >&2; exit 1; }
     load_config || exit $?
-    cmd_metrics
+    if [[ "$ACTION" == "devices" ]]; then cmd_devices; else cmd_metrics; fi
     exit $?
 fi
 
@@ -2861,12 +3103,14 @@ case "$ACTION" in
     run_foreground) run_foreground ;;
     run_once) run_once_pass; exit $? ;;
     metrics) cmd_metrics; exit $? ;;
+    devices) cmd_devices; exit $? ;;
     status) cmd_status; exit $? ;;
     print_config) cmd_print_config; exit $? ;;
     init_repository) cmd_init_repository; exit $? ;;
     journal_append) cmd_journal_append; exit $? ;;
     journal_compact) cmd_journal_compact; exit $? ;;
-    manifest_export) cmd_manifest_export; exit $? ;;
+    manifest_export) if [[ -n "${MANIFEST_SINCE:-}" ]]; then cmd_manifest_export_delta "$MANIFEST_SINCE"; else cmd_manifest_export; fi; exit $? ;;
+    manifest_export_delta) cmd_manifest_export_delta "${MANIFEST_SINCE:-}"; exit $? ;;
     manifest_get) cmd_manifest_get "$MANIFEST_PATH"; exit $? ;;
     file_states) cmd_file_states; exit $? ;;
     file_states_current) cmd_file_states false; exit $? ;;

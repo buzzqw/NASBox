@@ -112,10 +112,18 @@ _SERVER_UPDATE_NAME_RE = re.compile(r"^sync-daemon-server-([0-9]+(?:\.[0-9]+)+)\
 
 
 def _version_tuple(version: str) -> tuple[int, ...]:
-    try:
-        return tuple(int(part) for part in version.strip().split("."))
-    except (ValueError, AttributeError):
-        return (0,)
+    parts: list[int] = []
+    for part in str(version or "").strip().split("."):
+        digits = ""
+        for char in part:
+            if not char.isdigit():
+                break
+            digits += char
+        if digits:
+            parts.append(int(digits))
+        else:
+            break
+    return tuple(parts) or (0,)
 
 
 def server_is_outdated(remote_version: str) -> bool:
@@ -1375,9 +1383,131 @@ def _decode_manifest_path(value: bytes) -> str:
     return os.fsdecode(value)
 
 
+def _parse_manifest_rows(lines: list[bytes]) -> dict[str, RemoteState] | None:
+    entries: dict[str, RemoteState] = {}
+    for line in lines:
+        fields = line.split(b"\t")
+        if len(fields) < 6:
+            return None
+        path = _decode_manifest_path(fields[0])
+        try:
+            digest = fields[1].decode("ascii", errors="strict")
+            size = int(fields[2])
+            mtime_ns = int(fields[3])
+            event_seconds = int(fields[5])
+        except (UnicodeDecodeError, ValueError):
+            return None
+        try:
+            causal_text = fields[6].decode("ascii", errors="strict") if len(fields) >= 7 else ""
+        except UnicodeDecodeError:
+            return None
+        causal = CausalVersion.parse(causal_text)
+        if causal_text and causal is None:
+            return None
+        if digest:
+            if not re.fullmatch(r"[0-9a-f]{64}", digest):
+                return None
+            entries[path] = RemoteState(RemoteKind.FILE, digest, size, mtime_ns, causal)
+        else:
+            entries[path] = RemoteState(
+                RemoteKind.TOMBSTONE, "", 0, event_seconds * 1_000_000_000, causal,
+            )
+    return entries
+
+
+def _remote_manifest_delta(
+    cfg: Config, conn: NasConnection, script_path: str, previous_revision: int,
+    previous_entries: dict[str, RemoteState] | None,
+) -> tuple[int, dict[str, RemoteState] | None] | None:
+    """Fetch only the paths changed since previous_revision (server >= 3.24)."""
+    if previous_revision < 0 or previous_entries is None:
+        return None
+    ok, output, _error = run_remote_script_bytes(
+        cfg, conn, script_path, ["--manifest-export-delta", str(previous_revision)],
+        timeout=120,
+    )
+    if not ok:
+        return None  # older server: caller falls back to the full export
+    lines = output.splitlines()
+    if not lines or lines[0] != b"NASBOX_MANIFEST_DELTA_V1":
+        return None
+    header: dict[str, str] = {}
+    changed_start: int | None = None
+    removed_index: int | None = None
+    for index in range(1, len(lines)):
+        line = lines[index]
+        if line == b"REMOVED=":
+            removed_index = index
+            break
+        if changed_start is not None:
+            continue  # a data row: wait for the REMOVED= marker
+        if not line:
+            return None
+        key, separator, value = line.partition(b"=")
+        if separator:
+            header[key.decode("ascii", errors="replace")] = value.decode("ascii", errors="replace")
+        else:
+            changed_start = index  # first TSV row ends the header
+    if removed_index is None or changed_start is None:
+        return None
+    try:
+        current = int(header["CURRENT_REVISION"])
+        changed_count = int(header["CHANGED"])
+    except (KeyError, ValueError):
+        return None
+    changed_lines = lines[changed_start:removed_index]
+    removed_lines = lines[removed_index + 1:]
+    if len(changed_lines) != changed_count:
+        return None
+    changed = _parse_manifest_rows(changed_lines)
+    if changed is None:
+        return None
+    if header.get("FALLBACK_FULL") == "1":
+        return current, changed
+    entries = dict(previous_entries)
+    entries.update(changed)
+    for line in removed_lines:
+        if not line:
+            continue
+        entries.pop(_decode_manifest_path(line), None)
+    return current, entries
+
+
+def remote_devices(cfg: Config, conn: NasConnection) -> list[dict[str, object]] | None:
+    """Read the server's recent-device list (server >= 3.24, read-only)."""
+    script_path = (cfg.get("remote_server_script") or "").strip()
+    if not script_path:
+        return None
+    ok, output, _error = run_remote_script(
+        cfg, conn, script_path, ["--devices"], timeout=30,
+    )
+    if not ok:
+        return None
+    lines = output.splitlines()
+    if not lines or lines[0] != "NASBOX_DEVICES_V1":
+        return None
+    devices: list[dict[str, object]] = []
+    for line in lines[1:]:
+        fields = line.split("|")
+        if len(fields) < 3:
+            continue
+        try:
+            seen = int(fields[2])
+        except ValueError:
+            continue
+        devices.append({
+            "device": fields[0],
+            "host": fields[1],
+            "last_seen": seen,
+            "active": len(fields) > 3 and fields[3] == "ACTIVE",
+        })
+    return devices
+
+
 def remote_manifest_snapshot(
     cfg: Config, conn: NasConnection, previous_revision: int,
     known_revision: int | None = None,
+    previous_entries: dict[str, RemoteState] | None = None,
 ) -> tuple[int, dict[str, RemoteState] | None] | None:
     """Fetch the compact manifest only when its logical revision changed.
 
@@ -1406,43 +1536,23 @@ def remote_manifest_snapshot(
     if revision == previous_revision:
         return revision, None
 
+    # Prefer the incremental export: on a 10 MB manifest with a single changed
+    # file this avoids shipping the whole tree over SSH on every revision.
+    delta = _remote_manifest_delta(cfg, conn, script_path, previous_revision, previous_entries)
+    if delta is not None:
+        return delta
+
     ok, output, _error = run_remote_script_bytes(
         cfg, conn, script_path, ["--manifest-export"], timeout=120,
     )
     if not ok:
         return None
-    entries: dict[str, RemoteState] = {}
     lines = output.splitlines()
     if not lines or lines[0] != b"NASBOX_MANIFEST_V1":
         return None
-    for line in lines[1:]:
-        fields = line.split(b"\t")
-        if len(fields) < 6:
-            return None
-        path = _decode_manifest_path(fields[0])
-        try:
-            digest = fields[1].decode("ascii", errors="strict")
-            size = int(fields[2])
-            mtime_ns = int(fields[3])
-            event_seconds = int(fields[5])
-        except (UnicodeDecodeError, ValueError):
-            return None
-        try:
-            causal_text = fields[6].decode("ascii", errors="strict") if len(fields) >= 7 else ""
-        except UnicodeDecodeError:
-            return None
-        causal = CausalVersion.parse(causal_text)
-        if causal_text and causal is None:
-            return None
-        if digest:
-            if not re.fullmatch(r"[0-9a-f]{64}", digest):
-                return None
-            entries[path] = RemoteState(RemoteKind.FILE, digest, size, mtime_ns, causal)
-        else:
-            entries[path] = RemoteState(
-                RemoteKind.TOMBSTONE, "", 0, event_seconds * 1_000_000_000,
-                causal,
-            )
+    entries = _parse_manifest_rows(lines[1:])
+    if entries is None:
+        return None
     return revision, entries
 
 
@@ -2028,6 +2138,11 @@ def validate_transfer_safety(
                 f"operazione bloccata: {len(deletions)} cancellazioni proposte, "
                 f"limite di sicurezza {max_deletes}; controlla il volume e la cartella NASBox"
             )
+        # A sequence of smaller batches can stay under the per-batch limit and
+        # still delete the whole tree. Check the rolling window as well.
+        from . import delete_safety
+
+        delete_safety.shared().check(cfg, len(deletions), direction)
 
 
 def host_key_fingerprints(host: str, port: int) -> list[str]:
@@ -2256,6 +2371,12 @@ def _run_transfer(
             other_bytes -= dropped_bytes
             diagnostics_truncated = True
 
+    # --delete-after applies deletions only when rsync finishes. Hold the
+    # itemized delete rows until we know it succeeded: reporting them earlier
+    # writes DELETE_* log entries and self-written markers for files that may
+    # still exist after a cancellation.
+    pending_deletes: list[TransferItem] = []
+
     assert proc.stdout is not None
     try:
         for line in proc.stdout:
@@ -2267,13 +2388,9 @@ def _run_transfer(
             item = _parse_itemize_line(line, direction)
             if item:
                 if item.direction in ("delete_remote", "delete_local"):
-                    # deletions are atomic on the wire -- no partial-progress concept,
-                    # so reporting them the moment they're itemized is already correct.
-                    if on_item_started:
-                        on_item_started(item)
-                    items.append(item)
-                    if on_item:
-                        on_item(item)
+                    # Reported only after rsync exits successfully; see
+                    # pending_deletes above.
+                    pending_deletes.append(item)
                 else:
                     if on_item_started:
                         on_item_started(item)
@@ -2339,6 +2456,11 @@ def _run_transfer(
     if cancel_check is not None and cancel_check():
         cancelled = True
     ok = proc.returncode == 0 and not cancelled and not output_overflow
+    if ok:
+        for item in pending_deletes:
+            items.append(item)
+            if on_item:
+                on_item(item)
     if output_overflow:
         remember_diagnostic("output rsync non compatibile: coda completioni oltre il limite")
     if diagnostics_truncated:

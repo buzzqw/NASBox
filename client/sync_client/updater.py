@@ -47,10 +47,21 @@ DOWNLOAD_TIMEOUT_SECONDS = 600
 
 
 def version_tuple(version: str) -> tuple[int, ...]:
-    try:
-        return tuple(int(part) for part in version.strip().split("."))
-    except (AttributeError, ValueError):
+    """Compare numeric components, ignoring suffixes such as rc1/dev."""
+    if not version:
         return (0,)
+    parts: list[int] = []
+    for part in str(version).strip().split("."):
+        digits = ""
+        for char in part:
+            if not char.isdigit():
+                break
+            digits += char
+        if digits:
+            parts.append(int(digits))
+        else:
+            break
+    return tuple(parts) or (0,)
 
 
 def _read_version(root: Path) -> str | None:
@@ -311,6 +322,23 @@ def _remote_manifest(
     return parse_manifest(result.stdout)
 
 
+def _server_version(cfg: Any, connection: rsync_ops.NasConnection) -> str | None:
+    """Read VERSION from the NAS daemon's authoritative --print-config."""
+    script = str(cfg.get("remote_server_script") or "").strip()
+    if not script:
+        return None
+    ok, output, _error = rsync_ops.run_remote_script(
+        cfg, connection, script, ["--print-config"], timeout=30,
+    )
+    if not ok:
+        return None
+    for line in output.splitlines():
+        key, separator, value = line.partition("=")
+        if separator and key.strip() == "VERSION":
+            return value.strip()
+    return None
+
+
 def _remote_version(cfg: Any, connection: rsync_ops.NasConnection, remote_root: str) -> str | None:
     """Legacy discovery: ask the published tree for its version.py."""
     user = cfg.get("nas_user")
@@ -373,7 +401,18 @@ def find_update(cfg: Any, current_root: Path, startup_path: str) -> UpdateCandid
             remote_path = _remote_update_path(cfg)
             manifest = _remote_manifest(cfg, connection, remote_path)
             if manifest is not None:
-                if version_tuple(manifest.version) > version_tuple(APP_VERSION):
+                server_ok = True
+                if manifest.requires_server:
+                    server_version = _server_version(cfg, connection)
+                    server_ok = not (
+                        server_version
+                        and version_tuple(server_version) < version_tuple(manifest.requires_server)
+                    )
+                    if not server_ok:
+                        # Installing would produce a client that refuses every
+                        # operation with SERVER_OUTDATED. Keep the working build.
+                        pass
+                if server_ok and version_tuple(manifest.version) > version_tuple(APP_VERSION):
                     candidates.append(UpdateCandidate(
                         manifest.version, f"NAS:{remote_path}",
                         remote_path=remote_path, cfg=cfg, connection=connection, manifest=manifest,
@@ -525,18 +564,28 @@ def rollback_if_needed(destination_root: Path) -> str | None:
     if not backup.is_dir():
         pending.unlink(missing_ok=True)
         return None
-    restored_version = _read_version(backup) or str(payload.get("version") or "")
+    # Never report the incoming version as "restored": that is the version we
+    # just rolled back, not the one now running.
+    restored_version = _read_version(backup) or "precedente"
+    failed = destination_root.parent / f".{destination_root.name}.failed-{os.getpid()}"
+    moved_broken = False
     try:
-        failed = destination_root.parent / f".{destination_root.name}.failed-{os.getpid()}"
         if destination_root.exists():
             destination_root.rename(failed)
+            moved_broken = True
         backup.rename(destination_root)
     except OSError:
+        # The broken build must never be left occupying the canonical path, and
+        # the backup must be kept so a later start can retry the rollback.
+        if moved_broken and not destination_root.exists() and failed.is_dir():
+            try:
+                failed.rename(destination_root)
+            except OSError:
+                pass
         return None
     pending.unlink(missing_ok=True)
-    failed_tree = destination_root.parent / f".{destination_root.name}.failed-{os.getpid()}"
-    if failed_tree.is_dir():
-        shutil.rmtree(failed_tree, ignore_errors=True)
+    if failed.is_dir():
+        shutil.rmtree(failed, ignore_errors=True)
     return restored_version
 
 

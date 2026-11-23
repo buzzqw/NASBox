@@ -170,7 +170,16 @@ def main() -> int:
 
     # The update is confirmed only once the window is actually up: if this build
     # crashes during startup, the marker stays and the next start rolls back.
-    QTimer.singleShot(15_000, lambda: updater.confirm_started_ok(current_root))
+    # A slow machine can need more than 15 s to finish its first reconciliation;
+    # scaling the window with the queued work avoids rolling back a healthy
+    # build. A clean exit is also a successful start, whatever its duration.
+    try:
+        pending_count = len(window.sync_state.pending_paths()) if window.sync_state else 0
+    except Exception:
+        pending_count = 0
+    confirm_after_ms = min(120_000, max(15_000, 5_000 + pending_count * 20))
+    QTimer.singleShot(confirm_after_ms, lambda: updater.confirm_started_ok(current_root))
+    app.aboutToQuit.connect(lambda: updater.confirm_started_ok(current_root))
 
     return app.exec()
 

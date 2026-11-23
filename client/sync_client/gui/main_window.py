@@ -5,9 +5,10 @@ import time
 from pathlib import Path
 
 from PyQt6.QtCore import QEvent, Qt, QTimer
+from PyQt6.QtGui import QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QApplication, QFrame, QHBoxLayout, QLabel, QMainWindow, QProgressDialog,
-    QMessageBox, QSystemTrayIcon, QTabWidget, QVBoxLayout, QWidget,
+    QMessageBox, QSystemTrayIcon, QTabWidget, QToolButton, QVBoxLayout, QWidget,
 )
 
 from .. import config as config_module
@@ -31,6 +32,7 @@ from ..i18n import t
 from ..lock_coordinator import LockCoordinator
 from ..watcher import WatcherHandle
 from .async_utils import run_in_background
+from .style import SHORTCUT_SHOW_WINDOW
 from . import icons
 from .dialogs import FirstRunSetupWizard, FolderSetupDialog
 from ..repository_safety import RepositorySafetyError, initialize_local_root
@@ -126,17 +128,20 @@ class MainWindow(QMainWindow):
         brand.addWidget(subtitle)
         header_layout.addLayout(brand)
         header_layout.addStretch(1)
-        version = QLabel(f"v{APP_VERSION}")
+        version = QToolButton()
+        version.setText(f"v{APP_VERSION}")
         version.setObjectName("versionBadge")
-        version.setCursor(Qt.CursorShape.PointingHandCursor)
+        version.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
+        version.setAccessibleName(t("a11y.version_badge"))
         version.setToolTip(t("main_window.version_tooltip"))
-        version.mousePressEvent = lambda _e: self._check_for_client_update()
+        version.clicked.connect(self._check_for_client_update)
         header_layout.addWidget(version)
         shell_layout.addWidget(header)
 
         tabs = QTabWidget()
         tabs.setObjectName("mainTabs")
         tabs.setDocumentMode(True)
+        tabs.setAccessibleName(t("a11y.main_tabs"))
         self.tabs = tabs
         self.status_tab = StatusTab(
             self.cfg, self.engine, self.scan_worker, logger=self.logger,
@@ -244,6 +249,9 @@ class MainWindow(QMainWindow):
         self.engine.server_outdated.connect(self._on_server_outdated)
         self.engine.server_update_available.connect(self._on_server_update_available)
         self.engine.server_restarted.connect(self._on_server_restarted)
+        # Global keyboard access to reopening the window from the tray.
+        self.show_window_shortcut = QShortcut(QKeySequence(SHORTCUT_SHOW_WINDOW), self)
+        self.show_window_shortcut.activated.connect(self._show_window)
         self.tray.show()
         # The first Conflicts scan starts before the signal is connected; push
         # its current count once so badges are right from the first paint.
@@ -264,6 +272,12 @@ class MainWindow(QMainWindow):
         self._update_check_timer.setInterval(UPDATE_CHECK_INTERVAL_MS)
         self._update_check_timer.timeout.connect(self._check_for_client_update_quietly)
         self._update_check_timer.start()
+
+    def _show_window(self) -> None:
+        """Bring the main window back (same action as the tray menu item)."""
+        self.showNormal()
+        self.activateWindow()
+        self.raise_()
 
     def _on_conflict_count(self, count: int) -> None:
         """Keep the Conflicts tab and tray badge honest without a extra scan."""

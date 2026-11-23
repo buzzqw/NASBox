@@ -24,6 +24,7 @@ from typing import Iterator
 from PyQt6.QtCore import pyqtSignal
 
 from . import rsync_ops
+from . import delete_safety
 from .conflicts import CONFLICT_TAG
 from .config import Config, normalize_conflict_policy
 from .i18n import t
@@ -32,6 +33,7 @@ from .logger import EventLogger
 from .repository_safety import RepositorySafetyError
 from .reconcile import Action, RemoteKind, plan_path
 from .scan_worker import ScanWorker
+from .transfer_scheduler import cancellable
 from .sync_state import CausalVersion, Fingerprint, SyncStateStore
 from .transfer_worker import TransferWorker
 from .watcher import WatcherHandle
@@ -304,7 +306,7 @@ class PushWorker(TransferWorker):
         # Blocks only if a pull is currently running -- there's only ever one
         # NASBox folder, so this is the only pair that can conflict.
         self.transfer_preparing.emit("upload")
-        with self.transfer_lock:
+        with cancellable(self.transfer_lock, self._stop_flag):
             try:
                 self.transfer_waiting_for_lock.emit("upload")
                 with rsync_ops.remote_lock(
@@ -582,6 +584,10 @@ class PushWorker(TransferWorker):
 
             for item in delete_result.items:
                 self._on_item_complete(item)
+            if delete_result.completed_paths:
+                delete_safety.shared().record(
+                    self.cfg, len(delete_result.completed_paths), "upload",
+                )
             for path in sorted(delete_result.stale_paths):
                 self._log(
                     "STALE_DELETE", path,
@@ -1363,8 +1369,10 @@ class PushWorker(TransferWorker):
     def _set_current_process(self, proc) -> None:
         # The SSH session holding the NAS lock must be interruptible on exit,
         # just like the later rsync process. Otherwise a contended lock can
-        # hold application shutdown until RemoteLock's timeout expires.
-        self._current_proc = proc
+        # hold application shutdown until RemoteLock's timeout expires. It is
+        # kept out of _current_proc so cancelling a transfer cannot release the
+        # lease while later remote calls still assume it is held.
+        self._lock_proc = proc
 
     def _conflict_policy(self) -> str:
         """Normalize the configured conflict policy to a known value."""

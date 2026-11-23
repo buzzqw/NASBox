@@ -373,12 +373,21 @@ class BrowseTab(QWidget):
             return
         device_id = self.sync_state.device_id()
 
+        # One lease for the whole selection: per-file leases were slow and let
+        # another client interleave between two entries of the same batch.
+        by_path = {
+            (f"{self._path}/{entry.name}" if self._path else entry.name): entry
+            for entry in entries
+        }
+
         def delete_all():
-            outcomes = []
-            for entry in entries:
-                remote_path = f"{self._path}/{entry.name}" if self._path else entry.name
-                outcomes.append((entry, *rsync_ops.browse_delete(self.cfg, conn, remote_path, device_id)))
-            return outcomes
+            outcomes_by_path = rsync_ops.browse_delete_many(
+                self.cfg, conn, list(by_path), device_id,
+            )
+            return [
+                (by_path[path], ok, detail)
+                for path, ok, detail in outcomes_by_path
+            ]
 
         self._set_busy(t("browse.deleting"))
         run_in_background(self, "_delete_call", delete_all, self._on_delete_done)
@@ -388,10 +397,25 @@ class BrowseTab(QWidget):
         if exc is not None:
             QMessageBox.warning(self, t("browse.delete_failed_title"), str(exc))
             return
+        deleted = 0
         for entry, ok, _detail in result:
             if ok:
                 remote_path = f"{self._path}/{entry.name}" if self._path else entry.name
                 self.logger.log("BROWSE_DELETE", remote_path)
+                deleted += 1
+        if deleted:
+            from .. import delete_safety
+
+            delete_safety.shared().record(self.cfg, deleted, "browse")
+            # The NAS trash now holds the authoritative version. Mark the paths
+            # pending so the next reconciliation updates the local baseline
+            # instead of treating a stale fingerprint as a local edit.
+            deleted_paths = [
+                f"{self._path}/{entry.name}" if self._path else entry.name
+                for entry, ok, _detail in result if ok
+            ]
+            self.sync_state.mark_pending(deleted_paths)
+            self.engine.wake()
         failed = [entry.name for entry, ok, _detail in result if not ok]
         self.refresh()
         if failed:

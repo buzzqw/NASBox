@@ -26,7 +26,12 @@ HASH_MAX_WORKERS = min(8, max(1, (os.cpu_count() or 1) // 2))
 # In-memory cache mapping (dev, ino, size, mtime_ns) to sha256 digest to avoid
 # repeated hashing of unchanged files during push, pull and stability checks.
 _STAT_DIGEST_CACHE_MAX_ENTRIES = 50000
-_stat_digest_cache: dict[tuple[int, int, int, int], str] = {}
+# ctime is part of the key: a writer can preserve size and mtime (cp -p,
+# touch -r, restore from backup) while replacing the content. Without ctime
+# the cached digest would be returned forever and that edit would never be
+# pushed. ctime changes on any metadata write, so the cost is a few extra
+# hashes, never a missed change.
+_stat_digest_cache: dict[tuple[int, int, int, int, int], str] = {}
 _stat_digest_cache_lock = threading.Lock()
 
 
@@ -386,7 +391,10 @@ class SyncStateStore:
                 before = path.lstat()
                 if not stat.S_ISREG(before.st_mode):
                     return None
-                stat_key = (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns)
+                stat_key = (
+                    before.st_dev, before.st_ino, before.st_size,
+                    before.st_mtime_ns, before.st_ctime_ns,
+                )
                 with _stat_digest_cache_lock:
                     cached_digest = _stat_digest_cache.get(stat_key)
                 if cached_digest is not None:
@@ -395,6 +403,7 @@ class SyncStateStore:
                         stat.S_ISREG(after.st_mode)
                         and before.st_dev == after.st_dev and before.st_ino == after.st_ino
                         and before.st_size == after.st_size and before.st_mtime_ns == after.st_mtime_ns
+                        and before.st_ctime_ns == after.st_ctime_ns
                     ):
                         return Fingerprint(cached_digest, after.st_size, after.st_mtime_ns)
 
@@ -405,6 +414,7 @@ class SyncStateStore:
                     stat.S_ISREG(after.st_mode)
                     and before.st_dev == after.st_dev and before.st_ino == after.st_ino
                     and before.st_size == after.st_size and before.st_mtime_ns == after.st_mtime_ns
+                    and before.st_ctime_ns == after.st_ctime_ns
                 ):
                     with _stat_digest_cache_lock:
                         if len(_stat_digest_cache) >= _STAT_DIGEST_CACHE_MAX_ENTRIES:
@@ -514,6 +524,10 @@ class SyncStateStore:
         causal_versions: Mapping[str, CausalVersion | None] | None = None,
     ) -> None:
         """Commit authoritative per-path fingerprints in one SQLite transaction."""
+        # A transfer has just replaced these files on disk. Any digest cached
+        # before the write belongs to the previous version and must not survive
+        # the commit, otherwise a later push could treat a real change as ADOPT.
+        clear_fingerprint_cache()
         self._record_fingerprints(fingerprints, causal_versions)
 
     def _record_fingerprints(
