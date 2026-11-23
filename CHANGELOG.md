@@ -4,6 +4,11 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 1.28.8 - 2026-11-23
+
+- Barra verticale sempre riservata nei tab scrollabili: elimina il salto
+  orizzontale del contenuto quando si passa da un tab all'altro.
+
 ## 1.28.7 - 2026-11-23
 
 - Densità globale compatta: font base 12 px, margini dei QGroupBox dimezzati

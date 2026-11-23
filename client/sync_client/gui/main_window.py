@@ -8,7 +8,7 @@ from PyQt6.QtCore import QByteArray, QEvent, Qt, QSettings, QTimer
 from PyQt6.QtGui import QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QApplication, QFrame, QHBoxLayout, QLabel, QMainWindow, QProgressDialog,
-    QMessageBox, QSystemTrayIcon, QTabWidget, QToolButton, QVBoxLayout, QWidget,
+    QMessageBox, QScrollArea, QSystemTrayIcon, QTabWidget, QToolButton, QVBoxLayout, QWidget,
 )
 
 from .. import config as config_module
@@ -46,6 +46,13 @@ from .settings_tab import SettingsTab
 from .status_tab import StatusTab
 from .transfers_tab import TransfersTab
 from .tray import TrayIcon
+
+
+def uniform_scrollbars(widget: QWidget) -> None:
+    """Reserve the vertical gutter in every scrollable tab (no width jumps)."""
+    for area in widget.findChildren(QScrollArea):
+        area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
+        area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
 
 class MainWindow(QMainWindow):
@@ -174,6 +181,11 @@ class MainWindow(QMainWindow):
         }
         for widget, label in self._tab_labels.items():
             tabs.addTab(widget, label)
+        # Keep the vertical gutter reserved in every scrollable tab. Without
+        # this the content width changes when switching between tabs whose
+        # content happens to fit and tabs that need scrolling, which reads as
+        # the whole interface jumping sideways.
+        uniform_scrollbars(self)
         tabs.currentChanged.connect(lambda _index: self._update_metrics_tab_active())
         tabs.setTabToolTip(0, t("main_window.tab_status_tooltip"))
         tabs.setTabToolTip(1, t("main_window.tab_metrics_tooltip"))
