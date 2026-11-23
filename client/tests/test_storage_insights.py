@@ -7,15 +7,43 @@ import time
 from unittest.mock import MagicMock, patch
 
 import pytest
-from PyQt6.QtWidgets import QMainWindow
+from PyQt6.QtWidgets import QGroupBox, QMainWindow
 
 from sync_client import metrics_worker
 from sync_client.config import Config
 from sync_client.gui import metrics_tab as metrics_tab_module
 from sync_client.gui.metrics_tab import MetricsTab, STORAGE_COOLDOWN_SECONDS
 from sync_client.i18n import t
-from sync_client.metrics_worker import StorageInsights, collect_storage_insights
+from sync_client.metrics_worker import DuplicateGroup, StorageInsights, TrashInsight, collect_storage_insights
 from tests.support import ClientEnvironment
+
+
+def test_duplicate_render_is_one_path_per_line_without_repeated_title(qtbot):
+    """The duplicate list must be readable and the section title unique."""
+    with ClientEnvironment():
+        cfg = Config()
+        tab = MetricsTab(cfg, MagicMock())
+        qtbot.addWidget(tab)
+        assert tab.storage_duplicates_section.title() == t("storage.duplicates_title")
+        assert tab.findChild(QGroupBox, "storageDuplicatesBox").title() == t(
+            "storage.duplicate_groups_title"
+        )
+        group = DuplicateGroup(2048, "a" * 64, ("doc/a.txt", "copy/b.txt", "old/c.txt"))
+        result = StorageInsights(
+            root="/tmp/nasbox", collected_at=time.time(), scanned_files=10,
+            scan_errors=0, candidates_limit_reached=False, top_folders=(),
+            duplicates=(group,), duplicate_candidates=10, duplicate_wasted_bytes=4096,
+            trash=TrashInsight(0, 0, 0, 0, 30),
+        )
+        tab._render_storage(result)
+        text = tab.storage_duplicates_label.text()
+        lines = [line.strip() for line in text.splitlines() if line.strip()]
+        assert "doc/a.txt" in lines
+        assert "copy/b.txt" in lines
+        assert "old/c.txt" in lines
+        # each path on its own line; never a comma-joined blob
+        assert not any("," in line for line in lines if ".txt" in line)
+        assert t("storage.duplicate_groups_title") not in text
 
 
 class MockWindow(QMainWindow):

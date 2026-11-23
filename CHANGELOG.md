@@ -4,6 +4,14 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 1.28.5 - 2026-11-23
+
+- Storage insights: titolo "File duplicati" non duplicato e rendering con un
+  percorso per riga (max 5 gruppi e 3 path per gruppo, con conteggio dei
+  rimanenti).
+- La conferma delle cancellazioni massive ora chiama anche `sync_now()`: in
+  precedenza veniva rimosso solo il blocco, senza avviare la propagazione.
+
 ## 1.28.4 - 2026-11-23
 
 - Stato: "Garanzia di sincronizzazione" e "Stato" affiancati 50/50.

@@ -760,6 +760,9 @@ class StatusTab(QWidget):
 
     def _confirm_deletions(self) -> None:
         self.engine.confirm_deletions()
+        # The confirmation alone only lifts the safety guard: without a sync
+        # request the pending deletions would stay queued until the next poll.
+        self.engine.sync_now()
 
     def _on_devices_done(self, devices, exc: Exception | None) -> None:
         if exc is not None or not devices:

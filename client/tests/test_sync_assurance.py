@@ -85,6 +85,17 @@ def test_assurance_card_reports_pending_and_errors(qtbot):
         assert tab.assurance_stats["pending"].text() == "7"
 
 
+def test_confirm_deletions_also_requests_sync(qtbot):
+    with ClientEnvironment():
+        engine = MagicMock()
+        engine.connection = None
+        tab = StatusTab(Config(), engine, MagicMock())
+        qtbot.addWidget(tab)
+        tab._confirm_deletions()
+        engine.confirm_deletions.assert_called_once()
+        engine.sync_now.assert_called_once()
+
+
 def test_verify_now_triggers_engine(qtbot):
     with ClientEnvironment():
         engine = MagicMock()

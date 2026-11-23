@@ -314,7 +314,7 @@ class MetricsTab(QWidget):
         self.storage_duplicates_section.setMinimumWidth(260)
         self.storage_duplicates_label = QLabel()
         duplicates_layout.addWidget(self._storage_detail_box(
-            t("storage.duplicates_title"), "storageDuplicatesBox", self.storage_duplicates_label
+            t("storage.duplicate_groups_title"), "storageDuplicatesBox", self.storage_duplicates_label
         ))
 
         self.storage_folders_label.setWordWrap(True)
@@ -370,11 +370,24 @@ class MetricsTab(QWidget):
             self.storage_folders_label.setText(t("storage.empty_folders"))
 
         if result.duplicates:
-            lines = [
-                t("storage.duplicate_row", size=human_size(group.size_bytes),
-                  count=len(group.paths), paths=", ".join(group.paths))
-                for group in result.duplicates[:10]
-            ]
+            # One group per block and one path per line: a single
+            # comma-separated string was unreadable on a real tree.
+            lines: list[str] = []
+            for group in result.duplicates[:5]:
+                lines.append(t(
+                    "storage.duplicate_group",
+                    size=human_size(group.size_bytes), count=len(group.paths),
+                ))
+                for path in group.paths[:3]:
+                    lines.append(t("storage.duplicate_path", path=path))
+                if len(group.paths) > 3:
+                    lines.append(t(
+                        "storage.duplicate_more", count=len(group.paths) - 3,
+                    ))
+            if len(result.duplicates) > 5:
+                lines.append(t(
+                    "storage.duplicate_more_groups", count=len(result.duplicates) - 5,
+                ))
             lines.append(t(
                 "storage.duplicate_summary", groups=len(result.duplicates),
                 wasted=human_size(result.duplicate_wasted_bytes),

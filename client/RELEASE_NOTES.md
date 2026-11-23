@@ -1,10 +1,8 @@
-# NASBox 1.28.4
+# NASBox 1.28.5
 
-Assestamento interfaccia secondo le tue indicazioni.
-
-- **Stato**: "Garanzia di sincronizzazione" e "Stato" affiancati, ciascuno
-  metà larghezza.
-- **Monitor NAS**: "Dettagli analisi" e "File duplicati" affiancati ed entrambi
-  visibili di default.
-- **Impostazioni**: tutte le sezioni sempre esposte, senza check da aprire;
-  limiti di banda stretti e "Escludi dalla sincronizzazione" subito sotto.
+- "File duplicati": titolo non più ripetuto due volte; elenco riscritto con un
+  gruppo per blocco e **un percorso per riga**, invece di una stringa lunga e
+  illeggibile.
+- "Conferma cancellazioni di massa" ora avvia subito anche una sincronizzazione:
+  prima toglieva solo il blocco di sicurezza, quindi sembrava non succedesse
+  nulla.
