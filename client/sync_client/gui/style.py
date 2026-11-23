@@ -27,7 +27,7 @@ STYLESHEET = """
 QMainWindow, QWidget {
     background-color: #f6f8fb;
     color: #172033;
-    font-size: 13px;
+    font-size: 12px;
 }
 
 QFrame#appHeader {
@@ -49,24 +49,24 @@ QLabel#versionBadge, QToolButton#versionBadge, QToolButton#statusVersion {
     color: #344054;
     border: 1px solid #d9e0ea;
     border-radius: 10px;
-    padding: 5px 10px;
+    padding: 3px 8px;
     font-weight: 700;
 }
 
 QGroupBox {
     background-color: #ffffff;
     border: 1px solid #dfe5ee;
-    border-radius: 10px;
-    margin-top: 16px;
-    padding: 16px 14px 14px 14px;
+    border-radius: 8px;
+    margin-top: 8px;
+    padding: 6px 8px 8px 8px;
     color: #172033;
     font-weight: 700;
 }
 QGroupBox::title {
     subcontrol-origin: margin;
     subcontrol-position: top left;
-    left: 10px;
-    padding: 0 6px;
+    left: 8px;
+    padding: 0 4px;
 }
 QGroupBox#statusCard { border-color: #8ab4ff; }
 QGroupBox#assuranceCard {
@@ -76,7 +76,7 @@ QGroupBox#assuranceCard {
     margin-top: 4px;
 }
 QLabel#assuranceHeadline {
-    font-size: 18px;
+    font-size: 16px;
     font-weight: 700;
     color: #1d6b45;
     padding: 4px 2px 2px 2px;
@@ -102,9 +102,9 @@ QLabel#assuranceChecks {
     padding: 2px 2px 6px 2px;
 }
 QLabel#statusMessage {
-    font-size: 17px;
+    font-size: 15px;
     font-weight: 700;
-    padding: 5px 2px 12px 2px;
+    padding: 2px 2px 4px 2px;
 }
 /* Shape as well as colour: the border style differs per state. */
 QLabel#statusMessage[state="active"] {

@@ -4,6 +4,13 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 1.28.7 - 2026-11-23
+
+- Densità globale compatta: font base 12 px, margini dei QGroupBox dimezzati
+  (8 px in alto, 6/8 di padding), titoli e pulsanti più stretti.
+- Finestra iniziale ridotta a 1100×680.
+- Riduzione stimata dell'altezza complessiva di tutti i tab del 20-25%.
+
 ## 1.28.6 - 2026-11-23
 
 - Monitor NAS: "Rete", "Uptime NAS" e "Attività NASBox" affiancati in un'unica

@@ -17,6 +17,15 @@ def test_light_is_the_default_theme():
     assert style.current_theme() in style.THEMES
 
 
+def test_stylesheet_uses_compact_density():
+    from sync_client.gui.style import STYLESHEET
+
+    assert "font-size: 12px;" in STYLESHEET
+    assert "margin-top: 8px;" in STYLESHEET
+    assert "padding: 6px 8px 8px 8px;" in STYLESHEET
+    assert "margin-top: 16px;" not in STYLESHEET
+
+
 def test_dark_theme_has_its_own_stylesheet():
     assert style.DARK_STYLESHEET != style.STYLESHEET
     assert "QMainWindow, QWidget" in style.DARK_STYLESHEET

@@ -53,7 +53,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle(f"{APP_NAME} {APP_VERSION}")
         self.setWindowIcon(icons.app_icon())
-        self.resize(1280, 760)
+        self.resize(1100, 680)
         self.setMinimumSize(720, 520)
         self._settings = QSettings("NASBox", "NASBox")
         geometry = self._settings.value("window/geometry")
