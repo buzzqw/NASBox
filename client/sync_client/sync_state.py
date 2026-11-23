@@ -82,15 +82,6 @@ class CausalVersion:
     def encode(self) -> str:
         return ",".join(f"{device}:{counter}" for device, counter in self.clock)
 
-    def entry_count(self) -> int:
-        """Number of tracked files in the authoritative local baseline."""
-        with self._lock, self._connection() as conn:
-            row = conn.execute(
-                "SELECT COUNT(*) FROM entry WHERE repository = ?",
-                (self._repository(),),
-            ).fetchone()
-            return int(row[0]) if row else 0
-
     def counter(self, device_id: str) -> int:
         return dict(self.clock).get(device_id, 0)
 
@@ -147,6 +138,15 @@ class SyncStateStore:
         paths.ensure_dirs()
         self._db_path = paths.sync_state_db_file()
         self._init_db()
+
+    def entry_count(self) -> int:
+        """Number of tracked files in the authoritative local baseline."""
+        with self._lock, self._connection() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) FROM entry WHERE repository = ?",
+                (self._repository(),),
+            ).fetchone()
+            return int(row[0]) if row else 0
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self._db_path, timeout=10)

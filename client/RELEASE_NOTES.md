@@ -1,12 +1,9 @@
-# NASBox 1.28.1
+# NASBox 1.28.2
 
-Correzione avvio lento dopo l'aggiornamento 1.28.0.
+Correzione urgente: il metodo `entry_count()` era stato definito nella classe
+sbagliata, provocando un errore al secondo inello scheda Stato.
 
-- Il controllo di integrità automatico **non parte più all'avvio**: la prima
-  verifica è rinviata di 30 minuti e comunque solo a client a riposo.
-- "Verifica adesso" resta immediata, ma ora controlla un **campione di 500 file**
-  tratti dal manifest invece dell'intero albero: molto più veloce e con un
-  consumo di memoria ridotto. Per l'audit completo imposta
-  `integrity_check_sample_size = 0`.
-- La card di garanzia indica quando il dato è un campione.
-- Statistics della card calcolate una volta ogni 30 secondi invece di ogni tick.
+- `entry_count()` ora è correttamente un metodo di `SyncStateStore`.
+- L'updater rimuove le directory `__pycache__` dopo l'aggiornamento: i file
+  del bundle hanno mtime normalizzato e i vecchi `.pyc` potevano essere
+  riutilizzati al posto del nuovo codice.

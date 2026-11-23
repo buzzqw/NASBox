@@ -492,6 +492,12 @@ def install_update(source_root: Path, destination_root: Path) -> None:
     pending = _pending_file(destination_root)
     try:
         shutil.copytree(source_root, staging, symlinks=False)
+        # Bundled .py files carry a normalized mtime (0) for reproducible
+        # archives. Python's bytecode cache validates against that mtime, so a
+        # .pyc left by the previous version would be considered current even
+        # though the source changed. Never carry stale bytecode forward.
+        for cache_dir in list(staging.rglob("__pycache__")):
+            shutil.rmtree(cache_dir, ignore_errors=True)
         if (destination_root / "tests").is_dir() and not (staging / "tests").exists():
             shutil.copytree(destination_root / "tests", staging / "tests")
         if backup.exists():

@@ -5,6 +5,7 @@ from unittest.mock import MagicMock
 
 from sync_client.config import Config
 from sync_client.gui.status_tab import StatusTab
+from sync_client.sync_state import CausalVersion, SyncStateStore
 from tests.support import ClientEnvironment
 
 
@@ -39,6 +40,11 @@ def _status(**overrides):
     }
     data.update(overrides)
     return data
+
+
+def test_entry_count_belongs_to_sync_state_store():
+    assert hasattr(SyncStateStore, "entry_count")
+    assert not hasattr(CausalVersion, "entry_count")
 
 
 def test_assurance_card_reports_all_synced(qtbot):

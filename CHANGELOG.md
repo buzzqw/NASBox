@@ -4,6 +4,14 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 1.28.2 - 2026-11-23
+
+- **Fix urgente**: `entry_count()` era stato definito dentro `CausalVersion`
+  invece che in `SyncStateStore`, e generava un errore a ogni tick del motore.
+- L'updater elimina `__pycache__` dopo l'installazione: con i mtime
+  normalizzati dell'archivio, i bytecode della versione precedente potevano
+  essere considerati validi e mascherare il nuovo codice.
+
 ## 1.28.1 - 2026-11-23
 
 - **Avvio lento corretto**: il controllo di integrità automatico non scatta più
