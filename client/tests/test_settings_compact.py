@@ -1,5 +1,6 @@
 """Compattezza del tab Impostazioni: header di ricerca fisso, due colonne
-strette e al massimo due sezioni aperte per colonna all'avvio.
+strette e TUTTE le sezioni aperte e visibili all'avvio (niente piu' limiter di
+sezioni aperte: la ricerca filtra/evidenzia ma non lascia sezioni nascoste).
 
 Nessuna funzione viene rimossa: i test qui sotto verificano esplicitamente che
 gli attributi e le azioni pubblici restino raggiungibili per nome.
@@ -9,7 +10,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
-from PyQt6.QtWidgets import QBoxLayout, QGroupBox, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QBoxLayout, QGroupBox, QHBoxLayout, QVBoxLayout, QWidget
 
 from sync_client import i18n
 from sync_client.config import Config
@@ -58,14 +59,15 @@ def test_two_columns_are_present(compact_tab):
 def test_groups_are_split_between_the_two_columns(compact_tab):
     tab = compact_tab
     left, right = tab._column_sections
-    left_names = {tab._section_keys[id(box)] for box in left}
+    left_names = [tab._section_keys[id(box)] for box in left]
     right_names = {tab._section_keys[id(box)] for box in right}
 
-    # NAS + bandwidth a sinistra; tutto il resto a destra.
-    assert left_names == {"nas", "bandwidth"}
+    # NAS + banda + esclusioni a sinistra; tutto il resto a destra.
+    assert left_names == ["nas", "bandwidth", "exclude"]
     assert {"cadence", "schedule", "feedback", "language", "theme",
-            "info", "nas_facts", "maintenance", "exclude"} <= right_names
-    assert not (left_names & right_names)
+            "info", "nas_facts", "maintenance"} <= right_names
+    assert "exclude" not in right_names
+    assert not (set(left_names) & right_names)
 
 
 def test_search_header_sits_outside_the_scroll_area(compact_tab):
@@ -89,27 +91,28 @@ def test_search_label_is_visible_and_translated(compact_tab):
     assert label.text() == i18n.t("transfers.search_label")
 
 
-# --- sezioni collassate ----------------------------------------------------
+# --- tutte le sezioni esposte ----------------------------------------------
 
-def test_at_most_two_open_sections_per_column(compact_tab):
+def test_all_sections_are_expanded_and_visible(compact_tab):
     tab = compact_tab
     assert len(tab._column_sections) == 2
-    for sections in tab._column_sections:
-        expanded = [section for section in sections if section.isChecked()]
-        assert len(expanded) <= 2
+    named = [
+        box for box in tab.findChildren(QGroupBox)
+        if tab._section_keys.get(id(box))
+    ]
+    assert len(named) == len(tab._sections)
+    for section in tab._sections:
+        assert section.isChecked(), section.objectName()
+        assert not section.isHidden(), section.objectName()
+        fields = tab._section_fields(section)
+        assert fields, section.objectName()
+        assert all(not field.isHidden() for field in fields), section.objectName()
 
-    # I due gruppi lunghi di sinistra restano aperti; a destra ne restano due.
-    assert _section(tab, "nas").isChecked()
-    assert _section(tab, "bandwidth").isChecked()
-    assert sum(s.isChecked() for s in tab.findChildren(QGroupBox)
-               if tab._section_keys.get(id(s))) <= 4
-    assert any(not section.isChecked() for section in tab._sections)
 
-
-def test_search_reopens_and_highlights_a_collapsed_section(compact_tab):
+def test_search_highlights_an_always_open_section(compact_tab):
     tab = compact_tab
     theme = _section(tab, "theme")
-    assert not theme.isChecked()  # collapsed at startup
+    assert theme.isChecked()  # gia' aperta all'avvio: nessun check da cliccare
 
     tab.search_edit.setText(theme.title())
     assert theme.isChecked()
@@ -119,7 +122,9 @@ def test_search_reopens_and_highlights_a_collapsed_section(compact_tab):
     assert all(not field.isHidden() for field in fields)
 
     tab.search_edit.setText("")
-    assert not theme.isChecked()  # il collapse state viene ripristinato
+    assert theme.isChecked()
+    assert not theme.isHidden()
+    assert all(section.isChecked() for section in tab._sections)
 
 
 def test_search_restores_all_sections_visible(compact_tab):
@@ -128,6 +133,7 @@ def test_search_restores_all_sections_visible(compact_tab):
     assert _section(tab, "nas").isChecked()
     tab.search_edit.setText("")
     assert all(not section.isHidden() for section in tab._sections)
+    assert all(section.isChecked() for section in tab._sections)
 
 
 # --- densità dei controlli -------------------------------------------------
@@ -165,6 +171,47 @@ def test_short_fields_are_width_capped(compact_tab):
         assert 0 < field.maximumWidth() <= 250, name
 
 
+def test_bandwidth_fields_are_narrow_and_on_one_row(compact_tab):
+    tab = compact_tab
+    bw_box = _section(tab, "bandwidth")
+    layout = bw_box.layout()
+    assert isinstance(layout, QHBoxLayout)
+
+    for name in ("bw_upload_spin", "bw_download_spin"):
+        field = getattr(tab, name)
+        assert 90 <= field.maximumWidth() <= 110, name
+        assert layout.indexOf(field) >= 0, name
+    # Anche le etichette restano corte: nessun campo si allarga a tutta la colonna.
+    for name in ("bw_upload_label", "bw_download_label"):
+        label = getattr(tab, name)
+        assert 0 < label.maximumWidth() <= 110, name
+        assert layout.indexOf(label) >= 0, name
+
+    widgets = [
+        layout.itemAt(index).widget()
+        for index in range(layout.count())
+        if layout.itemAt(index).widget() is not None
+    ]
+    assert widgets == [
+        tab.bw_upload_label, tab.bw_upload_spin,
+        tab.bw_download_label, tab.bw_download_spin,
+    ]
+
+
+def test_exclude_box_sits_directly_below_bandwidth_in_left_column(compact_tab):
+    tab = compact_tab
+    left, right = tab._column_sections
+    exclude = _section(tab, "exclude")
+    bandwidth = _section(tab, "bandwidth")
+
+    assert [tab._section_keys[id(s)] for s in left] == ["nas", "bandwidth", "exclude"]
+    assert exclude in left
+    assert exclude not in right
+
+    left_layout = tab._columns.itemAt(0).layout()
+    assert left_layout.indexOf(exclude) == left_layout.indexOf(bandwidth) + 1
+
+
 # --- nessuna funzione rimossa ----------------------------------------------
 
 def test_original_attributes_and_actions_are_preserved(compact_tab):
@@ -176,7 +223,8 @@ def test_original_attributes_and_actions_are_preserved(compact_tab):
         "jump_user", "remote_server_script", "restart_daemon_btn",
         "remote_prefix", "detect_btn", "sync_mode_combo", "delete_enabled",
         "max_delete_spin", "conflict_policy_combo",
-        "bw_upload_spin", "bw_download_spin",
+        "bw_upload_label", "bw_upload_spin", "bw_download_label",
+        "bw_download_spin",
         "poll_spin", "metrics_refresh_spin", "compression_combo",
         "full_pull_spin", "nas_friendly_btn", "multiplexing_checkbox",
         "schedule_enabled", "schedule_list",
@@ -190,7 +238,8 @@ def test_original_attributes_and_actions_are_preserved(compact_tab):
     ):
         assert hasattr(tab, name), name
     for method in (
-        "_apply_search_filter", "_focus_search", "_export_diagnostics",
+        "_apply_search_filter", "_apply_initial_collapse", "_focus_search",
+        "_on_section_toggled", "_section_fields", "_export_diagnostics",
         "_detect_from_nas", "_refresh_nas_facts", "_save_settings",
     ):
         assert callable(getattr(tab, method)), method

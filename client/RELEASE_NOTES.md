@@ -1,11 +1,10 @@
-# NASBox 1.28.3
+# NASBox 1.28.4
 
-Interfaccia più compatta: meno scroll verticale.
+Assestamento interfaccia secondo le tue indicazioni.
 
-- **Stato**: la card "Garanzia di sincronizzazione" resta sempre in cima come
-  header fisso; le altre card sono su 2 colonne.
-- **Monitor NAS**: barra degli strumenti fissa, grafici su 2 colonne e sezioni
-  collassabili; i dettagli storage si aprono da soli dopo l'analisi.
-- **Impostazioni**: ricerca sempre visibile in cima, 2 colonne, al massimo 2
-  sezioni aperte per colonna e campi numerici più stretti.
-- Sotto una certa larghezza della finestra le colonne si impilano da sole.
+- **Stato**: "Garanzia di sincronizzazione" e "Stato" affiancati, ciascuno
+  metà larghezza.
+- **Monitor NAS**: "Dettagli analisi" e "File duplicati" affiancati ed entrambi
+  visibili di default.
+- **Impostazioni**: tutte le sezioni sempre esposte, senza check da aprire;
+  limiti di banda stretti e "Escludi dalla sincronizzazione" subito sotto.

@@ -79,6 +79,10 @@ _SEARCH_MATCH_STYLE = (
     ' background-color: #fff2cc; border-radius: 3px; }'
 )
 
+# A bandwidth cap is only a few digits: keep both spins (and their labels)
+# compact and in a single row instead of letting them span the whole column.
+_BW_FIELD_MAX_WIDTH = 100
+
 # A diagnostic bundle is meant to be pasted into an issue: never dump secrets
 # or a full known_hosts file, even if a key happens to have an unexpected name.
 _SENSITIVE_KEY_TOKENS = (
@@ -170,10 +174,12 @@ class SettingsTab(QWidget):
         root.setSpacing(4)
 
         # Two columns as before, but with the groups redistributed and every
-        # short field capped in width: the long NAS group + bandwidth on the
-        # left, all the compact groups on the right. Keeping a QHBoxLayout of
-        # two QVBoxLayouts also lets _update_column_layout stack them on a
-        # narrow window without rebuilding the widget tree.
+        # short field capped in width: NAS + bandwidth + exclusions on the
+        # left, all the remaining compact groups on the right. Every section
+        # starts expanded -- there is no checkbox to click just to see a
+        # setting. Keeping a QHBoxLayout of two QVBoxLayouts also lets
+        # _update_column_layout stack them on a narrow window without
+        # rebuilding the widget tree.
         columns = QHBoxLayout()
         self._columns = columns
         columns.setContentsMargins(0, 0, 0, 0)
@@ -184,8 +190,9 @@ class SettingsTab(QWidget):
         columns.addLayout(right_col, 1)
         root.addLayout(columns)
 
-        # Remember which column each section belongs to so startup can leave
-        # at most two sections expanded per column (see _apply_initial_collapse).
+        # Remember which column each section belongs to (used by diagnostics
+        # and tests); every section starts expanded, see
+        # _apply_initial_collapse.
         left_sections: list[QGroupBox] = []
         right_sections: list[QGroupBox] = []
 
@@ -296,28 +303,102 @@ class SettingsTab(QWidget):
         left_col.addWidget(nas_box)
         left_sections.append(nas_box)
 
-        # --- bandwidth (left column, next to the long NAS group) ---
+        # --- bandwidth (left column, under NAS; exclusions follow right below) ---
         bw_box = self._make_section("bandwidth", t("settings.bandwidth_title"))
         bw_layout = QHBoxLayout(bw_box)
         self._tight_layout(bw_layout)
-        bw_layout.addWidget(QLabel(t("settings.upload_label")))
+        self.bw_upload_label = QLabel(t("settings.upload_label"))
+        self._cap_field(self.bw_upload_label, _BW_FIELD_MAX_WIDTH)
+        bw_layout.addWidget(self.bw_upload_label)
         self.bw_upload_spin = QSpinBox()
         self.bw_upload_spin.setRange(0, 1_000_000)
         self.bw_upload_spin.setSingleStep(64)
         self.bw_upload_spin.setValue(int(cfg.get("bandwidth_upload_kbps") or 0))
         self.bw_upload_spin.setToolTip(t("settings.bandwidth_tooltip"))
-        self._cap_field(self.bw_upload_spin, 90)
+        self._cap_field(self.bw_upload_spin, _BW_FIELD_MAX_WIDTH)
         bw_layout.addWidget(self.bw_upload_spin)
-        bw_layout.addWidget(QLabel(t("settings.download_label")))
+        self.bw_download_label = QLabel(t("settings.download_label"))
+        self._cap_field(self.bw_download_label, _BW_FIELD_MAX_WIDTH)
+        bw_layout.addWidget(self.bw_download_label)
         self.bw_download_spin = QSpinBox()
         self.bw_download_spin.setRange(0, 1_000_000)
         self.bw_download_spin.setSingleStep(64)
         self.bw_download_spin.setValue(int(cfg.get("bandwidth_download_kbps") or 0))
         self.bw_download_spin.setToolTip(t("settings.bandwidth_tooltip"))
-        self._cap_field(self.bw_download_spin, 90)
+        self._cap_field(self.bw_download_spin, _BW_FIELD_MAX_WIDTH)
         bw_layout.addWidget(self.bw_download_spin)
+        # All four controls stay packed on one row; unused space goes to the
+        # stretch at the end, never to the fields themselves.
+        bw_layout.addStretch(1)
         left_col.addWidget(bw_box)
         left_sections.append(bw_box)
+
+        # --- exclusions: directly under bandwidth, same (left) column ---
+        exclude_box = self._make_section("exclude", t("settings.exclude_title"))
+        exclude_layout = QVBoxLayout(exclude_box)
+        self._tight_layout(exclude_layout)
+        exclude_note = QLabel(t("settings.exclude_note"))
+        exclude_note.setWordWrap(True)
+        exclude_layout.addWidget(exclude_note)
+        self.exclude_list = QListWidget()
+        self.exclude_list.setMaximumHeight(90)
+        self.exclude_list.setToolTip(t("settings.exclude_note"))
+        self.exclude_list.addItems(cfg.exclude_patterns())
+        exclude_layout.addWidget(self.exclude_list)
+        profile_row = QHBoxLayout()
+        profile_row.addWidget(QLabel(t("settings.exclude_profile_label")))
+        self.exclusion_profile_combo = QComboBox()
+        for key, label_key, patterns in EXCLUSION_PROFILES:
+            self.exclusion_profile_combo.addItem(t(label_key), userData=list(patterns))
+        self.exclusion_profile_combo.setToolTip(t("settings.exclude_profile_tooltip"))
+        self._cap_field(self.exclusion_profile_combo, 200)
+        profile_row.addWidget(self.exclusion_profile_combo, 1)
+        add_profile_btn = QPushButton(t("settings.exclude_profile_add"))
+        add_profile_btn.setToolTip(t("settings.exclude_profile_tooltip"))
+        add_profile_btn.clicked.connect(self._add_exclusion_profile)
+        profile_row.addWidget(add_profile_btn)
+        exclude_layout.addLayout(profile_row)
+        exclude_add_row = QHBoxLayout()
+        self.exclude_input = QLineEdit()
+        self.exclude_input.setPlaceholderText(t("settings.exclude_hint"))
+        self.exclude_input.setToolTip(t("settings.exclude_input_tooltip"))
+        self.exclude_input.returnPressed.connect(self._add_exclude)
+        exclude_add_row.addWidget(self.exclude_input)
+        add_exclude_btn = QPushButton(t("settings.exclude_add_btn"))
+        add_exclude_btn.setToolTip(t("settings.exclude_add_tooltip"))
+        add_exclude_btn.clicked.connect(self._add_exclude)
+        exclude_add_row.addWidget(add_exclude_btn)
+        self.remove_exclude_btn = QPushButton(t("settings.exclude_remove_btn"))
+        self.remove_exclude_btn.setToolTip(t("settings.exclude_remove_tooltip"))
+        self.remove_exclude_btn.setEnabled(False)
+        self.remove_exclude_btn.clicked.connect(self._remove_exclude)
+        exclude_add_row.addWidget(self.remove_exclude_btn)
+        exclude_layout.addLayout(exclude_add_row)
+
+        selective_row = QHBoxLayout()
+        self.selective_btn = QPushButton(t("settings.selective_btn"))
+        self.selective_btn.setToolTip(t("settings.selective_tooltip"))
+        self.selective_btn.clicked.connect(self._choose_selective_folders)
+        selective_row.addWidget(self.selective_btn)
+        self.selective_label = QLabel()
+        self.selective_label.setWordWrap(True)
+        selective_row.addWidget(self.selective_label, 1)
+        exclude_layout.addLayout(selective_row)
+
+        # Read-only, separate from the editable list above: this one isn't a
+        # pattern the user typed in, it's computed automatically from "Script
+        # server sul NAS" (see rsync_ops.server_package_excluded_path) and
+        # can't be removed here -- shown so "where did my server folder go,
+        # why isn't it in my synced NASBox folder" has a visible answer
+        # instead of being an invisible rule nobody can see is active.
+        self.auto_exclude_label = QLabel()
+        self.auto_exclude_label.setWordWrap(True)
+        self.auto_exclude_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        exclude_layout.addWidget(self.auto_exclude_label)
+        self._refresh_auto_exclude_label()
+        self._refresh_selective_label()
+        left_col.addWidget(exclude_box)
+        left_sections.append(exclude_box)
 
         # --- sync cadence ---
         cadence_box = self._make_section("cadence", t("settings.cadence_title"))
@@ -537,73 +618,6 @@ class SettingsTab(QWidget):
         maint_layout.addLayout(conflict_row)
         right_col.addWidget(maint_box)
         right_sections.append(maint_box)
-        # --- selective sync (now lives in the right column with the other
-        #     compact groups; the list itself is height-capped below) ---
-        exclude_box = self._make_section("exclude", t("settings.exclude_title"))
-        exclude_layout = QVBoxLayout(exclude_box)
-        self._tight_layout(exclude_layout)
-        exclude_note = QLabel(t("settings.exclude_note"))
-        exclude_note.setWordWrap(True)
-        exclude_layout.addWidget(exclude_note)
-        self.exclude_list = QListWidget()
-        self.exclude_list.setMaximumHeight(90)
-        self.exclude_list.setToolTip(t("settings.exclude_note"))
-        self.exclude_list.addItems(cfg.exclude_patterns())
-        exclude_layout.addWidget(self.exclude_list)
-        profile_row = QHBoxLayout()
-        profile_row.addWidget(QLabel(t("settings.exclude_profile_label")))
-        self.exclusion_profile_combo = QComboBox()
-        for key, label_key, patterns in EXCLUSION_PROFILES:
-            self.exclusion_profile_combo.addItem(t(label_key), userData=list(patterns))
-        self.exclusion_profile_combo.setToolTip(t("settings.exclude_profile_tooltip"))
-        self._cap_field(self.exclusion_profile_combo, 200)
-        profile_row.addWidget(self.exclusion_profile_combo, 1)
-        add_profile_btn = QPushButton(t("settings.exclude_profile_add"))
-        add_profile_btn.setToolTip(t("settings.exclude_profile_tooltip"))
-        add_profile_btn.clicked.connect(self._add_exclusion_profile)
-        profile_row.addWidget(add_profile_btn)
-        exclude_layout.addLayout(profile_row)
-        exclude_add_row = QHBoxLayout()
-        self.exclude_input = QLineEdit()
-        self.exclude_input.setPlaceholderText(t("settings.exclude_hint"))
-        self.exclude_input.setToolTip(t("settings.exclude_input_tooltip"))
-        self.exclude_input.returnPressed.connect(self._add_exclude)
-        exclude_add_row.addWidget(self.exclude_input)
-        add_exclude_btn = QPushButton(t("settings.exclude_add_btn"))
-        add_exclude_btn.setToolTip(t("settings.exclude_add_tooltip"))
-        add_exclude_btn.clicked.connect(self._add_exclude)
-        exclude_add_row.addWidget(add_exclude_btn)
-        self.remove_exclude_btn = QPushButton(t("settings.exclude_remove_btn"))
-        self.remove_exclude_btn.setToolTip(t("settings.exclude_remove_tooltip"))
-        self.remove_exclude_btn.setEnabled(False)
-        self.remove_exclude_btn.clicked.connect(self._remove_exclude)
-        exclude_add_row.addWidget(self.remove_exclude_btn)
-        exclude_layout.addLayout(exclude_add_row)
-
-        selective_row = QHBoxLayout()
-        self.selective_btn = QPushButton(t("settings.selective_btn"))
-        self.selective_btn.setToolTip(t("settings.selective_tooltip"))
-        self.selective_btn.clicked.connect(self._choose_selective_folders)
-        selective_row.addWidget(self.selective_btn)
-        self.selective_label = QLabel()
-        self.selective_label.setWordWrap(True)
-        selective_row.addWidget(self.selective_label, 1)
-        exclude_layout.addLayout(selective_row)
-
-        # Read-only, separate from the editable list above: this one isn't a
-        # pattern the user typed in, it's computed automatically from "Script
-        # server sul NAS" (see rsync_ops.server_package_excluded_path) and
-        # can't be removed here -- shown so "where did my server folder go,
-        # why isn't it in my synced NASBox folder" has a visible answer
-        # instead of being an invisible rule nobody can see is active.
-        self.auto_exclude_label = QLabel()
-        self.auto_exclude_label.setWordWrap(True)
-        self.auto_exclude_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        exclude_layout.addWidget(self.auto_exclude_label)
-        self._refresh_auto_exclude_label()
-        self._refresh_selective_label()
-        right_col.addWidget(exclude_box)
-        right_sections.append(exclude_box)
 
         save_row = QHBoxLayout()
         self.save_feedback = QLabel(t("settings.saved_feedback"))
@@ -656,15 +670,17 @@ class SettingsTab(QWidget):
         widget.setMaximumWidth(width)
 
     def _apply_initial_collapse(self) -> None:
-        """Leave at most two sections expanded per column on startup.
+        """No-op for collapsing: every section starts expanded and visible.
 
-        This is a view-only preference: _on_section_toggled only hides child
-        widgets, no cfg value is touched. _apply_search_filter re-opens any
-        matching section and restores this exact state when the filter clears.
+        Kept (and still called from __init__) rather than deleted so existing
+        callers keep working, but the old "at most two open groups per column"
+        behaviour is disabled. A user can still tick a group's checkbox by
+        hand; the application itself never collapses a section on startup.
         """
-        for sections in self._column_sections:
-            for section in sections[2:]:
-                section.setChecked(False)
+        for section in self._sections:
+            section.setChecked(True)
+            for child in self._section_fields(section):
+                child.setVisible(True)
 
     @staticmethod
     def _section_fields(section: QGroupBox) -> list[QWidget]:

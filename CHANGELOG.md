@@ -4,6 +4,14 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 1.28.4 - 2026-11-23
+
+- Stato: "Garanzia di sincronizzazione" e "Stato" affiancati 50/50.
+- Monitor NAS: "Dettagli analisi" e "File duplicati" affiancati e aperti di
+  default.
+- Impostazioni: tutte le sezioni sempre visibili (niente collasso iniziale),
+  campi banda stretti e blocco esclusioni subito sotto la banda.
+
 ## 1.28.3 - 2026-11-23
 
 - **Interfaccia compatta**: Stato, Monitor NAS e Impostazioni usano 2 colonne

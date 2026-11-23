@@ -290,21 +290,33 @@ class MetricsTab(QWidget):
         self.storage_last_label = QLabel()
         layout.addWidget(self.storage_last_label)
 
+        # "Dettagli analisi" and "File duplicati" sit side by side in a
+        # two-column row. Both start expanded: the results should be visible
+        # without the user having to open any checkbox first.
+        details_row = QHBoxLayout()
+        details_row.setSpacing(6)
         self.storage_details_section, _details_content, details_layout = self._collapsible_section(
-            t("storage.details_title"), "storageDetailsSection", False, layout
+            t("storage.details_title"), "storageDetailsSection", True, details_row
         )
+        self.storage_details_section.setMinimumWidth(260)
         self.storage_folders_label = QLabel()
-        self.storage_duplicates_label = QLabel()
         self.storage_trash_label = QLabel()
         details_layout.addWidget(self._storage_detail_box(
             t("storage.folders_title"), "storageFoldersBox", self.storage_folders_label
         ))
         details_layout.addWidget(self._storage_detail_box(
-            t("storage.duplicates_title"), "storageDuplicatesBox", self.storage_duplicates_label
-        ))
-        details_layout.addWidget(self._storage_detail_box(
             t("storage.trash_title"), "storageTrashBox", self.storage_trash_label
         ))
+
+        self.storage_duplicates_section, _duplicates_content, duplicates_layout = self._collapsible_section(
+            t("storage.duplicates_title"), "storageDuplicatesSection", True, details_row
+        )
+        self.storage_duplicates_section.setMinimumWidth(260)
+        self.storage_duplicates_label = QLabel()
+        duplicates_layout.addWidget(self._storage_detail_box(
+            t("storage.duplicates_title"), "storageDuplicatesBox", self.storage_duplicates_label
+        ))
+
         self.storage_folders_label.setWordWrap(True)
         self.storage_folders_label.setTextInteractionFlags(
             Qt.TextInteractionFlag.TextSelectableByMouse
@@ -314,6 +326,8 @@ class MetricsTab(QWidget):
             Qt.TextInteractionFlag.TextSelectableByMouse
         )
         self.storage_trash_label.setWordWrap(True)
+
+        layout.addLayout(details_row)
 
         self._render_storage_empty()
 

@@ -90,6 +90,7 @@ def test_tall_sections_are_checkable(compact_tab):
         ("cpu_chart_section", "cpuChartSection"),
         ("storage_section", "storageSection"),
         ("storage_details_section", "storageDetailsSection"),
+        ("storage_duplicates_section", "storageDuplicatesSection"),
     ):
         section = getattr(compact_tab, attribute)
         assert isinstance(section, QGroupBox)
@@ -101,18 +102,22 @@ def test_default_expanded_state(compact_tab):
     assert compact_tab.load_chart_section.isChecked() is True
     assert compact_tab.storage_section.isChecked() is True
     assert compact_tab.cpu_chart_section.isChecked() is False
-    assert compact_tab.storage_details_section.isChecked() is False
+    # Analysis details and duplicates start open: no extra checkbox to reveal.
+    assert compact_tab.storage_details_section.isChecked() is True
+    assert compact_tab.storage_duplicates_section.isChecked() is True
 
     assert _content(compact_tab, "loadChartSection").isHidden() is False
     assert _content(compact_tab, "storageSection").isHidden() is False
     assert _content(compact_tab, "cpuChartSection").isHidden() is True
-    assert _content(compact_tab, "storageDetailsSection").isHidden() is True
+    assert _content(compact_tab, "storageDetailsSection").isHidden() is False
+    assert _content(compact_tab, "storageDuplicatesSection").isHidden() is False
 
 
 def test_toggling_a_section_shows_and_hides_its_contents(compact_tab):
     for attribute, object_name in (
         ("cpu_chart_section", "cpuChartSection"),
         ("storage_details_section", "storageDetailsSection"),
+        ("storage_duplicates_section", "storageDuplicatesSection"),
         ("load_chart_section", "loadChartSection"),
     ):
         section = getattr(compact_tab, attribute)
@@ -156,6 +161,58 @@ def test_charts_are_two_columns_of_at_least_300px(compact_tab):
     assert compact_tab.cpu_chart_section.minimumWidth() >= 300
     assert compact_tab.load_plot.parentWidget() is not None
     assert compact_tab.cpu_plot.parentWidget() is not None
+
+
+def _details_row(compact_tab: MetricsTab) -> QHBoxLayout:
+    """The QHBoxLayout that places analysis details next to duplicate files."""
+    storage_content = _content(compact_tab, "storageSection")
+    layout = storage_content.layout()
+    for index in range(layout.count()):
+        candidate = layout.itemAt(index).layout()
+        if not isinstance(candidate, QHBoxLayout):
+            continue
+        widgets = [candidate.itemAt(i).widget() for i in range(candidate.count())]
+        if (
+            compact_tab.storage_details_section in widgets
+            and compact_tab.storage_duplicates_section in widgets
+        ):
+            return candidate
+    raise AssertionError("Dettagli analisi e File duplicati non sono affiancati")
+
+
+def test_details_and_duplicates_are_two_side_by_side_columns(compact_tab):
+    row = _details_row(compact_tab)
+    widgets = [row.itemAt(i).widget() for i in range(row.count())]
+    assert widgets == [
+        compact_tab.storage_details_section,
+        compact_tab.storage_duplicates_section,
+    ]
+    assert compact_tab.storage_details_section.minimumWidth() >= 260
+    assert compact_tab.storage_duplicates_section.minimumWidth() >= 260
+
+    # The duplicate readout was extracted from "Dettagli analisi" into its own
+    # section; folders and history stay in the analysis-details section.
+    assert not compact_tab.storage_details_section.isAncestorOf(
+        compact_tab.storage_duplicates_label
+    )
+    assert compact_tab.storage_duplicates_section.isAncestorOf(
+        compact_tab.storage_duplicates_label
+    )
+    assert compact_tab.storage_details_section.isAncestorOf(
+        compact_tab.storage_folders_label
+    )
+    assert compact_tab.storage_details_section.isAncestorOf(
+        compact_tab.storage_trash_label
+    )
+
+
+def test_details_and_duplicates_are_open_by_default(compact_tab):
+    for section, content_name in (
+        (compact_tab.storage_details_section, "storageDetailsSection"),
+        (compact_tab.storage_duplicates_section, "storageDuplicatesSection"),
+    ):
+        assert section.isChecked() is True
+        assert _content(compact_tab, content_name).isHidden() is False
 
 
 def test_summary_cards_stay_in_two_columns(compact_tab):
@@ -213,6 +270,7 @@ def test_existing_attributes_object_names_and_methods_are_preserved(compact_tab)
         "net_interfaces_label", "uptime_label", "activity_label", "queue_label",
         "staging_label", "metadata_label", "storage_analyze_btn",
         "storage_status_label", "storage_progress", "storage_last_label",
+        "storage_details_section", "storage_duplicates_section",
         "storage_folders_label", "storage_duplicates_label", "storage_trash_label",
     ):
         assert hasattr(compact_tab, name), name

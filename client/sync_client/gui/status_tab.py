@@ -96,7 +96,7 @@ class StatusTab(QWidget):
         self._recent_problem_events: dict[str, tuple[float, str]] = {}
         self.attention_problems: list[tuple[str, str, str]] = []
         self._conflict_count = 0
-        # True once the two card rows have been stacked vertically because the
+        # True once the card rows have been stacked vertically because the
         # window became too narrow for two ~360px columns side by side.
         self._single_column = False
 
@@ -155,9 +155,9 @@ class StatusTab(QWidget):
         self.verify_now_btn.setToolTip(t("assurance.verify_now_tooltip"))
         self.verify_now_btn.clicked.connect(self._verify_now)
         assurance_layout.addWidget(self.verify_now_btn)
-        # Fixed header: the assurance answer stays on screen while the cards
-        # below scroll, so it must live in `outer`, not in the scroll content.
-        outer.addWidget(self.assurance_box)
+        # The assurance card no longer spans the tab as a fixed header: it
+        # shares a half-width row with the status card, added to the scroll
+        # content once status_box has been built (see _assurance_columns).
         outer.addWidget(scroll)
 
         # --- status ---
@@ -342,6 +342,21 @@ class StatusTab(QWidget):
         self.sync_feedback_label.setWordWrap(True)
         self.sync_feedback_label.hide()
         status_layout.addWidget(self.sync_feedback_label)
+        self.status_box = status_box
+
+        # --- assurance + status: 50/50 row at the top of the scroll content ---
+        # The "is everything synced?" answer and the live status now sit side
+        # by side instead of assurance taking a full-width fixed header. Both
+        # ask for ~360px so text and buttons never get squeezed; resizeEvent
+        # stacks them when the window is too narrow for two columns.
+        self._assurance_columns = QHBoxLayout()
+        self._assurance_columns.setContentsMargins(0, 0, 0, 0)
+        self._assurance_columns.setSpacing(6)
+        for card in (self.assurance_box, self.status_box):
+            card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+            card.setMinimumWidth(360)
+            self._assurance_columns.addWidget(card, 1)
+        root.addLayout(self._assurance_columns)
 
         # --- NAS status & overview ---
         nas_box = QGroupBox(t("status.nas_overview_title"))
@@ -372,17 +387,17 @@ class StatusTab(QWidget):
         self.nas_storage_bar.setValue(0)
         nas_layout.addWidget(self.nas_storage_bar)
 
-        # Two compact columns: the live status and the NAS overview share a
-        # row instead of stacking into two full-width cards. Each column asks
-        # for ~360px so text and buttons never get squeezed; resizeEvent below
-        # stacks the row again when the window is too narrow for both.
+        # The NAS overview used to share this row with the status card; that
+        # card now sits next to the assurance card in _assurance_columns, so a
+        # spacer keeps the overview at the same half-width column instead of
+        # letting a single card stretch across the whole tab.
         self._status_columns = QHBoxLayout()
         self._status_columns.setContentsMargins(0, 0, 0, 0)
         self._status_columns.setSpacing(6)
-        for card in (status_box, nas_box):
-            card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-            card.setMinimumWidth(360)
-            self._status_columns.addWidget(card, 1)
+        nas_box.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        nas_box.setMinimumWidth(360)
+        self._status_columns.addWidget(nas_box, 1)
+        self._status_columns.addStretch(1)
         root.addLayout(self._status_columns)
 
         # Hidden when healthy: day-to-day users only see this card when there is
@@ -465,8 +480,8 @@ class StatusTab(QWidget):
             QBoxLayout.Direction.TopToBottom if single_column
             else QBoxLayout.Direction.LeftToRight
         )
-        self._status_columns.setDirection(direction)
-        self._secondary_columns.setDirection(direction)
+        for row in (self._assurance_columns, self._status_columns, self._secondary_columns):
+            row.setDirection(direction)
 
     # --- actions ---
 
