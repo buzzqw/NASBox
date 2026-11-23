@@ -4,6 +4,15 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 1.30.0 - 2026-11-23
+
+- Nuova tab **Panoramica**: schermata fissa con stato di sincronizzazione,
+  contatori, ultimo audit e dispositivi; pulsante per aprire i dettagli.
+- **Activity feed multi-PC** nel Monitor NAS, con polling ogni 5 minuti e
+  aggiornamento manuale.
+- **Pulizia guidata dei duplicati**: spostamento sicuro nel cestino locale con
+  conferma, calcolo dello spazio recuperabile e protezione del file mantenuto.
+
 ## 1.29.0 - 2026-11-23
 
 - **Certificato di coerenza**: audit completo settimanale a blocchi da 250

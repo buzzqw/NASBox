@@ -39,6 +39,7 @@ from ..repository_safety import RepositorySafetyError, initialize_local_root
 from .browse_tab import BrowseTab
 from .conflicts_tab import ConflictsTab
 from .history_tab import HistoryTab
+from .overview_tab import OverviewTab
 from .log_tab import LogTab
 from .metrics_tab import MetricsTab
 from .mirrors_tab import MirrorsTab
@@ -150,6 +151,7 @@ class MainWindow(QMainWindow):
         header_layout.addWidget(version)
         shell_layout.addWidget(header)
 
+        self.overview_tab = OverviewTab()
         tabs = QTabWidget()
         tabs.setObjectName("mainTabs")
         tabs.setDocumentMode(True)
@@ -169,6 +171,7 @@ class MainWindow(QMainWindow):
         self.mirrors_tab = MirrorsTab(self.cfg, self.mirror_manager)
 
         self._tab_labels = {
+            self.overview_tab: t("main_window.tab_overview"),
             self.status_tab: t("main_window.tab_status"),
             self.metrics_tab: t("main_window.tab_metrics"),
             self.transfers_tab: t("main_window.tab_transfers"),
@@ -187,19 +190,25 @@ class MainWindow(QMainWindow):
         # the whole interface jumping sideways.
         uniform_scrollbars(self)
         tabs.currentChanged.connect(lambda _index: self._update_metrics_tab_active())
-        tabs.setTabToolTip(0, t("main_window.tab_status_tooltip"))
-        tabs.setTabToolTip(1, t("main_window.tab_metrics_tooltip"))
-        tabs.setTabToolTip(2, t("main_window.tab_transfers_tooltip"))
-        tabs.setTabToolTip(3, t("main_window.tab_history_tooltip"))
-        tabs.setTabToolTip(4, t("main_window.tab_conflicts_tooltip"))
-        tabs.setTabToolTip(5, t("main_window.tab_browse_tooltip"))
-        tabs.setTabToolTip(6, t("main_window.tab_log_tooltip"))
-        tabs.setTabToolTip(7, t("main_window.tab_mirrors_tooltip"))
-        tabs.setTabToolTip(8, t("main_window.tab_settings_tooltip"))
+        for index, key in enumerate((
+            "overview", "status", "metrics", "transfers", "history",
+            "conflicts", "browse", "log", "mirrors", "settings",
+        )):
+            tooltip = t(f"main_window.tab_{key}_tooltip")
+            if not tooltip.startswith("main_window.tab_"):
+                tabs.setTabToolTip(index, tooltip)
         shell_layout.addWidget(tabs, 1)
         self.setCentralWidget(shell)
 
         self.engine.status_changed.connect(self.status_tab.on_status_changed)
+        self.engine.status_changed.connect(self.overview_tab.set_status)
+        self.engine.status_changed.connect(
+            lambda status: self.metrics_tab.set_devices(status.get("devices") or [])
+        )
+        self.metrics_tab.devices_refresh_requested.connect(self.engine.refresh_devices_now)
+        self.overview_tab.open_details_requested.connect(
+            lambda: tabs.setCurrentWidget(self.status_tab)
+        )
         self.status_tab.attention_action_requested.connect(self._open_status_action)
         self.conflicts_tab.conflict_count_changed.connect(self._on_conflict_count)
         self.engine.connection_changed.connect(self.scan_worker.set_connection)

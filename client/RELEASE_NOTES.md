@@ -1,12 +1,14 @@
-# NASBox 1.29.0
+# NASBox 1.30.0
 
-Certificato di coerenza: una verifica completa, rara e verificabile.
+Tre evoluzioni richieste dal piano di sviluppo:
 
-- Audit completo automatico ogni 7 giorni (configurabile), eseguito in
-  background a bassa priorità, senza prendere il lock di sincronizzazione.
-- Confronto a blocchi da 250 file: niente più rsync singolo sull'intero albero.
-- Report persistente con data, durata, file confrontati, differenze e revisione
-  del manifest; vengono conservati gli ultimi 5 audit.
-- Nella scheda Stato: esito dell'ultimo audit e pulsante "Audit completo ora"
-  con avanzamento.
-- Se l'audit trova differenze, non modifica nulla: segnala solo i percorsi.
+- **Tab Panoramica**: prima tab, fissa e senza scroll, con banner "Tutto
+  sincronizzato", 4 contatori, ultimo audit, dispositivi e pulsante "Apri
+  dettagli".
+- **Attività multi-PC**: il Monitor NAS mostra i dispositivi che hanno
+  sincronizzato di recente (host, attivo/ultimo accesso), con aggiornamento
+  manuale.
+- **Pulizia guidata duplicati**: dall'analisi storage si apre un dialog in cui
+  scegliere quali copie spostare nel cestino; per ogni gruppo il file
+  "Mantieni" resta intatto e i percorsi fuori dalla cartella NASBox vengono
+  rifiutati.

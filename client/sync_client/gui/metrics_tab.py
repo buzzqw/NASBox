@@ -5,7 +5,7 @@ import subprocess
 import time
 from collections import deque
 
-from PyQt6.QtCore import QPointF, QTimer, Qt
+from PyQt6.QtCore import QPointF, QTimer, Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QPainter, QPen, QPolygonF
 from PyQt6.QtWidgets import (
     QFormLayout, QFrame, QGridLayout, QGroupBox, QHBoxLayout, QLabel,
@@ -78,6 +78,10 @@ class MetricHistoryPlot(QFrame):
 
 class MetricsTab(QWidget):
     """Small, read-only NAS health dashboard."""
+
+    # Emitted by the "Aggiorna dispositivi" button; main_window owns the actual
+    # fetch, this tab only renders the result passed to set_devices().
+    devices_refresh_requested = pyqtSignal()
 
     def __init__(self, cfg: Config, engine: SyncEngine, parent=None) -> None:
         super().__init__(parent)
@@ -221,6 +225,7 @@ class MetricsTab(QWidget):
         cpu_layout.addWidget(self.cpu_plot)
         root.addLayout(charts)
 
+        self._build_devices_section(root)
         self._build_storage_section(root)
         root.addStretch(1)
 
@@ -267,6 +272,65 @@ class MetricsTab(QWidget):
         content.setVisible(expanded)
         parent_layout.addWidget(box)
         return box, content, content_layout
+
+    # --- Recent devices -----------------------------------------------------
+
+    def _build_devices_section(self, root: QVBoxLayout) -> None:
+        """Compact multi-PC activity feed inside the NAS monitor tab."""
+        box = QGroupBox(t("devices.title"))
+        box.setObjectName("recentDevicesBox")
+        layout = QVBoxLayout(box)
+        layout.setContentsMargins(6, 8, 6, 6)
+        layout.setSpacing(6)
+
+        toolbar = QHBoxLayout()
+        toolbar.setContentsMargins(0, 0, 0, 0)
+        toolbar.setSpacing(6)
+        self.devices_refresh_btn = QPushButton(t("devices.refresh_btn"))
+        self.devices_refresh_btn.setMaximumWidth(160)
+        self.devices_refresh_btn.setObjectName("devicesRefreshBtn")
+        self.devices_refresh_btn.clicked.connect(self.devices_refresh_requested.emit)
+        toolbar.addStretch(1)
+        toolbar.addWidget(self.devices_refresh_btn)
+        layout.addLayout(toolbar)
+
+        self.devices_label = QLabel(t("devices.empty"))
+        self.devices_label.setObjectName("recentDevicesLabel")
+        self.devices_label.setTextFormat(Qt.TextFormat.PlainText)
+        self.devices_label.setWordWrap(True)
+        self.devices_label.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+        )
+        layout.addWidget(self.devices_label)
+
+        root.addWidget(box)
+        self.set_devices(None)
+
+    def set_devices(self, devices: list[dict] | None) -> None:
+        """Render the latest device activity. GUI thread only, no network I/O.
+
+        ``devices`` entries come from ``rsync_ops.remote_devices()`` and carry
+        ``device``, ``host``, ``last_seen`` (epoch) and ``active`` keys.
+        """
+        if not devices:
+            self.devices_label.setText(t("devices.empty"))
+            return
+        now = time.time()
+        rows: list[str] = []
+        for device in devices[:5]:
+            host = str(device.get("host") or device.get("device") or "")
+            if not host:
+                host = t("metrics.unknown_value")
+            if device.get("active"):
+                status = t("devices.active")
+            else:
+                try:
+                    minutes = max(0, int((now - float(device.get("last_seen"))) / 60))
+                except (TypeError, ValueError):
+                    minutes = 0
+                status = t("devices.minutes_ago", minutes=minutes)
+            rows.append(t("devices.row", host=host, status=status))
+        self.devices_label.setText("\n".join(rows))
 
     # --- Storage insights ---------------------------------------------------
 
@@ -322,6 +386,13 @@ class MetricsTab(QWidget):
         duplicates_layout.addWidget(self._storage_detail_box(
             t("storage.duplicate_groups_title"), "storageDuplicatesBox", self.storage_duplicates_label
         ))
+        self.storage_cleanup_btn = QPushButton(t("storage.cleanup_btn"))
+        self.storage_cleanup_btn.setObjectName("storageCleanupBtn")
+        self.storage_cleanup_btn.setToolTip(t("storage.cleanup_tooltip"))
+        self.storage_cleanup_btn.setEnabled(False)
+        self.storage_cleanup_btn.clicked.connect(self._open_duplicate_cleanup)
+        duplicates_layout.addWidget(self.storage_cleanup_btn)
+        self._last_storage_result = None
 
         self.storage_folders_label.setWordWrap(True)
         self.storage_folders_label.setTextInteractionFlags(
@@ -362,7 +433,22 @@ class MetricsTab(QWidget):
     def _render_storage_error(self, detail: str) -> None:
         self.storage_status_label.setText(t("storage.error", detail=detail))
 
+    def _open_duplicate_cleanup(self) -> None:
+        from .duplicate_cleanup import DuplicateCleanupDialog
+
+        result = self._last_storage_result
+        if result is None or not result.duplicates:
+            return
+        dialog = DuplicateCleanupDialog(self.cfg, result.duplicates, self)
+        if dialog.exec():
+            # A cleanup changes the tree: force a fresh analysis next time.
+            self._last_storage_analysis = 0.0
+            self._analyze_storage(force=True)
+
     def _render_storage(self, result: StorageInsights) -> None:
+        self._last_storage_result = result
+        self.storage_cleanup_btn.setEnabled(bool(result.duplicates))
+
         if result.top_folders:
             lines = [
                 t("storage.folder_row", path=folder.path, size=human_size(folder.size_bytes),

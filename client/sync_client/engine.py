@@ -86,6 +86,8 @@ class SyncEngine(QThread):
         self._integrity_running = threading.Event()
         self._audit_running = threading.Event()
         self._audit_progress: tuple[int, int] = (0, 0)
+        self._devices: list[dict] = []
+        self._last_devices_refresh = 0.0
         self._last_integrity_check = 0.0
         self._started_at = time.time()
         self._assurance_cache: tuple[float, int] | None = None
@@ -216,6 +218,25 @@ class SyncEngine(QThread):
     def verify_integrity_now(self) -> None:
         """Run a full checksum verification on demand, ignoring the interval."""
         self._maybe_integrity_check(time.time(), force=True)
+
+    def refresh_devices_now(self) -> None:
+        if self._conn is None:
+            return
+
+        def worker() -> None:
+            try:
+                devices = rsync_ops.remote_devices(self.cfg, self._conn) or []
+            except Exception:
+                return
+            self._devices = devices
+            self._last_devices_refresh = time.time()
+
+        threading.Thread(target=worker, name="nasbox-devices", daemon=True).start()
+
+    def _maybe_refresh_devices(self, now: float) -> None:
+        if self._conn is None or now - self._last_devices_refresh < 300:
+            return
+        self.refresh_devices_now()
 
     def audit_snapshot(self) -> dict:
         history = integrity_audit.load_history()
@@ -381,6 +402,7 @@ class SyncEngine(QThread):
         self._reconcile_watcher()
         self._maybe_integrity_check(now)
         self._maybe_full_audit(now)
+        self._maybe_refresh_devices(now)
 
         if now - self._last_pending_status >= PENDING_STATUS_INTERVAL_SECONDS:
             self._pending_summary = self.sync_state.pending_summary() if self.sync_state is not None else {}
@@ -428,6 +450,7 @@ class SyncEngine(QThread):
             "cycle_ts": now,
             "assurance": self.assurance_snapshot(),
             "audit": self.audit_snapshot(),
+            "devices": list(self._devices),
         })
 
         if now - self._last_prune > PRUNE_INTERVAL_SECONDS:
