@@ -173,7 +173,6 @@ class MetricsTab(QWidget):
         network_form.addRow(t("metrics.receive_label"), self.net_rx_label)
         network_form.addRow(t("metrics.transmit_label"), self.net_tx_label)
         network_form.addRow(t("metrics.interfaces_label"), self.net_interfaces_label)
-        cards.addWidget(network, 3, 0, 1, 2)
 
         uptime = QGroupBox(t("metrics.uptime_title"))
         uptime_form = QFormLayout(uptime)
@@ -181,7 +180,6 @@ class MetricsTab(QWidget):
         uptime_form.setSpacing(6)
         self.uptime_label = QLabel("--")
         uptime_form.addRow(t("metrics.uptime_label"), self.uptime_label)
-        cards.addWidget(uptime, 4, 0, 1, 2)
 
         activity = QGroupBox(t("metrics.nasbox_title"))
         activity_form = QFormLayout(activity)
@@ -195,7 +193,15 @@ class MetricsTab(QWidget):
         activity_form.addRow(t("metrics.queue_label"), self.queue_label)
         activity_form.addRow(t("metrics.staging_label"), self.staging_label)
         activity_form.addRow(t("metrics.metadata_label"), self.metadata_label)
-        cards.addWidget(activity, 5, 0, 1, 2)
+
+        # Rete / uptime / attività NASBox occupy one compact row of three,
+        # instead of three full-width cards stacked vertically.
+        bottom_row = QHBoxLayout()
+        bottom_row.setSpacing(6)
+        for box in (network, uptime, activity):
+            box.setMinimumWidth(210)
+            bottom_row.addWidget(box, 1)
+        cards.addLayout(bottom_row, 3, 0, 1, 2)
         root.addLayout(cards)
 
         # Two charts side by side, each independently collapsible.

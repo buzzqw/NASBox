@@ -1,8 +1,4 @@
-# NASBox 1.28.5
+# NASBox 1.28.6
 
-- "File duplicati": titolo non più ripetuto due volte; elenco riscritto con un
-  gruppo per blocco e **un percorso per riga**, invece di una stringa lunga e
-  illeggibile.
-- "Conferma cancellazioni di massa" ora avvia subito anche una sincronizzazione:
-  prima toglieva solo il blocco di sicurezza, quindi sembrava non succedesse
-  nulla.
+- Monitor NAS: "Rete", "Uptime NAS" e "Attività NASBox" ora in una sola riga,
+  uno accanto all'altro.

@@ -229,14 +229,24 @@ def test_summary_cards_stay_in_two_columns(compact_tab):
     assert geometry(load_box)[:2] == (0, 0)
     assert geometry(cpu_box)[:2] == (0, 1)
 
-    for widget in (
+    boxes = (
         compact_tab.net_rx_label.parentWidget(),
         compact_tab.uptime_label.parentWidget(),
         compact_tab.activity_label.parentWidget(),
-    ):
+    )
+    for widget in boxes:
         assert isinstance(widget, QGroupBox)
-        _row, column, _row_span, column_span = geometry(widget)
-        assert (column, column_span) == (0, 2)
+        assert widget.minimumWidth() >= 210
+
+    # The three summary cards share one row of three, not three stacked rows.
+    rows = [
+        index for index in range(cards.count())
+        if isinstance(cards.itemAt(index), QHBoxLayout)
+        and all(cards.itemAt(index).layout().itemAt(i).widget() is box for i, box in enumerate(boxes))
+    ]
+    assert len(rows) == 1
+    _row, column, _row_span, column_span = cards.getItemPosition(rows[0])
+    assert (column, column_span) == (0, 2)
 
 
 def test_group_box_margins_and_narrow_secondary_controls(compact_tab):

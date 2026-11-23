@@ -4,6 +4,11 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 1.28.6 - 2026-11-23
+
+- Monitor NAS: "Rete", "Uptime NAS" e "Attività NASBox" affiancati in un'unica
+  riga compatta.
+
 ## 1.28.5 - 2026-11-23
 
 - Storage insights: titolo "File duplicati" non duplicato e rendering con un
