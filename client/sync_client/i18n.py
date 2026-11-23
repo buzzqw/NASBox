@@ -369,6 +369,7 @@ STRINGS: dict[str, dict[str, str]] = {
     "storage.missing_root": {"it": "Cartella NASBox non configurata.", "en": "NASBox folder not configured."},
     "storage.error": {"it": "Analisi non riuscita: {detail}", "en": "Analysis failed: {detail}"},
     "storage.invalid_result": {"it": "Risultato dell'analisi non valido.", "en": "Invalid analysis result."},
+    "storage.details_title": {"it": "Dettagli analisi (cartelle, duplicati, storico)", "en": "Analysis details (folders, duplicates, history)"},
     "browse.empty_hint": {"it": "Questa cartella è vuota. Trascina qui file dal computer per caricarli sul NAS.", "en": "This folder is empty. Drag files here from your computer to upload them to the NAS."},
     "browse.empty_filtered_hint": {"it": "Nessun elemento corrisponde alla ricerca.", "en": "No items match the search."},
     "browse.menu_copy_remote_path": {"it": "Copia percorso remoto", "en": "Copy remote path"},

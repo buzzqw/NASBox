@@ -100,30 +100,38 @@ class MetricsTab(QWidget):
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(6)
+
+        # Fixed header: status and refresh stay visible while the dashboard scrolls.
+        header = QWidget()
+        header.setObjectName("metricsHeader")
+        header_layout = QHBoxLayout(header)
+        header_layout.setContentsMargins(4, 6, 4, 6)
+        header_layout.setSpacing(6)
+        self.status_label = QLabel(t("metrics.status_unknown"))
+        self.status_label.setWordWrap(True)
+        header_layout.addWidget(self.status_label, 1)
+        self.refresh_btn = QPushButton(t("metrics.refresh_btn"))
+        self.refresh_btn.setMaximumWidth(110)
+        self.refresh_btn.clicked.connect(self._refresh_metrics)
+        header_layout.addWidget(self.refresh_btn)
+        outer.addWidget(header)
+
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QScrollArea.Shape.NoFrame)
-        outer.addWidget(scroll)
+        outer.addWidget(scroll, 1)
 
         content = QWidget()
         scroll.setWidget(content)
         root = QVBoxLayout(content)
-        root.setContentsMargins(4, 8, 4, 4)
-        root.setSpacing(12)
-
-        toolbar = QHBoxLayout()
-        self.status_label = QLabel(t("metrics.status_unknown"))
-        self.status_label.setWordWrap(True)
-        toolbar.addWidget(self.status_label, 1)
-        self.refresh_btn = QPushButton(t("metrics.refresh_btn"))
-        self.refresh_btn.clicked.connect(self._refresh_metrics)
-        toolbar.addWidget(self.refresh_btn)
-        root.addLayout(toolbar)
+        root.setContentsMargins(4, 6, 4, 6)
+        root.setSpacing(8)
 
         self.sync_state_box = QFrame()
         self.sync_state_box.setObjectName("syncStateBox")
         state_layout = QVBoxLayout(self.sync_state_box)
-        state_layout.setContentsMargins(14, 10, 14, 10)
+        state_layout.setContentsMargins(6, 8, 6, 6)
         state_layout.setSpacing(2)
         self.sync_state_title = QLabel()
         self.sync_state_title.setObjectName("syncStateTitle")
@@ -135,9 +143,10 @@ class MetricsTab(QWidget):
         root.addWidget(self.sync_state_box)
         self._set_sync_state("unknown", t("metrics.sync_unknown_title"), t("metrics.sync_unknown_detail"))
 
+        # Two compact columns of read-only summary cards.
         cards = QGridLayout()
-        cards.setHorizontalSpacing(12)
-        cards.setVerticalSpacing(12)
+        cards.setHorizontalSpacing(6)
+        cards.setVerticalSpacing(6)
         self.load_label = self._card(cards, 0, 0, t("metrics.load_title"), t("metrics.load_label"))
         self.cpu_label = self._card(cards, 0, 1, t("metrics.cpu_title"), t("metrics.cpu_label"))
         self.memory_label = self._card(cards, 1, 0, t("metrics.memory_title"), t("metrics.memory_label"))
@@ -146,6 +155,8 @@ class MetricsTab(QWidget):
 
         io = QGroupBox(t("metrics.io_title"))
         io_form = QFormLayout(io)
+        io_form.setContentsMargins(6, 8, 6, 6)
+        io_form.setSpacing(6)
         self.io_read_label = QLabel("--")
         self.io_write_label = QLabel("--")
         io_form.addRow(t("metrics.io_read_label"), self.io_read_label)
@@ -154,6 +165,8 @@ class MetricsTab(QWidget):
 
         network = QGroupBox(t("metrics.network_title"))
         network_form = QFormLayout(network)
+        network_form.setContentsMargins(6, 8, 6, 6)
+        network_form.setSpacing(6)
         self.net_rx_label = QLabel("--")
         self.net_tx_label = QLabel("--")
         self.net_interfaces_label = QLabel("--")
@@ -164,13 +177,16 @@ class MetricsTab(QWidget):
 
         uptime = QGroupBox(t("metrics.uptime_title"))
         uptime_form = QFormLayout(uptime)
+        uptime_form.setContentsMargins(6, 8, 6, 6)
+        uptime_form.setSpacing(6)
         self.uptime_label = QLabel("--")
         uptime_form.addRow(t("metrics.uptime_label"), self.uptime_label)
         cards.addWidget(uptime, 4, 0, 1, 2)
-        root.addLayout(cards)
 
         activity = QGroupBox(t("metrics.nasbox_title"))
         activity_form = QFormLayout(activity)
+        activity_form.setContentsMargins(6, 8, 6, 6)
+        activity_form.setSpacing(6)
         self.activity_label = QLabel("--")
         self.queue_label = QLabel("--")
         self.staging_label = QLabel("--")
@@ -179,19 +195,24 @@ class MetricsTab(QWidget):
         activity_form.addRow(t("metrics.queue_label"), self.queue_label)
         activity_form.addRow(t("metrics.staging_label"), self.staging_label)
         activity_form.addRow(t("metrics.metadata_label"), self.metadata_label)
-        root.addWidget(activity)
+        cards.addWidget(activity, 5, 0, 1, 2)
+        root.addLayout(cards)
 
+        # Two charts side by side, each independently collapsible.
         charts = QHBoxLayout()
-        load_chart_box = QGroupBox(t("metrics.load_chart_title"))
-        load_chart_layout = QVBoxLayout(load_chart_box)
+        charts.setSpacing(6)
+        self.load_chart_section, _load_content, load_layout = self._collapsible_section(
+            t("metrics.load_chart_title"), "loadChartSection", True, charts
+        )
+        self.load_chart_section.setMinimumWidth(300)
         self.load_plot = MetricHistoryPlot(t("metrics.load_chart_title"), "#3b82f6")
-        load_chart_layout.addWidget(self.load_plot)
-        charts.addWidget(load_chart_box)
-        cpu_chart_box = QGroupBox(t("metrics.cpu_chart_title"))
-        cpu_chart_layout = QVBoxLayout(cpu_chart_box)
+        load_layout.addWidget(self.load_plot)
+        self.cpu_chart_section, _cpu_content, cpu_layout = self._collapsible_section(
+            t("metrics.cpu_chart_title"), "cpuChartSection", False, charts
+        )
+        self.cpu_chart_section.setMinimumWidth(300)
         self.cpu_plot = MetricHistoryPlot(t("metrics.cpu_chart_title"), "#f97316", maximum=100)
-        cpu_chart_layout.addWidget(self.cpu_plot)
-        charts.addWidget(cpu_chart_box)
+        cpu_layout.addWidget(self.cpu_plot)
         root.addLayout(charts)
 
         self._build_storage_section(root)
@@ -205,21 +226,55 @@ class MetricsTab(QWidget):
     def _card(grid: QGridLayout, row: int, column: int, title: str, label: str) -> QLabel:
         box = QGroupBox(title)
         form = QFormLayout(box)
+        form.setContentsMargins(6, 8, 6, 6)
+        form.setSpacing(6)
         value = QLabel("--")
         value.setWordWrap(True)
         form.addRow(label, value)
         grid.addWidget(box, row, column)
         return value
 
+    @staticmethod
+    def _collapsible_section(
+        title: str, object_name: str, expanded: bool, parent_layout
+    ) -> tuple[QGroupBox, QWidget, QVBoxLayout]:
+        """Checkable group box whose contents are really hidden when collapsed.
+
+        Qt keeps a checkable QGroupBox's children in the layout (and in the
+        size hint) even when unchecked, so toggling the content widget's
+        visibility explicitly is what actually shortens the scroll area.
+        """
+        box = QGroupBox(title)
+        box.setObjectName(object_name)
+        box.setCheckable(True)
+        box.setChecked(expanded)
+        box_layout = QVBoxLayout(box)
+        box_layout.setContentsMargins(6, 8, 6, 6)
+        box_layout.setSpacing(6)
+        content = QWidget()
+        content.setObjectName(object_name + "Content")
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(6)
+        box_layout.addWidget(content)
+        box.toggled.connect(lambda checked: content.setVisible(checked))
+        content.setVisible(expanded)
+        parent_layout.addWidget(box)
+        return box, content, content_layout
+
     # --- Storage insights ---------------------------------------------------
 
     def _build_storage_section(self, root: QVBoxLayout) -> None:
-        box = QGroupBox(t("storage.title"))
-        layout = QVBoxLayout(box)
+        self.storage_section, _storage_content, layout = self._collapsible_section(
+            t("storage.title"), "storageSection", True, root
+        )
 
         toolbar = QHBoxLayout()
+        toolbar.setContentsMargins(0, 0, 0, 0)
+        toolbar.setSpacing(6)
         self.storage_analyze_btn = QPushButton(t("storage.analyze_btn"))
-        self.storage_analyze_btn.clicked.connect(lambda: self._analyze_storage(force=True))
+        self.storage_analyze_btn.setMaximumWidth(150)
+        self.storage_analyze_btn.clicked.connect(self._on_analyze_clicked)
         toolbar.addWidget(self.storage_analyze_btn)
         self.storage_status_label = QLabel(t("storage.status_idle"))
         self.storage_status_label.setWordWrap(True)
@@ -235,35 +290,47 @@ class MetricsTab(QWidget):
         self.storage_last_label = QLabel()
         layout.addWidget(self.storage_last_label)
 
-        folders_box = QGroupBox(t("storage.folders_title"))
-        folders_layout = QVBoxLayout(folders_box)
+        self.storage_details_section, _details_content, details_layout = self._collapsible_section(
+            t("storage.details_title"), "storageDetailsSection", False, layout
+        )
         self.storage_folders_label = QLabel()
+        self.storage_duplicates_label = QLabel()
+        self.storage_trash_label = QLabel()
+        details_layout.addWidget(self._storage_detail_box(
+            t("storage.folders_title"), "storageFoldersBox", self.storage_folders_label
+        ))
+        details_layout.addWidget(self._storage_detail_box(
+            t("storage.duplicates_title"), "storageDuplicatesBox", self.storage_duplicates_label
+        ))
+        details_layout.addWidget(self._storage_detail_box(
+            t("storage.trash_title"), "storageTrashBox", self.storage_trash_label
+        ))
         self.storage_folders_label.setWordWrap(True)
         self.storage_folders_label.setTextInteractionFlags(
             Qt.TextInteractionFlag.TextSelectableByMouse
         )
-        folders_layout.addWidget(self.storage_folders_label)
-        layout.addWidget(folders_box)
-
-        duplicates_box = QGroupBox(t("storage.duplicates_title"))
-        duplicates_layout = QVBoxLayout(duplicates_box)
-        self.storage_duplicates_label = QLabel()
         self.storage_duplicates_label.setWordWrap(True)
         self.storage_duplicates_label.setTextInteractionFlags(
             Qt.TextInteractionFlag.TextSelectableByMouse
         )
-        duplicates_layout.addWidget(self.storage_duplicates_label)
-        layout.addWidget(duplicates_box)
-
-        trash_box = QGroupBox(t("storage.trash_title"))
-        trash_layout = QVBoxLayout(trash_box)
-        self.storage_trash_label = QLabel()
         self.storage_trash_label.setWordWrap(True)
-        trash_layout.addWidget(self.storage_trash_label)
-        layout.addWidget(trash_box)
 
-        root.addWidget(box)
         self._render_storage_empty()
+
+    @staticmethod
+    def _storage_detail_box(title: str, object_name: str, value: QLabel) -> QGroupBox:
+        box = QGroupBox(title)
+        box.setObjectName(object_name)
+        box_layout = QVBoxLayout(box)
+        box_layout.setContentsMargins(6, 8, 6, 6)
+        box_layout.setSpacing(6)
+        box_layout.addWidget(value)
+        return box
+
+    def _on_analyze_clicked(self) -> None:
+        # Reveal the result area as soon as the user asks for an analysis.
+        self.storage_details_section.setChecked(True)
+        self._analyze_storage(force=True)
 
     def _render_storage_empty(self) -> None:
         self.storage_status_label.setText(t("storage.status_idle"))
@@ -378,6 +445,9 @@ class MetricsTab(QWidget):
         self._storage_result = result
         self._storage_last_finished = time.monotonic()
         self._render_storage(result)
+        # The freshly computed details must be visible even if the user had
+        # collapsed that section before an automatic analysis completed.
+        self.storage_details_section.setChecked(True)
 
     def on_connection_changed(self, connection) -> None:
         if self._connection_initialized and connection == self._connection:

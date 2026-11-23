@@ -1,9 +1,11 @@
-# NASBox 1.28.2
+# NASBox 1.28.3
 
-Correzione urgente: il metodo `entry_count()` era stato definito nella classe
-sbagliata, provocando un errore al secondo inello scheda Stato.
+Interfaccia più compatta: meno scroll verticale.
 
-- `entry_count()` ora è correttamente un metodo di `SyncStateStore`.
-- L'updater rimuove le directory `__pycache__` dopo l'aggiornamento: i file
-  del bundle hanno mtime normalizzato e i vecchi `.pyc` potevano essere
-  riutilizzati al posto del nuovo codice.
+- **Stato**: la card "Garanzia di sincronizzazione" resta sempre in cima come
+  header fisso; le altre card sono su 2 colonne.
+- **Monitor NAS**: barra degli strumenti fissa, grafici su 2 colonne e sezioni
+  collassabili; i dettagli storage si aprono da soli dopo l'analisi.
+- **Impostazioni**: ricerca sempre visibile in cima, 2 colonne, al massimo 2
+  sezioni aperte per colonna e campi numerici più stretti.
+- Sotto una certa larghezza della finestra le colonne si impilano da sole.

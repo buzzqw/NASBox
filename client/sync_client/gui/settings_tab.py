@@ -119,6 +119,34 @@ class SettingsTab(QWidget):
         self._collapse_state: dict[QGroupBox, bool] | None = None
         self._highlighted: set[QWidget] = set()
 
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+
+        # --- settings search (Ctrl+K) ---
+        # The filter lives OUTSIDE the scroll area: with many collapsible
+        # groups the content is still taller than the window, and having to
+        # scroll back to the top to reach the search field defeated Ctrl+K.
+        self._search_header = QWidget()
+        self._search_header.setObjectName("settingsSearchHeader")
+        header_layout = QHBoxLayout(self._search_header)
+        header_layout.setContentsMargins(6, 6, 6, 2)
+        header_layout.setSpacing(6)
+        search_label = QLabel(t("transfers.search_label"))
+        search_label.setObjectName("settingsSearchLabel")
+        header_layout.addWidget(search_label)
+        self.search_edit = QLineEdit()
+        self.search_edit.setObjectName("settingsSearchEdit")
+        self.search_edit.setClearButtonEnabled(True)
+        self.search_edit.setPlaceholderText(t("settings.search_placeholder"))
+        self.search_edit.setToolTip(t("settings.search_tooltip"))
+        self.search_edit.setAccessibleName(t("settings.search_placeholder"))
+        self.search_edit.textChanged.connect(self._apply_search_filter)
+        header_layout.addWidget(self.search_edit, 1)
+        outer.addWidget(self._search_header)
+        self.search_shortcut = QShortcut(QKeySequence("Ctrl+K"), self)
+        self.search_shortcut.activated.connect(self._focus_search)
+
         # This tab stacks a lot of group boxes -- without a scroll area, Qt's
         # layout system reports their combined minimum height as *this tab's*
         # minimum height, which propagates all the way up to the main window
@@ -126,11 +154,10 @@ class SettingsTab(QWidget):
         # field at once". A scroll area's own minimum height is small
         # regardless of what's inside it, so the window stays freely
         # resizable and this tab scrolls internally instead.
-        outer = QVBoxLayout(self)
-        outer.setContentsMargins(0, 0, 0, 0)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        self._scroll_area = scroll
         outer.addWidget(scroll)
 
         container = QWidget()
@@ -139,36 +166,33 @@ class SettingsTab(QWidget):
         # so the light/dark theme keeps styling every other widget.
         container.setStyleSheet(_SEARCH_MATCH_STYLE)
         root = QVBoxLayout(container)
+        root.setContentsMargins(6, 4, 6, 4)
+        root.setSpacing(4)
 
-        # --- settings search (Ctrl+K) ---
-        self.search_edit = QLineEdit()
-        self.search_edit.setObjectName("settingsSearchEdit")
-        self.search_edit.setClearButtonEnabled(True)
-        self.search_edit.setPlaceholderText(t("settings.search_placeholder"))
-        self.search_edit.setToolTip(t("settings.search_tooltip"))
-        self.search_edit.setAccessibleName(t("settings.search_placeholder"))
-        self.search_edit.textChanged.connect(self._apply_search_filter)
-        root.addWidget(self.search_edit)
-        self.search_shortcut = QShortcut(QKeySequence("Ctrl+K"), self)
-        self.search_shortcut.activated.connect(self._focus_search)
-
-        # Two columns instead of one long stack: NAS connection is the one
-        # genuinely long group (10+ fields), so it gets a column to itself:
-        # everything else is short enough to stack in the other one without
-        # either column towering over the other, and neither column forces a
-        # QLineEdit to stretch edge-to-edge across the whole window for a
-        # value like a port number.
+        # Two columns as before, but with the groups redistributed and every
+        # short field capped in width: the long NAS group + bandwidth on the
+        # left, all the compact groups on the right. Keeping a QHBoxLayout of
+        # two QVBoxLayouts also lets _update_column_layout stack them on a
+        # narrow window without rebuilding the widget tree.
         columns = QHBoxLayout()
         self._columns = columns
+        columns.setContentsMargins(0, 0, 0, 0)
+        columns.setSpacing(6)
         left_col = QVBoxLayout()
         right_col = QVBoxLayout()
         columns.addLayout(left_col, 1)
         columns.addLayout(right_col, 1)
         root.addLayout(columns)
 
+        # Remember which column each section belongs to so startup can leave
+        # at most two sections expanded per column (see _apply_initial_collapse).
+        left_sections: list[QGroupBox] = []
+        right_sections: list[QGroupBox] = []
+
         # --- NAS connection ---
         nas_box = self._make_section("nas", t("settings.nas_box_title"))
         nas_form = QFormLayout(nas_box)
+        self._tight_layout(nas_form)
         self.nas_lan = QLineEdit(str(cfg.get("nas_lan") or ""))
         self.nas_lan.setPlaceholderText(t("settings.nas_lan_placeholder"))
         self.nas_lan.setToolTip(t("settings.nas_lan_tooltip"))
@@ -184,6 +208,7 @@ class SettingsTab(QWidget):
         self.ssh_port.setRange(1, 65535)
         self.ssh_port.setValue(int(cfg.get("ssh_port") or 22))
         self.ssh_port.setToolTip(t("settings.ssh_port_tooltip"))
+        self._cap_field(self.ssh_port, 90)
         nas_form.addRow(t("settings.ssh_port_label"), self.ssh_port)
         verify_keys_btn = QPushButton(t("settings.verify_keys_btn"))
         verify_keys_btn.setToolTip(t("settings.verify_keys_tooltip"))
@@ -201,6 +226,7 @@ class SettingsTab(QWidget):
         self.jump_port.setRange(1, 65535)
         self.jump_port.setValue(int(cfg.get("jump_port") or 22))
         self.jump_port.setToolTip(t("settings.jump_note"))
+        self._cap_field(self.jump_port, 90)
         nas_form.addRow(t("settings.jump_port_label"), self.jump_port)
         self.jump_user = QLineEdit(str(cfg.get("jump_user") or ""))
         self.jump_user.setPlaceholderText(t("settings.jump_user_placeholder"))
@@ -238,6 +264,7 @@ class SettingsTab(QWidget):
             if value == current_sync_mode:
                 self.sync_mode_combo.setCurrentIndex(index)
         self.sync_mode_combo.setToolTip(t("settings.sync_mode_note"))
+        self._cap_field(self.sync_mode_combo, 200)
         nas_form.addRow(t("settings.sync_mode_label"), self.sync_mode_combo)
         sync_mode_note = QLabel(t("settings.sync_mode_note"))
         sync_mode_note.setWordWrap(True)
@@ -251,6 +278,7 @@ class SettingsTab(QWidget):
         self.max_delete_spin.setRange(1, 1_000_000)
         self.max_delete_spin.setValue(int(cfg.get("max_delete_files") or 1000))
         self.max_delete_spin.setToolTip(t("settings.max_delete_tooltip"))
+        self._cap_field(self.max_delete_spin, 110)
         nas_form.addRow(t("settings.max_delete_label"), self.max_delete_spin)
 
         self.conflict_policy_combo = QComboBox()
@@ -260,21 +288,25 @@ class SettingsTab(QWidget):
             if value == current_policy:
                 self.conflict_policy_combo.setCurrentIndex(index)
         self.conflict_policy_combo.setToolTip(t("settings.conflict_policy_tooltip"))
+        self._cap_field(self.conflict_policy_combo, 200)
         nas_form.addRow(t("settings.conflict_policy_label"), self.conflict_policy_combo)
         conflict_policy_note = QLabel(t("settings.conflict_policy_tooltip"))
         conflict_policy_note.setWordWrap(True)
         nas_form.addRow(conflict_policy_note)
         left_col.addWidget(nas_box)
+        left_sections.append(nas_box)
 
-        # --- bandwidth ---
+        # --- bandwidth (left column, next to the long NAS group) ---
         bw_box = self._make_section("bandwidth", t("settings.bandwidth_title"))
         bw_layout = QHBoxLayout(bw_box)
+        self._tight_layout(bw_layout)
         bw_layout.addWidget(QLabel(t("settings.upload_label")))
         self.bw_upload_spin = QSpinBox()
         self.bw_upload_spin.setRange(0, 1_000_000)
         self.bw_upload_spin.setSingleStep(64)
         self.bw_upload_spin.setValue(int(cfg.get("bandwidth_upload_kbps") or 0))
         self.bw_upload_spin.setToolTip(t("settings.bandwidth_tooltip"))
+        self._cap_field(self.bw_upload_spin, 90)
         bw_layout.addWidget(self.bw_upload_spin)
         bw_layout.addWidget(QLabel(t("settings.download_label")))
         self.bw_download_spin = QSpinBox()
@@ -282,23 +314,28 @@ class SettingsTab(QWidget):
         self.bw_download_spin.setSingleStep(64)
         self.bw_download_spin.setValue(int(cfg.get("bandwidth_download_kbps") or 0))
         self.bw_download_spin.setToolTip(t("settings.bandwidth_tooltip"))
+        self._cap_field(self.bw_download_spin, 90)
         bw_layout.addWidget(self.bw_download_spin)
-        right_col.addWidget(bw_box)
+        left_col.addWidget(bw_box)
+        left_sections.append(bw_box)
 
         # --- sync cadence ---
         cadence_box = self._make_section("cadence", t("settings.cadence_title"))
         cadence_form = QFormLayout(cadence_box)
+        self._tight_layout(cadence_form)
         self.poll_spin = QSpinBox()
         self.poll_spin.setRange(5, 3600)
         self.poll_spin.setSuffix(" s")
         self.poll_spin.setValue(int(cfg.get("poll_interval") or 60))
         self.poll_spin.setToolTip(t("settings.cadence_note"))
+        self._cap_field(self.poll_spin, 100)
         cadence_form.addRow(t("settings.poll_label"), self.poll_spin)
         self.metrics_refresh_spin = QSpinBox()
         self.metrics_refresh_spin.setRange(5, 3600)
         self.metrics_refresh_spin.setSuffix(" s")
         self.metrics_refresh_spin.setValue(int(cfg.get("metrics_refresh_seconds") or 15))
         self.metrics_refresh_spin.setToolTip(t("settings.metrics_refresh_note"))
+        self._cap_field(self.metrics_refresh_spin, 100)
         cadence_form.addRow(t("settings.metrics_refresh_label"), self.metrics_refresh_spin)
         self.compression_combo = QComboBox()
         current_compression = str(cfg.get("compression_mode") or "auto")
@@ -307,6 +344,7 @@ class SettingsTab(QWidget):
             if value == current_compression:
                 self.compression_combo.setCurrentIndex(index)
         self.compression_combo.setToolTip(t("settings.compression_tooltip"))
+        self._cap_field(self.compression_combo, 200)
         cadence_form.addRow(t("settings.compression_label"), self.compression_combo)
         self.full_pull_spin = QSpinBox()
         self.full_pull_spin.setRange(300, 86400)
@@ -314,6 +352,7 @@ class SettingsTab(QWidget):
         self.full_pull_spin.setSuffix(" s")
         self.full_pull_spin.setValue(int(cfg.get("full_pull_interval_seconds") or 7200))
         self.full_pull_spin.setToolTip(t("settings.full_pull_note"))
+        self._cap_field(self.full_pull_spin, 100)
         cadence_form.addRow(t("settings.full_pull_label"), self.full_pull_spin)
         self.nas_friendly_btn = QPushButton(t("settings.nas_friendly_btn"))
         self.nas_friendly_btn.setToolTip(t("settings.nas_friendly_tooltip"))
@@ -327,17 +366,19 @@ class SettingsTab(QWidget):
         cadence_note.setWordWrap(True)
         cadence_form.addRow(cadence_note)
         right_col.addWidget(cadence_box)
+        right_sections.append(cadence_box)
 
         # --- scheduled pause ---
         schedule_box = self._make_section("schedule", t("settings.schedule_title"))
         schedule_layout = QVBoxLayout(schedule_box)
+        self._tight_layout(schedule_layout)
         self.schedule_enabled = QCheckBox(t("settings.schedule_enabled_checkbox"))
         self.schedule_enabled.setChecked(bool(cfg.get("pause_schedule_enabled")))
         self.schedule_enabled.setToolTip(t("settings.schedule_enabled_tooltip"))
         schedule_layout.addWidget(self.schedule_enabled)
         self.schedule_list = QListWidget()
         self.schedule_list.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
-        self.schedule_list.setMaximumHeight(110)
+        self.schedule_list.setMaximumHeight(90)
         self.schedule_list.setToolTip(t("settings.schedule_list_tooltip"))
         schedule_layout.addWidget(self.schedule_list)
         schedule_buttons = QHBoxLayout()
@@ -360,10 +401,12 @@ class SettingsTab(QWidget):
         schedule_layout.addWidget(schedule_note)
         self._refresh_schedule_list()
         right_col.addWidget(schedule_box)
+        right_sections.append(schedule_box)
 
         # --- sync feedback ---
         feedback_box = self._make_section("feedback", t("settings.feedback_title"))
         feedback_layout = QVBoxLayout(feedback_box)
+        self._tight_layout(feedback_layout)
         self.notify_sync_checkbox = QCheckBox(t("settings.notify_sync_checkbox"))
         self.notify_sync_checkbox.setChecked(bool(cfg.get("notify_sync_completion")))
         self.notify_sync_checkbox.setToolTip(t("settings.notify_sync_tooltip"))
@@ -381,16 +424,19 @@ class SettingsTab(QWidget):
             if value == current_tray_click:
                 self.tray_click_combo.setCurrentIndex(index)
         self.tray_click_combo.setToolTip(t("settings.tray_click_tooltip"))
+        self._cap_field(self.tray_click_combo, 200)
         tray_click_row.addWidget(self.tray_click_combo, 1)
         feedback_layout.addLayout(tray_click_row)
         feedback_note = QLabel(t("settings.notify_sync_note"))
         feedback_note.setWordWrap(True)
         feedback_layout.addWidget(feedback_note)
         right_col.addWidget(feedback_box)
+        right_sections.append(feedback_box)
 
         # --- language ---
         language_box = self._make_section("language", t("settings.language_title"))
         language_form = QFormLayout(language_box)
+        self._tight_layout(language_form)
         self.language_combo = QComboBox()
         current_lang = cfg.language()
         for index, (code, label_key) in enumerate(LANGUAGE_OPTIONS):
@@ -398,15 +444,18 @@ class SettingsTab(QWidget):
             if code == current_lang:
                 self.language_combo.setCurrentIndex(index)
         self.language_combo.setToolTip(t("settings.language_note"))
+        self._cap_field(self.language_combo, 200)
         language_form.addRow(t("settings.language_label"), self.language_combo)
         language_note = QLabel(t("settings.language_note"))
         language_note.setWordWrap(True)
         language_form.addRow(language_note)
         right_col.addWidget(language_box)
+        right_sections.append(language_box)
 
         # --- theme: light stays the default so the existing look is preserved ---
         theme_box = self._make_section("theme", t("settings.theme_title"))
         theme_form = QFormLayout(theme_box)
+        self._tight_layout(theme_form)
         self.theme_combo = QComboBox()
         current_theme = cfg.get("theme", "light")
         for index, (value, label_key) in enumerate(THEME_OPTIONS):
@@ -415,15 +464,18 @@ class SettingsTab(QWidget):
                 self.theme_combo.setCurrentIndex(index)
         self.theme_combo.setToolTip(t("settings.theme_note"))
         self.theme_combo.setAccessibleName(t("settings.theme_label"))
+        self._cap_field(self.theme_combo, 200)
         theme_form.addRow(t("settings.theme_label"), self.theme_combo)
         theme_note = QLabel(t("settings.theme_note"))
         theme_note.setWordWrap(True)
         theme_form.addRow(theme_note)
         right_col.addWidget(theme_box)
+        right_sections.append(theme_box)
 
         # --- info ---
         info_box = self._make_section("info", t("settings.info_title"))
         info_form = QFormLayout(info_box)
+        self._tight_layout(info_form)
         info_form.addRow(t("settings.info_version_label"), QLabel(f"{APP_NAME} {APP_VERSION}"))
         info_form.addRow(t("settings.info_min_server_label"), QLabel(rsync_ops.EXPECTED_SERVER_VERSION))
         config_path_label = QLabel(str(paths.config_file()))
@@ -439,10 +491,12 @@ class SettingsTab(QWidget):
         self.export_diag_btn.clicked.connect(self._export_diagnostics)
         info_form.addRow(self.export_diag_btn)
         right_col.addWidget(info_box)
+        right_sections.append(info_box)
 
         # --- NAS-reported values (read-only, never re-fetched here) ---
         nas_facts_box = self._make_section("nas_facts", t("settings.nas_facts_title"))
         nas_facts_form = QFormLayout(nas_facts_box)
+        self._tight_layout(nas_facts_form)
         self.nas_fact_retention = QLabel()
         self.nas_fact_retention.setWordWrap(True)
         nas_facts_form.addRow(t("settings.nas_fact_retention_label"), self.nas_fact_retention)
@@ -457,10 +511,12 @@ class SettingsTab(QWidget):
         nas_facts_form.addRow(nas_facts_note)
         self._refresh_nas_facts()
         right_col.addWidget(nas_facts_box)
+        right_sections.append(nas_facts_box)
 
         # --- maintenance ---
         maint_box = self._make_section("maintenance", t("settings.maint_title"))
         maint_layout = QVBoxLayout(maint_box)
+        self._tight_layout(maint_layout)
         maint_note = QLabel(t("settings.maint_conflict_note"))
         maint_note.setWordWrap(True)
         maint_layout.addWidget(maint_note)
@@ -480,15 +536,17 @@ class SettingsTab(QWidget):
         conflict_row.addStretch(1)
         maint_layout.addLayout(conflict_row)
         right_col.addWidget(maint_box)
-        # --- selective sync (full width: the list benefits from it, and it
-        #     doesn't pair well height-wise with anything above) ---
+        right_sections.append(maint_box)
+        # --- selective sync (now lives in the right column with the other
+        #     compact groups; the list itself is height-capped below) ---
         exclude_box = self._make_section("exclude", t("settings.exclude_title"))
         exclude_layout = QVBoxLayout(exclude_box)
+        self._tight_layout(exclude_layout)
         exclude_note = QLabel(t("settings.exclude_note"))
         exclude_note.setWordWrap(True)
         exclude_layout.addWidget(exclude_note)
         self.exclude_list = QListWidget()
-        self.exclude_list.setMaximumHeight(120)
+        self.exclude_list.setMaximumHeight(90)
         self.exclude_list.setToolTip(t("settings.exclude_note"))
         self.exclude_list.addItems(cfg.exclude_patterns())
         exclude_layout.addWidget(self.exclude_list)
@@ -498,6 +556,7 @@ class SettingsTab(QWidget):
         for key, label_key, patterns in EXCLUSION_PROFILES:
             self.exclusion_profile_combo.addItem(t(label_key), userData=list(patterns))
         self.exclusion_profile_combo.setToolTip(t("settings.exclude_profile_tooltip"))
+        self._cap_field(self.exclusion_profile_combo, 200)
         profile_row.addWidget(self.exclusion_profile_combo, 1)
         add_profile_btn = QPushButton(t("settings.exclude_profile_add"))
         add_profile_btn.setToolTip(t("settings.exclude_profile_tooltip"))
@@ -543,8 +602,8 @@ class SettingsTab(QWidget):
         exclude_layout.addWidget(self.auto_exclude_label)
         self._refresh_auto_exclude_label()
         self._refresh_selective_label()
-
-        root.addWidget(exclude_box)
+        right_col.addWidget(exclude_box)
+        right_sections.append(exclude_box)
 
         save_row = QHBoxLayout()
         self.save_feedback = QLabel(t("settings.saved_feedback"))
@@ -560,7 +619,9 @@ class SettingsTab(QWidget):
         outer.addLayout(save_row)
 
         root.addStretch(1)
+        self._column_sections = [left_sections, right_sections]
         self._connect_dirty_signals()
+        self._apply_initial_collapse()
         self._apply_search_filter("")
         self._update_column_layout(self.width())
 
@@ -582,6 +643,28 @@ class SettingsTab(QWidget):
         self._sections.append(box)
         self._section_keys[id(box)] = key
         return box
+
+    @staticmethod
+    def _tight_layout(layout) -> None:
+        """Group boxes stay short: small contents margins and tight spacing."""
+        layout.setContentsMargins(6, 6, 6, 6)
+        layout.setSpacing(4)
+
+    @staticmethod
+    def _cap_field(widget: QWidget, width: int) -> None:
+        """Ports, timeouts and other short values must not span a full column."""
+        widget.setMaximumWidth(width)
+
+    def _apply_initial_collapse(self) -> None:
+        """Leave at most two sections expanded per column on startup.
+
+        This is a view-only preference: _on_section_toggled only hides child
+        widgets, no cfg value is touched. _apply_search_filter re-opens any
+        matching section and restores this exact state when the filter clears.
+        """
+        for sections in self._column_sections:
+            for section in sections[2:]:
+                section.setChecked(False)
 
     @staticmethod
     def _section_fields(section: QGroupBox) -> list[QWidget]:

@@ -4,6 +4,16 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 1.28.3 - 2026-11-23
+
+- **Interfaccia compatta**: Stato, Monitor NAS e Impostazioni usano 2 colonne
+  con controlli e margini più stretti, riducendo molto lo scroll verticale.
+  La card di garanzia di sincronizzazione, la barra del Monitor e la ricerca
+  delle Impostazioni restano come header fissi sempre visibili.
+- Grafici e sezioni del Monitor collassabili; le sezioni Impostazioni partono
+  al massimo 2 aperte per colonna (la ricerca le riapre comunque).
+- Sotto una soglia di larghezza le colonne si impilano automaticamente.
+
 ## 1.28.2 - 2026-11-23
 
 - **Fix urgente**: `entry_count()` era stato definito dentro `CausalVersion`

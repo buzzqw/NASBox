@@ -8,8 +8,8 @@ from datetime import datetime, timedelta
 from PyQt6.QtCore import Qt, QTimer, QUrl, pyqtSignal
 from PyQt6.QtGui import QDesktopServices, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
-    QGridLayout, QGroupBox, QHBoxLayout, QLabel, QMessageBox, QProgressBar, QPushButton, QSizePolicy,
-    QScrollArea, QToolButton, QVBoxLayout, QWidget,
+    QBoxLayout, QGridLayout, QGroupBox, QHBoxLayout, QLabel, QMessageBox, QProgressBar, QPushButton,
+    QSizePolicy, QScrollArea, QToolButton, QVBoxLayout, QWidget,
 )
 
 from ..config import Config
@@ -96,26 +96,31 @@ class StatusTab(QWidget):
         self._recent_problem_events: dict[str, tuple[float, str]] = {}
         self.attention_problems: list[tuple[str, str, str]] = []
         self._conflict_count = 0
+        # True once the two card rows have been stacked vertically because the
+        # window became too narrow for two ~360px columns side by side.
+        self._single_column = False
 
         if logger is not None:
             self._load_recent_events(logger.tail(limit=RECENT_EVENT_SCAN_LIMIT))
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(6)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QScrollArea.Shape.NoFrame)
         content = QWidget()
         scroll.setWidget(content)
-        outer.addWidget(scroll)
         root = QVBoxLayout(content)
-        root.setContentsMargins(4, 8, 4, 4)
-        root.setSpacing(14)
+        root.setContentsMargins(4, 4, 4, 4)
+        root.setSpacing(6)
 
         # --- sync assurance: answer "is everything synced?" before anything else ---
         self.assurance_box = QGroupBox(t("assurance.title"))
         self.assurance_box.setObjectName("assuranceCard")
         assurance_layout = QVBoxLayout(self.assurance_box)
+        assurance_layout.setContentsMargins(6, 4, 6, 4)
+        assurance_layout.setSpacing(4)
         self.assurance_headline = QLabel(t("assurance.checking"))
         self.assurance_headline.setObjectName("assuranceHeadline")
         self.assurance_headline.setAccessibleName(t("a11y.assurance_headline"))
@@ -134,6 +139,8 @@ class StatusTab(QWidget):
         self.assurance_activity.setWordWrap(True)
         assurance_layout.addWidget(self.assurance_activity)
         assurance_grid = QGridLayout()
+        assurance_grid.setContentsMargins(0, 0, 0, 0)
+        assurance_grid.setSpacing(4)
         self.assurance_stats: dict[str, QLabel] = {}
         for index, key in enumerate(("tracked", "pending", "queue", "conflicts", "revision", "lastcheck")):
             caption = QLabel(t(f"assurance.stat_{key}"))
@@ -148,12 +155,17 @@ class StatusTab(QWidget):
         self.verify_now_btn.setToolTip(t("assurance.verify_now_tooltip"))
         self.verify_now_btn.clicked.connect(self._verify_now)
         assurance_layout.addWidget(self.verify_now_btn)
-        root.addWidget(self.assurance_box)
+        # Fixed header: the assurance answer stays on screen while the cards
+        # below scroll, so it must live in `outer`, not in the scroll content.
+        outer.addWidget(self.assurance_box)
+        outer.addWidget(scroll)
 
         # --- status ---
         status_box = QGroupBox(t("status.group_title"))
         status_box.setObjectName("statusCard")
         status_layout = QVBoxLayout(status_box)
+        status_layout.setContentsMargins(6, 4, 6, 4)
+        status_layout.setSpacing(4)
         self.status_label = QLabel(t("status.starting"))
         self.status_label.setObjectName("statusMessage")
         self.status_label.setAccessibleName(t("a11y.status_message"))
@@ -236,6 +248,7 @@ class StatusTab(QWidget):
         details_layout.setContentsMargins(0, 0, 0, 0)
         for technical in (
             self.remote_lock_label, self.watcher_label, self.queue_label, self.pending_label,
+            self.last_sync_label, self.last_problem_label,
         ):
             status_layout.removeWidget(technical)
             details_layout.addWidget(technical)
@@ -244,6 +257,8 @@ class StatusTab(QWidget):
         # Keep the update status on the same row as the version: showing a
         # separate label here changes the card height while the check runs.
         version_row = QHBoxLayout()
+        version_row.setContentsMargins(0, 0, 0, 0)
+        version_row.setSpacing(4)
         self.version_label = QToolButton()
         self.version_label.setText(f"{APP_NAME} v{APP_VERSION}")
         self.version_label.setObjectName("statusVersion")
@@ -274,6 +289,8 @@ class StatusTab(QWidget):
         self.hash_progress_label.hide()
         status_layout.addWidget(self.hash_progress_label)
         diagnostics_row = QHBoxLayout()
+        diagnostics_row.setContentsMargins(0, 0, 0, 0)
+        diagnostics_row.setSpacing(4)
         self.diagnostics_label = QLabel(t("status.diagnostics_unknown"))
         self.diagnostics_label.setAccessibleName(t("a11y.diagnostics_status"))
         self.diagnostics_label.setWordWrap(True)
@@ -283,6 +300,8 @@ class StatusTab(QWidget):
         diagnostics_row.addWidget(diagnostics_btn)
         status_layout.addLayout(diagnostics_row)
         integrity_row = QHBoxLayout()
+        integrity_row.setContentsMargins(0, 0, 0, 0)
+        integrity_row.setSpacing(4)
         self.integrity_label = QLabel(t("status.integrity_unknown"))
         self.integrity_label.setAccessibleName(t("a11y.integrity_status"))
         self.integrity_label.setWordWrap(True)
@@ -293,6 +312,8 @@ class StatusTab(QWidget):
         status_layout.addLayout(integrity_row)
 
         actions_row = QHBoxLayout()
+        actions_row.setContentsMargins(0, 0, 0, 0)
+        actions_row.setSpacing(4)
         self.sync_now_btn = QPushButton(t("status.sync_now_btn"))
         self.sync_now_btn.setObjectName("primaryButton")
         self.sync_now_btn.setAccessibleName(t("status.sync_now_btn"))
@@ -321,12 +342,13 @@ class StatusTab(QWidget):
         self.sync_feedback_label.setWordWrap(True)
         self.sync_feedback_label.hide()
         status_layout.addWidget(self.sync_feedback_label)
-        root.addWidget(status_box)
 
         # --- NAS status & overview ---
         nas_box = QGroupBox(t("status.nas_overview_title"))
         nas_box.setObjectName("nasStatusBox")
         nas_layout = QVBoxLayout(nas_box)
+        nas_layout.setContentsMargins(6, 4, 6, 4)
+        nas_layout.setSpacing(4)
 
         self.nas_host_label = QLabel(t("status.nas_connection_title"))
         self.nas_host_label.setAccessibleName(t("a11y.nas_connection"))
@@ -350,25 +372,40 @@ class StatusTab(QWidget):
         self.nas_storage_bar.setValue(0)
         nas_layout.addWidget(self.nas_storage_bar)
 
-        root.addWidget(nas_box)
+        # Two compact columns: the live status and the NAS overview share a
+        # row instead of stacking into two full-width cards. Each column asks
+        # for ~360px so text and buttons never get squeezed; resizeEvent below
+        # stacks the row again when the window is too narrow for both.
+        self._status_columns = QHBoxLayout()
+        self._status_columns.setContentsMargins(0, 0, 0, 0)
+        self._status_columns.setSpacing(6)
+        for card in (status_box, nas_box):
+            card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+            card.setMinimumWidth(360)
+            self._status_columns.addWidget(card, 1)
+        root.addLayout(self._status_columns)
 
         # Hidden when healthy: day-to-day users only see this card when there is
         # a concrete problem and every row points at the existing place to fix it.
         self.attention_box = QGroupBox(t("status.attention_title"))
         self.attention_box.setObjectName("attentionCard")
         self.attention_layout = QVBoxLayout(self.attention_box)
-        root.addWidget(self.attention_box)
-        self._refresh_attention()
+        self.attention_layout.setContentsMargins(6, 4, 6, 4)
+        self.attention_layout.setSpacing(4)
 
         # --- the NASBox folder ---
         folder_box = QGroupBox(t("status.folder_group_title"))
         folder_box.setObjectName("folderCard")
         folder_layout = QVBoxLayout(folder_box)
+        folder_layout.setContentsMargins(6, 4, 6, 4)
+        folder_layout.setSpacing(4)
         self.folder_label = QLabel()
         self.folder_label.setAccessibleName(t("a11y.folder_path"))
         self.folder_label.setWordWrap(True)
         folder_layout.addWidget(self.folder_label)
         folder_actions = QHBoxLayout()
+        folder_actions.setContentsMargins(0, 0, 0, 0)
+        folder_actions.setSpacing(4)
         open_btn = QPushButton(t("status.open_folder_btn"))
         open_btn.setObjectName("secondaryButton")
         open_btn.setToolTip(t("status.open_folder_tooltip"))
@@ -381,7 +418,19 @@ class StatusTab(QWidget):
         folder_actions.addWidget(relocate_btn)
         folder_actions.addStretch(1)
         folder_layout.addLayout(folder_actions)
-        root.addWidget(folder_box)
+
+        # Second row: actionable problems next to the folder card. The
+        # attention card hides itself when healthy, so refresh it only after
+        # both cards are parented to the shared row layout.
+        self._secondary_columns = QHBoxLayout()
+        self._secondary_columns.setContentsMargins(0, 0, 0, 0)
+        self._secondary_columns.setSpacing(6)
+        for card in (self.attention_box, folder_box):
+            card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+            card.setMinimumWidth(360)
+            self._secondary_columns.addWidget(card, 1)
+        root.addLayout(self._secondary_columns)
+        self._refresh_attention()
 
         root.addStretch(1)
 
@@ -394,6 +443,30 @@ class StatusTab(QWidget):
         self._update_timer = QTimer(self)
         self._update_timer.setSingleShot(True)
         self._update_timer.timeout.connect(self._check_for_update)
+
+    # --- layout ---
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._update_column_layout(event.size().width())
+
+    def _update_column_layout(self, width: int) -> None:
+        """Keep two columns while there is room, stack them when narrow.
+
+        QHBoxLayout does not reflow on its own: without this the two 360px
+        cards would squeeze below their minimum (or force a horizontal
+        scrollbar) as soon as the window shrinks.
+        """
+        single_column = width < 780
+        if single_column == self._single_column:
+            return
+        self._single_column = single_column
+        direction = (
+            QBoxLayout.Direction.TopToBottom if single_column
+            else QBoxLayout.Direction.LeftToRight
+        )
+        self._status_columns.setDirection(direction)
+        self._secondary_columns.setDirection(direction)
 
     # --- actions ---
 
