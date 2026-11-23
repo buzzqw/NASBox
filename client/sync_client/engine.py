@@ -85,6 +85,8 @@ class SyncEngine(QThread):
         self._pending_summary: dict[str, object] = {}
         self._integrity_running = threading.Event()
         self._last_integrity_check = 0.0
+        self._started_at = time.time()
+        self._assurance_cache: tuple[float, int] | None = None
         self._offered_server_update = ""
         self._server_health = "unknown"
 
@@ -130,7 +132,7 @@ class SyncEngine(QThread):
         if self._pull_worker:
             self._pull_worker.cancel_current_transfer()
 
-    def _maybe_integrity_check(self, now: float) -> None:
+    def _maybe_integrity_check(self, now: float, force: bool = False) -> None:
         """Periodic, read-only checksum audit of both directions.
 
         Runs in a separate thread and only while nothing else is transferring:
@@ -141,12 +143,35 @@ class SyncEngine(QThread):
             interval = int(self.cfg.get("integrity_check_interval_seconds") or 0)
         except (TypeError, ValueError):
             interval = 0
-        if interval <= 0 or now - self._last_integrity_check < interval:
+        if interval <= 0:
             return
+        # On a fresh install (or right after an update) there is no previous
+        # verification timestamp: scheduling one immediately launches two
+        # whole-tree checksum rsyncs while the client is still warming up.
+        # Pretend the last check happened `startup_delay` ago instead, so the
+        # first automatic audit is delayed. "Verifica adesso" stays immediate.
+        if not force:
+            if self._last_integrity_check <= 0:
+                try:
+                    delay = max(60, int(self.cfg.get("integrity_startup_delay_seconds") or 1800))
+                except (TypeError, ValueError):
+                    delay = 1800
+                self._last_integrity_check = now - interval + delay
+                return
+            if now - self._last_integrity_check < interval:
+                return
+            try:
+                startup_delay = max(0, int(self.cfg.get("integrity_startup_delay_seconds") or 1800))
+            except (TypeError, ValueError):
+                startup_delay = 1800
+            if now - self._started_at < startup_delay:
+                return
         if self._conn is None or self._stop_flag.is_set() or self._integrity_running.is_set():
             return
-        if self.transfer_scheduler is not None and self.transfer_scheduler.snapshot().get("count", 0):
-            return
+        if self.transfer_scheduler is not None:
+            snapshot = self.transfer_scheduler.snapshot()
+            if snapshot.get("count", 0) or snapshot.get("active_kind"):
+                return
         if self.sync_state is not None:
             try:
                 if self.sync_state.pending_paths():
@@ -159,7 +184,13 @@ class SyncEngine(QThread):
         def run() -> None:
             try:
                 mismatches = rsync_ops.integrity_check(self.cfg, self._conn)
-                checked = self.sync_state.entry_count() if self.sync_state else 0
+                try:
+                    sample = int(self.cfg.get("integrity_check_sample_size") or 500)
+                except (TypeError, ValueError):
+                    sample = 500
+                checked = (
+                    self.sync_state.entry_count() if self.sync_state else 0
+                ) if sample <= 0 else sample
             except Exception as exc:
                 self.cfg.set("last_integrity_error", str(exc), persist=True)
                 self.logger.log("ERROR", "-", f"controllo integrità non riuscito: {exc}")
@@ -182,8 +213,7 @@ class SyncEngine(QThread):
 
     def verify_integrity_now(self) -> None:
         """Run a full checksum verification on demand, ignoring the interval."""
-        self._last_integrity_check = 0.0
-        self._maybe_integrity_check(time.time())
+        self._maybe_integrity_check(time.time(), force=True)
 
     def confirm_deletions(self) -> int:
         """Explicitly allow a large, intentional deletion batch for a short time."""
@@ -196,13 +226,19 @@ class SyncEngine(QThread):
 
     def assurance_snapshot(self) -> dict:
         """Facts that answer one question: 'is everything synced?'."""
+        now = time.time()
+        if self._assurance_cache is not None and now - self._assurance_cache[0] < 30:
+            tracked = self._assurance_cache[1]
+        else:
+            try:
+                tracked = self.sync_state.entry_count() if self.sync_state else 0
+            except (OSError, RuntimeError):
+                tracked = 0
+            self._assurance_cache = (now, tracked)
         scheduler = self.transfer_scheduler.snapshot() if self.transfer_scheduler else {}
         pending = self._pending_summary or {}
-        try:
-            tracked = self.sync_state.entry_count() if self.sync_state else 0
-        except (OSError, RuntimeError):
-            tracked = 0
-        return {
+        delete_snapshot = delete_safety.shared().snapshot(self.cfg)
+        result = {
             "tracked_files": tracked,
             "pending_count": int(pending.get("count", 0) or 0),
             "queue_count": int(scheduler.get("count", 0) or 0),
@@ -211,13 +247,15 @@ class SyncEngine(QThread):
             "last_integrity_files": int(self.cfg.get("last_integrity_files") or 0),
             "last_integrity_mismatches": int(self.cfg.get("last_integrity_mismatches") or 0),
             "last_integrity_error": str(self.cfg.get("last_integrity_error") or ""),
+            "integrity_sample": int(self.cfg.get("integrity_check_sample_size") or 0),
             "manifest_revision": int(self.cfg.get("last_manifest_revision") or -1),
             "server_health": self._server_health,
             "repository_ready": bool(self.cfg.get("remote_repository_ready")),
             "journal_ready": bool(self.cfg.get("remote_journal_ready")),
-            "delete_used": delete_safety.shared().snapshot(self.cfg).get("used", 0),
-            "delete_limit": delete_safety.shared().snapshot(self.cfg).get("limit", 0),
+            "delete_used": delete_snapshot.get("used", 0),
+            "delete_limit": delete_snapshot.get("limit", 0),
         }
+        return result
 
     def prune_now(self) -> int:
         removed = trash.prune_local(self.cfg, self.logger)

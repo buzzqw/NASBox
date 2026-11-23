@@ -197,6 +197,8 @@ DEFAULTS: dict[str, Any] = {
     "delete_safety_window_seconds": 3600,
     "delete_confirmation_seconds": 600,
     "integrity_check_interval_seconds": 86400,  # automatic checksum audit (0 disables)
+    "integrity_startup_delay_seconds": 1800,  # never checksum the whole tree right after startup
+    "integrity_check_sample_size": 500,  # 0 = full tree (expensive); default = bounded sample
     "last_integrity_check_ts": 0,
     "last_integrity_mismatches": 0,
     "last_integrity_files": 0,

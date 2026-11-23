@@ -529,8 +529,9 @@ class StatusTab(QWidget):
             ago = t("assurance.seconds_ago", seconds=age) if age < 120 else t(
                 "assurance.minutes_ago", minutes=age // 60,
             )
+            scope = t("assurance.sample_suffix") if data.get("integrity_sample", 0) else ""
             self.assurance_proof.setText(t(
-                "assurance.proof", when=ago, files=checked, mismatches=mismatch,
+                "assurance.proof", when=ago, files=f"{checked}{scope}", mismatches=mismatch,
             ))
         else:
             self.assurance_proof.setText(t("assurance.waiting_proof"))

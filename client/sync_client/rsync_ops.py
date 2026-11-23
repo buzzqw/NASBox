@@ -2002,6 +2002,7 @@ def _dry_run(
     on_start: Optional[Callable[[subprocess.Popen], None]] = None,
     checksum: bool = False,
     strict: bool = False,
+    paths: set[str] | None = None,
 ) -> list[TransferItem]:
     # The NAS is the hub. Uploads never mirror-delete the destination; local
     # deletions use checked_delete_remote() with a baseline precondition.
@@ -2010,22 +2011,43 @@ def _dry_run(
     remote = _remote_uri(cfg, conn)
     src, dst = (local, remote) if direction == "upload" else (remote, local)
 
+    files_from_path: str | None = None
+    selection_args: list[str] = []
+    if paths is not None:
+        if not paths:
+            return []
+        with tempfile.NamedTemporaryFile(prefix="nasbox-check-", delete=False) as stream:
+            for relative_path in sorted(paths):
+                stream.write(os.fsencode(relative_path))
+                stream.write(b"\0")
+            files_from_path = stream.name
+        selection_args = ["--from0", f"--files-from={files_from_path}", "--relative"]
+
     cmd = [
         "rsync", "-aniz", "--dry-run",
         *( ["--checksum"] if checksum else ["-u"] ),
         *delete_flag,
+        *selection_args,
         *_exclude_args(cfg),
         *_old_args_flag(cfg, conn),
         "--out-format=%i|%l|%n",
         "-e", _ssh_e_arg(cfg, conn),
         src, dst,
     ]
+    def _cleanup() -> None:
+        if files_from_path:
+            try:
+                os.unlink(files_from_path)
+            except OSError:
+                pass
+
     try:
         # Popen (not run()) so a caller on another thread can terminate a scan
         # that's taking a while via on_start's Popen handle -- e.g. on app quit,
         # instead of being stuck waiting out the full timeout below.
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
     except OSError as exc:
+        _cleanup()
         if strict:
             raise RepositorySafetyError(f"preflight rsync non avviabile: {exc}") from exc
         return []
@@ -2033,18 +2055,21 @@ def _dry_run(
         on_start(proc)
     preflight_timeout = int(cfg.get("preflight_timeout_seconds") or 180)
     try:
-        stdout, _ = proc.communicate(timeout=preflight_timeout)
-    except subprocess.TimeoutExpired:
-        proc.kill()
-        proc.communicate()
-        if strict:
-            raise RepositorySafetyError("preflight rsync scaduto: cancellazioni bloccate")
-        return []
-    if strict and proc.returncode != 0:
-        raise RepositorySafetyError(
-            f"preflight rsync fallito (codice {proc.returncode}): cancellazioni bloccate"
-        )
-    return _parse_itemize(stdout, direction)
+        try:
+            stdout, _ = proc.communicate(timeout=preflight_timeout)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.communicate()
+            if strict:
+                raise RepositorySafetyError("preflight rsync scaduto: cancellazioni bloccate")
+            return []
+        if strict and proc.returncode != 0:
+            raise RepositorySafetyError(
+                f"preflight rsync fallito (codice {proc.returncode}): cancellazioni bloccate"
+            )
+        return _parse_itemize(stdout, direction)
+    finally:
+        _cleanup()
 
 
 def scan(
@@ -2216,14 +2241,51 @@ def pin_host_key(host: str, port: int, known_hosts: str, fingerprint: str) -> tu
 
 
 def integrity_check(cfg: Config, conn: NasConnection) -> list[TransferItem]:
-    """Checksum both directions without writing anything.
+    """Checksum a bounded sample of files in both directions, read-only.
 
-    Unlike the normal queue preview this intentionally does not use `-u`:
-    checksum comparison must report a difference even when timestamps have
-    been preserved or clocks disagree.
+    A whole-tree `--checksum` on a multi-TB NASBox can use gigabytes of RAM in
+    rsync and take many minutes. The default is an evenly spaced sample from
+    the authoritative manifest, which is fast and still detects real drift;
+    set ``integrity_check_sample_size`` to 0 for a full audit.
     """
-    uploads = _dry_run(cfg, conn, "upload", checksum=True) if cfg.allows_push() else []
-    downloads = _dry_run(cfg, conn, "download", checksum=True) if cfg.allows_pull() else []
+    raw_sample = cfg.get("integrity_check_sample_size")
+    try:
+        sample_size = 500 if raw_sample is None else int(raw_sample)
+    except (TypeError, ValueError):
+        sample_size = 500
+    sample: set[str] | None = None
+    if sample_size > 0:
+        script_path = (cfg.get("remote_server_script") or "").strip()
+        ok, output, _error = (
+            run_remote_script(cfg, conn, script_path, ["--manifest-export"], timeout=120)
+            if script_path else (False, "", "")
+        )
+        if not ok:
+            return []
+        lines = output.encode("utf-8", errors="replace").splitlines()
+        if not lines or lines[0] != b"NASBOX_MANIFEST_V1":
+            return []
+        entries = _parse_manifest_rows(lines[1:])
+        if entries is None:
+            return []
+        paths = sorted(
+            path for path, state in entries.items() if state.kind == RemoteKind.FILE
+        )
+        if not paths:
+            return []
+        if len(paths) > sample_size:
+            step = len(paths) / sample_size
+            paths = [paths[min(len(paths) - 1, int(index * step))] for index in range(sample_size)]
+        sample = set(paths)
+
+    uploads = (
+        _dry_run(cfg, conn, "upload", checksum=True, paths=sample)
+        if cfg.allows_push() else []
+    )
+    downloads = (
+        _dry_run(cfg, conn, "download", checksum=True, paths=sample)
+        if cfg.allows_pull() else []
+    )
     return uploads + downloads
 
 

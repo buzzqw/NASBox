@@ -271,6 +271,7 @@ STRINGS: dict[str, dict[str, str]] = {
     "assurance.check_integrity": {"it": "Integrità verificata", "en": "Integrity verified"},
     "assurance.check_errors": {"it": "Nessun errore recente", "en": "No recent errors"},
     "assurance.activity_empty": {"it": "Nessuna attività recente.", "en": "No recent activity."},
+    "assurance.sample_suffix": {"it": " (campione)", "en": " (sample)"},
     "assurance.activity": {"it": "Ultime 24h: ↑ {uploads} caricamenti · ↓ {downloads} download · ✕ {deletes} eliminazioni", "en": "Last 24h: ↑ {uploads} uploads · ↓ {downloads} downloads · ✕ {deletes} deletions"},
     "history.today_label": {"it": "Oggi", "en": "Today"},
     "history.yesterday_label": {"it": "Ieri", "en": "Yesterday"},

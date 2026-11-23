@@ -115,6 +115,39 @@ class ManifestDeltaClientTests(unittest.TestCase):
             self.assertIn("a.txt", entries)
 
 
+class IntegritySamplingTests(unittest.TestCase):
+    def test_integrity_check_uses_bounded_sample(self) -> None:
+        with ClientEnvironment():
+            cfg = Config()
+            cfg.set("remote_server_script", "/tmp/server.sh", persist=False)
+            cfg.set("sync_mode", "bidirectional", persist=False)
+            cfg.set("integrity_check_sample_size", 2, persist=False)
+            rows = b"".join(
+                f"f{i}.txt\t".encode() + b"a" * 64 + b"\t1\t1\t1\t1\t\n"
+                for i in range(10)
+            )
+            manifest = b"NASBOX_MANIFEST_V1\n" + rows
+            with patch.object(rsync_ops, "run_remote_script",
+                              return_value=(True, manifest.decode(), "")), \
+                 patch.object(rsync_ops, "_dry_run", return_value=[]) as dry:
+                result = rsync_ops.integrity_check(cfg, rsync_ops.NasConnection("nas"))
+            self.assertEqual(result, [])
+            self.assertEqual(dry.call_count, 2)
+            for call in dry.call_args_list:
+                self.assertEqual(len(call.kwargs["paths"]), 2)
+                self.assertTrue(call.kwargs["checksum"])
+
+    def test_full_audit_when_sample_disabled(self) -> None:
+        with ClientEnvironment():
+            cfg = Config()
+            cfg.set("sync_mode", "bidirectional", persist=False)
+            cfg.set("integrity_check_sample_size", 0, persist=False)
+            with patch.object(rsync_ops, "_dry_run", return_value=[]) as dry:
+                rsync_ops.integrity_check(cfg, rsync_ops.NasConnection("nas"))
+            self.assertEqual(dry.call_count, 2)
+            self.assertIsNone(dry.call_args_list[0].kwargs.get("paths"))
+
+
 class VersionParsingTests(unittest.TestCase):
     def test_suffixes_are_ignored(self) -> None:
         self.assertEqual(updater.version_tuple("1.26.14rc1"), (1, 26, 14))

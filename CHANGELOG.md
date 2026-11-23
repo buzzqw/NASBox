@@ -4,6 +4,16 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 1.28.1 - 2026-11-23
+
+- **Avvio lento corretto**: il controllo di integrità automatico non scatta più
+  al primo avvio dopo l'aggiornamento (rinviato di 30 minuti e solo a client
+  a riposo). La verifica manuale usa ora un campione di 500 file dal manifest
+  invece di un `--checksum` sull'intero albero, che su volumi da oltre 1 TB
+  poteva occupare diversi gigabyte di RAM. `integrity_check_sample_size = 0`
+  ripristina l'audit completo.
+- Il conteggio dei file nella card di garanzia è memoizzato per 30 secondi.
+
 ## 1.28.0 - 2026-11-23
 
 Sprint interfaccia: la certezza che tutto sia sincronizzato diventa il dato
