@@ -70,6 +70,39 @@ def test_audit_ignores_excluded_paths(tmp_path, monkeypatch):
         assert report.differences == []
 
 
+def test_audit_detects_stale_pending_and_missing_local(tmp_path, monkeypatch):
+    from unittest.mock import MagicMock
+
+    with ClientEnvironment():
+        cfg = Config()
+        cfg.set_local_root(str(tmp_path))
+        cfg.set_exclude_patterns(["sync-daemon/"])
+        monkeypatch.setattr(integrity_audit, "report_file", lambda: tmp_path / "audit.json")
+        (tmp_path / "presente.txt").write_text("x", encoding="utf-8")
+        entries = {
+            "presente.txt": RemoteState(RemoteKind.FILE, "a" * 64, 1, 1, None),
+            "sparito.txt": RemoteState(RemoteKind.FILE, "b" * 64, 1, 1, None),
+        }
+        state = MagicMock()
+        state.pending_paths.return_value = {"stale.txt"}
+        state.all_entries.return_value = {
+            "sparito.txt": Fingerprint("b" * 64, 1, 1),
+            "stale.txt": Fingerprint("", -1, -1),
+        }
+        report = integrity_audit.run_audit(
+            cfg, get_manifest=lambda: entries,
+            fingerprint=lambda path: (
+                Fingerprint("a" * 64, 1, 1) if Path(path).exists() else None
+            ),
+            state_store=state,
+        )
+        codes = {issue["code"] for issue in report.issues}
+        assert "stale_pending" in codes
+        assert "missing_local" in codes
+        assert report.status in ("problems", "differences")
+        assert report.checks["excluded_manifest_paths"] == 0
+
+
 def test_report_history_is_persistent_and_bounded(tmp_path, monkeypatch):
     with ClientEnvironment():
         monkeypatch.setattr(integrity_audit, "report_file", lambda: tmp_path / "audit.json")

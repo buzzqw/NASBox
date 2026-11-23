@@ -4,6 +4,12 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 1.31.0 - 2026-11-23
+
+- Audit esteso ai problemi di sincronizzazione: coda pending con voci stale,
+  file del baseline mancanti in locale, errori journal e percorsi esclusi.
+- Stato "Attenzione" con motivo leggibile nella Panoramica e nello Stato.
+
 ## 1.30.1 - 2026-11-23
 
 - Audit e verifica checksum rispettano le esclusioni di sincronizzazione: le

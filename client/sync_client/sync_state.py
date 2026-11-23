@@ -139,6 +139,18 @@ class SyncStateStore:
         self._db_path = paths.sync_state_db_file()
         self._init_db()
 
+    def all_entries(self) -> dict[str, Fingerprint]:
+        """Return the whole local baseline (path -> fingerprint)."""
+        with self._lock, self._connection() as conn:
+            return {
+                row[0]: Fingerprint(row[1], row[2], row[3], CausalVersion.parse(row[4]))
+                if row[1] else Fingerprint("", -1, -1, CausalVersion.parse(row[4]))
+                for row in conn.execute(
+                    "SELECT path, digest, size, mtime_ns, causal FROM entry WHERE repository = ?",
+                    (self._repository(),),
+                )
+            }
+
     def entry_count(self) -> int:
         """Number of tracked files in the authoritative local baseline."""
         with self._lock, self._connection() as conn:

@@ -249,8 +249,13 @@ class SyncEngine(QThread):
             if not rsync_ops.path_is_excluded(self.cfg, str(item.get("path") or ""))
         ]
         status = last.status if last else "unknown"
-        if last and last.status == "differences" and not real_differences:
-            status = "ok"
+        if last and last.status in ("differences", "problems"):
+            actionable = [
+                issue for issue in last.issues
+                if issue.get("severity") in ("warning", "error")
+            ]
+            if not real_differences and not actionable:
+                status = "ok"
         return {
             "last": {
                 "status": status,
@@ -258,6 +263,8 @@ class SyncEngine(QThread):
                 "duration_seconds": last.duration_seconds,
                 "files_checked": last.files_checked,
                 "differences": len(real_differences),
+                "issues": list(last.issues),
+                "checks": dict(last.checks),
                 "error": last.error,
             } if last else None,
             "history_count": len(history),
@@ -310,6 +317,7 @@ class SyncEngine(QThread):
                     self.cfg,
                     get_manifest=lambda: rsync_ops.cached_manifest(self.cfg, max_age_seconds=3600)
                     or self._fresh_manifest(),
+                    state_store=self.sync_state,
                     progress=lambda done, total: setattr(self, "_audit_progress", (done, total)),
                     cancel=self._stop_flag.is_set,
                 )

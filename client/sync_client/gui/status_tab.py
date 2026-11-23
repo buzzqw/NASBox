@@ -622,10 +622,14 @@ class StatusTab(QWidget):
                 "audit.ok", when=when, files=last.get("files_checked", 0),
                 duration=int(last.get("duration_seconds", 0)),
             ))
-        elif last.get("status") == "differences":
-            self.audit_label.setText(t(
-                "audit.differences", when=when, count=last.get("differences", 0),
-            ))
+        elif last.get("status") in ("differences", "problems"):
+            issues = [
+                str(issue.get("detail") or "")
+                for issue in (last.get("issues") or [])
+                if issue.get("severity") in ("warning", "error")
+            ]
+            detail = " · ".join(issues[:2]) or t("audit.differences", when=when, count=last.get("differences", 0))
+            self.audit_label.setText(detail)
         else:
             self.audit_label.setText(t("audit.error", detail=last.get("error") or ""))
 

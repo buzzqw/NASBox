@@ -222,6 +222,9 @@ class OverviewTab(QWidget):
             reasons.append(t("overview.reason_checksum", count=mismatches))
         if audit_differences:
             reasons.append(t("overview.reason_audit", count=audit_differences))
+        for issue in (last_audit.get("issues") or []):
+            if issue.get("severity") in ("warning", "error"):
+                reasons.append(str(issue.get("detail") or issue.get("code") or ""))
         if assurance.get("server_health") not in ("ok", None):
             reasons.append(str(assurance.get("server_health")))
         if not assurance.get("journal_ready"):

@@ -1,10 +1,13 @@
-# NASBox 1.30.1
+# NASBox 1.31.0
 
-Corretto il falso allarme "Attenzione": audit e verifica checksum ora ignorano
-le cartelle escluse dalla sincronizzazione (es. `sync-daemon/`), che generavano
-centinaia di differenze inesistenti.
+L'audit completo ora cerca **problemi di sincronizzazione**, non solo differenze
+di contenuto:
 
-- Gli audit passati con sole differenze escluse vengono automaticamente
-  considerati puliti.
-- La Panoramica mostra ora una riga "Motivo:" con la causa concreta dello stato
-  di attenzione.
+- rileva code `pending` con percorsi già cancellati su entrambi i lati (i falsi
+  allarmi che abbiamo visto), file del baseline presenti sul NAS ma spariti in
+  locale ed errori del journal;
+- distingue le voci di sola informazione da quelle che richiedono intervento;
+- mostra il **motivo** concreto dello stato "Attenzione" nella Panoramica e
+  nella scheda Stato;
+- conta e segnala i percorsi del manifest che sono esclusi dalla sync, così le
+  differenze fantasma non ricompaiono.

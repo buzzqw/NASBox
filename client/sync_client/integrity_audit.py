@@ -28,12 +28,14 @@ DEFAULT_BATCH_SIZE = 250
 
 @dataclass
 class AuditReport:
-    status: str = "unknown"          # ok | differences | error
+    status: str = "unknown"          # ok | differences | problems | error
     started_at: float = 0.0
     finished_at: float = 0.0
     duration_seconds: float = 0.0
     files_checked: int = 0
     differences: list[dict[str, str]] = field(default_factory=list)
+    issues: list[dict[str, str]] = field(default_factory=list)
+    checks: dict[str, int] = field(default_factory=dict)
     manifest_revision: int = -1
     client_version: str = APP_VERSION
     error: str = ""
@@ -127,11 +129,75 @@ def _manifest_entries(
     return dict(rows or {}), revision
 
 
+def _sync_health(
+    cfg: Config, entries: Mapping[str, RemoteState], state_store,
+) -> tuple[list[dict[str, str]], dict[str, int]]:
+    """Look for the sync defects that produce false reassurance or loops."""
+    from . import rsync_ops
+
+    issues: list[dict[str, str]] = []
+    checks: dict[str, int] = {}
+    root = Path(cfg.local_root())
+    excluded = [p for p in entries if p and rsync_ops.path_is_excluded(cfg, p)]
+    checks["excluded_manifest_paths"] = len(excluded)
+
+    if state_store is None:
+        return issues, checks
+
+    try:
+        pending = set(state_store.pending_paths())
+        known = state_store.all_entries()
+    except Exception:
+        return issues, checks
+
+    checks["pending_paths"] = len(pending)
+    stale = [
+        path for path in pending
+        if not (root / path).exists() and not (root / path).is_symlink()
+        and (path not in entries or entries[path].kind in (RemoteKind.ABSENT, RemoteKind.TOMBSTONE))
+    ]
+    checks["stale_pending_paths"] = len(stale)
+    if stale:
+        issues.append({
+            "code": "stale_pending", "severity": "warning",
+            "count": str(len(stale)),
+            "detail": f"{len(stale)} percorsi in coda sono già cancellati su entrambi i lati",
+        })
+
+    missing = [
+        path for path, fp in known.items()
+        if fp is not None and not fp.is_tombstone
+        and path in entries and entries[path].kind == RemoteKind.FILE
+        and not (root / path).exists() and not rsync_ops.path_is_excluded(cfg, path)
+    ]
+    checks["baseline_missing_local"] = len(missing)
+    if missing:
+        issues.append({
+            "code": "missing_local", "severity": "warning",
+            "count": str(len(missing)),
+            "detail": f"{len(missing)} file presenti sul NAS non esistono più in locale",
+        })
+
+    if pending:
+        issues.append({
+            "code": "pending_changes", "severity": "info",
+            "count": str(len(pending)),
+            "detail": f"{len(pending)} modifiche locali ancora in coda",
+        })
+    if str(cfg.get("journal_error") or "").strip():
+        issues.append({
+            "code": "journal_error", "severity": "error",
+            "count": "1", "detail": str(cfg.get("journal_error")),
+        })
+    return issues, checks
+
+
 def run_audit(
     cfg: Config,
     *,
     get_manifest: Callable[[], Mapping[str, RemoteState] | None] | None = None,
     fingerprint: Callable[[Path], object] | None = None,
+    state_store=None,
     progress: Callable[[int, int], None] | None = None,
     cancel: Callable[[], bool] | None = None,
     batch_size: int | None = None,
@@ -193,7 +259,15 @@ def run_audit(
         if progress is not None:
             progress(total, total)
         report.files_checked = checked
-        report.status = "differences" if report.differences else "ok"
+        report.issues, report.checks = _sync_health(cfg, entries, state_store)
+        if report.differences:
+            report.status = "differences"
+        elif any(issue["severity"] == "error" for issue in report.issues):
+            report.status = "problems"
+        elif any(issue["severity"] == "warning" for issue in report.issues):
+            report.status = "problems"
+        else:
+            report.status = "ok"
     except Exception as exc:  # a rare audit must never break sync
         report.error = str(exc)
         report.status = "error"
