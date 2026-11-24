@@ -126,6 +126,29 @@ func TestRunnerSkipsAuditWhenDisabled(t *testing.T) {
 	}
 }
 
+func TestRunnerSyncsImmediatelyAtStartup(t *testing.T) {
+	cfg, store, _ := setupTest(t)
+	cfg.Set("poll_interval", 3600, false)
+	cfg.Set("mirror_interval_seconds", 3600, false)
+	nas := &fakeNAS{config: nasConfig(), manifest: "NASBOX_MANIFEST_V1\n"}
+	runner := NewRunner(cfg, store, nas, &fakeTransfer{})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = runner.Run(ctx) }()
+
+	deadline := time.After(5 * time.Second)
+	for {
+		select {
+		case event := <-runner.Events():
+			if event.Kind == "sync" {
+				return
+			}
+		case <-deadline:
+			t.Fatal("runner did not sync at startup")
+		}
+	}
+}
+
 func TestRunnerSyncsAfterFilesystemEvent(t *testing.T) {
 	cfg, store, root := setupTest(t)
 	cfg.Set("debounce_seconds", float64(1), false)

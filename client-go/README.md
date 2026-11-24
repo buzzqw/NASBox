@@ -43,7 +43,8 @@ binario.
 | 10 | P1: SSH LAN/WAN/bastione con pin, mirror locale sicuro e annullabile, audit schedulato in formato Python, impostazioni compatte | completata (0.16.0) |
 | 11 | Evoluzione: manifest delta, conflict storm, diagnostica persistente, banda separata, pull completo reale, UI moderna verificata | completata (0.17.0) |
 | 12 | Fix updater: manifest Go include target e requires_server | completata (0.17.1) |
-| 13 | Rollout graduale e rimozione del client Python | da fare |
+| 13 | Sync immediato all'avvio | completata (0.17.2) |
+| 14 | Rollout graduale e rimozione del client Python | da fare |
 
 Il documento di design dell'interfaccia è in `internal/ui/DESIGN.md`.
 

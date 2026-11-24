@@ -194,6 +194,9 @@ func (r *Runner) Run(ctx context.Context) error {
 
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
+	// Converge immediately after a login or restart instead of waiting for the
+	// first poll tick, which can be several minutes away.
+	r.SyncNow()
 	for {
 		select {
 		case path := <-watcher.Events():
