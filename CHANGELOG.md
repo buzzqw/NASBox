@@ -4,6 +4,31 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 0.18.0 - 2026-11-24
+
+Client Go, parità con il client Python 1.35.2:
+
+- Storage insights nel client Go: cartelle più grandi, duplicati con SHA-256 e
+  riepilogo del cestino locale, con scansione limitata e conteggio degli errori.
+- Pulizia guidata dei duplicati: selezione per gruppo, file "Mantieni" protetto,
+  spostamento nel cestino locale con ripristino.
+- Monitor NAS completo: CPU e attesa I/O, rete, I/O disco, swap, uptime,
+  staging, journal/manifest e giudizio di salute.
+- Log filtrabile per categoria, ricerca testuale e ricarica dagli eventi
+  persistenti condivisi con il client Python.
+- Anteprima modifiche strutturata con cartelle, anomalie, spostamenti e
+  cancellazioni sospette.
+- Pausa programmata con giorni e finestre notturne (corretto il salvataggio che
+  perdeva i giorni) e pausa temporizzata `pause_until`.
+- Setup guidato al primo avvio: cartella locale, SSH, rilevamento dello script
+  server e verifica della connessione.
+- Tray con notifiche di completamento e collegamenti a conflitti, storico, log e
+  impostazioni; editor delle esclusioni per pattern.
+- Change feed NAS (`--wait-for-revision`) con manifest delta, così una modifica
+  di un altro PC arriva subito invece di attendere il polling.
+- Nuovi test Go per storage, metriche, pianificazione, change feed, filtri log e
+  nuove schermate. Stato e lacune residue in `client-go/PARITY.md`.
+
 ## 3.26.0 - 2026-11-24
 
 - `restore-batch` transazionale con marker `STARTED`/`MOVED`, recovery idempotente

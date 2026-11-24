@@ -155,9 +155,17 @@ func TestConflictChoiceIncludesOriginalAndAlternatives(t *testing.T) {
 func TestMetricsAndAssignedDeviceNameAreReadable(t *testing.T) {
 	c := newTestClient(t)
 	c.updateMetricsUI(map[string]string{
-		"DISK_USAGE_PERCENT": "63", "DISK_AVAILABLE_BYTES": "214748364800",
+		"COLLECTED_AT_EPOCH": "1792910400", "UPTIME_SECONDS": "90061",
 		"LOAD_1": "0.24", "LOAD_5": "0.31", "LOAD_15": "0.28",
-		"MEM_AVAILABLE_BYTES": "3221225472", "NASBOX_LOCK_HELD": "0",
+		"CPU_TOTAL_TICKS": "100", "CPU_IDLE_TICKS": "40", "CPU_IOWAIT_TICKS": "5",
+		"MEM_TOTAL_BYTES": "4294967296", "MEM_AVAILABLE_BYTES": "3221225472",
+		"SWAP_TOTAL_BYTES": "0", "SWAP_FREE_BYTES": "0",
+		"DISK_TOTAL_BYTES": "500000000000", "DISK_USED_BYTES": "315000000000",
+		"DISK_USAGE_PERCENT": "63", "DISK_AVAILABLE_BYTES": "214748364800",
+		"DISK_READ_BYTES": "2000", "DISK_WRITE_BYTES": "3000",
+		"NET_RX_BYTES": "4000", "NET_TX_BYTES": "5000",
+		"NET_RX_PACKETS": "40", "NET_TX_PACKETS": "50", "NET_INTERFACE_COUNT": "2",
+		"NASBOX_LOCK_HELD":  "false",
 		"NASBOX_LOCK_PHASE": "idle", "NASBOX_QUEUE_COUNT": "0",
 	})
 	if !strings.Contains(c.diskValue.Text, "63%") || !strings.Contains(c.diskValue.Text, "200.0 GB") {
@@ -189,8 +197,17 @@ func TestSettingsChoicesUseDropdowns(t *testing.T) {
 		t.Fatalf("general dropdown count = %d, want language and theme", len(general))
 	}
 	advanced := findUI[*widget.Select](c.settingsAdvanced())
-	if len(advanced) < 4 {
-		t.Fatalf("advanced dropdown count = %d, want tray/backend/schedule choices", len(advanced))
+	if len(advanced) < 2 {
+		t.Fatalf("advanced dropdown count = %d, want tray and backend choices", len(advanced))
+	}
+	scheduleAdd := false
+	for _, button := range findUI[*widget.Button](c.settingsAdvanced()) {
+		if button.Text == tr("settings.schedule_add_btn", nil) {
+			scheduleAdd = true
+		}
+	}
+	if !scheduleAdd {
+		t.Fatal("scheduled pause editor is missing from advanced settings")
 	}
 	buttons := findUI[*widget.Button](c.settingsAppearance())
 	for _, button := range buttons {

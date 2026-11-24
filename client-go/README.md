@@ -46,7 +46,11 @@ binario.
 | 13 | Sync immediato all'avvio | completata (0.17.2) |
 | 14 | Updater: nessun blocco dopo il primo riavvio | completata (0.17.3) |
 | 15 | Guardia cancellazioni: esclusi canali update e file generati | completata (0.17.4) |
-| 16 | Rollout graduale e rimozione del client Python | da fare |
+| 16 | Parità Python: storage insights, pulizia duplicati, metriche CPU/I-O/rete, log filtrabile, anteprima strutturata, pausa programmata e temporizzata, setup guidato, tray completo | completata (0.18.0) |
+| 17 | Rollout graduale e rimozione del client Python | da fare |
+
+Lo stato dettagliato del confronto con il client Python, comprese le funzioni
+ancora mancanti, è in [`PARITY.md`](PARITY.md).
 
 Il documento di design dell'interfaccia è in `internal/ui/DESIGN.md`.
 

@@ -611,13 +611,106 @@ func (c *Client) BrowseRename(src, dst, runTS, device string) (string, error) {
 }
 
 func (c *Client) Metrics() (map[string]string, error) {
-	output, err := c.Run([]string{c.script(), "--metrics"}, nil, 30*time.Second)
+	output, err := c.MetricsOutput()
 	if err != nil {
 		return nil, err
 	}
 	return ParseConfig(output), nil
 }
 
+// MetricsOutput returns the raw NASBOX_METRICS_V1 payload so the metrics
+// package can validate every required counter instead of silently accepting a
+// partial map.
+func (c *Client) MetricsOutput() ([]byte, error) {
+	return c.Run([]string{c.script(), "--metrics"}, nil, 30*time.Second)
+}
+
+// RevisionWait is the response of the read-only change feed.
+type RevisionWait struct {
+	Result   string // CHANGED or TIMEOUT
+	Revision int
+}
+
+// ParseRevisionWait validates the deliberately small change-feed response.
+func ParseRevisionWait(output []byte) (RevisionWait, error) {
+	lines := strings.Split(strings.TrimRight(string(output), "\r\n"), "\n")
+	if len(lines) != 3 || strings.TrimSpace(lines[0]) != "NASBOX_CHANGE_WAIT_V1" {
+		return RevisionWait{}, fmt.Errorf("risposta change feed non valida")
+	}
+	values := map[string]string{}
+	for _, line := range lines[1:] {
+		key, value, found := strings.Cut(line, "=")
+		if !found || key == "" {
+			return RevisionWait{}, fmt.Errorf("risposta change feed non valida")
+		}
+		if _, exists := values[key]; exists || (key != "RESULT" && key != "REVISION") {
+			return RevisionWait{}, fmt.Errorf("risposta change feed non valida")
+		}
+		values[key] = value
+	}
+	result, revision := values["RESULT"], values["REVISION"]
+	if (result != "CHANGED" && result != "TIMEOUT") || revision == "" {
+		return RevisionWait{}, fmt.Errorf("risposta change feed non valida")
+	}
+	value, err := strconv.ParseInt(revision, 10, 64)
+	if err != nil || value < 0 {
+		return RevisionWait{}, fmt.Errorf("revisione change feed non valida")
+	}
+	return RevisionWait{Result: result, Revision: int(value)}, nil
+}
+
+// WaitForRevision blocks on the NAS without taking the transfer lock. It lets
+// a remote change wake the client immediately instead of waiting for the next
+// poll interval, matching the Python client's change feed.
+func (c *Client) WaitForRevision(previous, timeout int) (RevisionWait, error) {
+	if previous < 0 || timeout < 0 || timeout > 3600 {
+		return RevisionWait{}, fmt.Errorf("parametri change feed non validi")
+	}
+	output, err := c.Run(
+		[]string{c.script(), "--wait-for-revision", strconv.Itoa(previous), strconv.Itoa(timeout)},
+		nil, time.Duration(timeout+20)*time.Second,
+	)
+	if err != nil {
+		return RevisionWait{}, err
+	}
+	wait, err := ParseRevisionWait(output)
+	if err != nil {
+		return RevisionWait{}, err
+	}
+	if wait.Revision < previous {
+		return RevisionWait{}, fmt.Errorf("revisione change feed regressiva")
+	}
+	if wait.Result == "CHANGED" && wait.Revision == previous {
+		return RevisionWait{}, fmt.Errorf("change feed senza avanzamento")
+	}
+	if wait.Result == "TIMEOUT" && wait.Revision != previous {
+		return RevisionWait{}, fmt.Errorf("change feed incoerente")
+	}
+	return wait, nil
+}
+
+// DiscoverServerScripts finds running sync-daemon-server.sh instances on the
+// NAS. BusyBox grep variants differ, so the scrape uses ps+awk like Python.
+func (c *Client) DiscoverServerScripts() ([]string, error) {
+	command := `ps aux 2>/dev/null | awk '{ for (i = 1; i <= NF; i++) if ($i ~ /sync-daemon-server[.]sh$/) print $i }' | sort -u`
+	output, err := c.Run([]string{command}, nil, 20*time.Second)
+	if err != nil {
+		return nil, err
+	}
+	seen := map[string]bool{}
+	result := make([]string, 0)
+	for _, line := range strings.Split(string(output), "\n") {
+		path := strings.TrimSpace(line)
+		if path == "" || !strings.Contains(path, "/") || seen[path] {
+			continue
+		}
+		seen[path] = true
+		result = append(result, path)
+	}
+	return result, nil
+}
+
+// Devices returns the raw NAS device activity rows.
 func (c *Client) Devices() ([]string, error) {
 	output, err := c.Run([]string{c.script(), "--devices"}, nil, 30*time.Second)
 	if err != nil {

@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
-	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
@@ -244,41 +243,48 @@ func scheduleTimes(current string) []string {
 	return times
 }
 
-func (c *clientApp) scheduleSetting() fyne.CanvasObject {
-	start, end := "09:00", "18:00"
-	if entries, ok := c.cfg.Get("pause_schedule").([]any); ok && len(entries) > 0 {
-		if first, ok := entries[0].(map[string]any); ok {
-			start = valueOrDash(fmt.Sprint(first["start"]))
-			end = valueOrDash(fmt.Sprint(first["end"]))
-		}
-	}
-	startSelect := widget.NewSelect(scheduleTimes(start), nil)
-	endSelect := widget.NewSelect(scheduleTimes(end), nil)
-	startSelect.SetSelected(start)
-	endSelect.SetSelected(end)
-	save := newHintButton(tr("ui.settings.save_schedule", nil), theme.ConfirmIcon(),
-		tr("ui.settings.save_schedule_hint", nil), widget.MediumImportance, func() {
-			if _, err := time.Parse("15:04", startSelect.Selected); err != nil {
-				c.appendLog(tr("ui.settings.invalid_time", nil))
-				return
+// excludePatternsSetting edits the rsync-style patterns ignored in both
+// directions. One pattern per line keeps the same format as the Python
+// settings tab and the client.json array.
+func (c *clientApp) excludePatternsSetting() fyne.CanvasObject {
+	entry := widget.NewMultiLineEntry()
+	entry.SetMinRowsVisible(6)
+	entry.SetText(strings.Join(stringList(c.cfg.Get("exclude_patterns")), "\n"))
+	entry.SetPlaceHolder(tr("ui.settings.exclude_placeholder", nil))
+	save := newHintButton(tr("ui.settings.exclude_save", nil), theme.ConfirmIcon(),
+		tr("ui.settings.exclude_save_hint", nil), widget.HighImportance, func() {
+			patterns := make([]any, 0)
+			for _, line := range strings.Split(entry.Text, "\n") {
+				line = strings.TrimSpace(line)
+				if line != "" {
+					patterns = append(patterns, line)
+				}
 			}
-			if _, err := time.Parse("15:04", endSelect.Selected); err != nil {
-				c.appendLog(tr("ui.settings.invalid_time", nil))
-				return
-			}
-			if startSelect.Selected == endSelect.Selected {
-				c.appendLog(tr("dialogs.schedule.same_time_body", nil))
-				return
-			}
-			if c.persistSetting("pause_schedule", []any{map[string]any{
-				"start": startSelect.Selected, "end": endSelect.Selected,
-			}}) {
-				c.settingSaved(tr("ui.settings.schedule_label", nil),
-					startSelect.Selected+" → "+endSelect.Selected)
+			if c.persistSetting("exclude_patterns", patterns) {
+				c.settingSaved(tr("ui.settings.exclude_title", nil), len(patterns))
 			}
 		}, c.setHint)
-	return c.settingRow(tr("ui.settings.schedule_label", nil),
-		container.NewHBox(startSelect, endSelect, save), "pause_schedule")
+	return container.NewVBox(
+		widget.NewLabelWithStyle(tr("ui.settings.exclude_title", nil), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		c.note(tr("ui.settings.exclude_note", nil)),
+		entry,
+		save,
+	)
+}
+
+func stringList(value any) []string {
+	out := []string{}
+	switch list := value.(type) {
+	case []any:
+		for _, item := range list {
+			if text, ok := item.(string); ok && strings.TrimSpace(text) != "" {
+				out = append(out, text)
+			}
+		}
+	case []string:
+		out = append(out, list...)
+	}
+	return out
 }
 
 func (c *clientApp) deviceLabelsSetting() fyne.CanvasObject {

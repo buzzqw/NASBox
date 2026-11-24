@@ -5793,5 +5793,117 @@
   "updater.restarting_title": {
     "en": "Client update",
     "it": "Aggiornamento client"
+  },
+  "ui.action.close": {
+    "it": "Chiudi",
+    "en": "Close"
+  },
+  "ui.log.reload_failed": {
+    "it": "Impossibile rileggere il log",
+    "en": "Could not reload the log"
+  },
+  "ui.log.count": {
+    "it": "{shown} di {total} eventi",
+    "en": "{shown} of {total} events"
+  },
+  "ui.preview.title": {
+    "it": "Anteprima modifiche",
+    "en": "Change preview"
+  },
+  "ui.preview.note": {
+    "it": "Calcolata sul PC in sola lettura: nessun file è stato modificato.",
+    "en": "Computed on the PC, read-only: no file has been changed."
+  },
+  "ui.preview.window_title": {
+    "it": "Anteprima delle modifiche",
+    "en": "Change preview"
+  },
+  "ui.preview.anomalies": {
+    "it": "Cartelle anomale",
+    "en": "Anomalous folders"
+  },
+  "ui.preview.anomaly": {
+    "it": "• {directory}: {missing}/{remote} file mancanti ({percent}%)",
+    "en": "• {directory}: {missing}/{remote} missing files ({percent}%)"
+  },
+  "ui.preview.folders": {
+    "it": "File mancanti per cartella",
+    "en": "Missing files per folder"
+  },
+  "ui.preview.folder_row": {
+    "it": "{directory} — {missing} mancanti su {remote}",
+    "en": "{directory} — {missing} missing of {remote}"
+  },
+  "ui.preview.renames": {
+    "it": "Spostamenti riconosciuti",
+    "en": "Recognised moves"
+  },
+  "ui.preview.deletions": {
+    "it": "Cancellazioni inspiegate (campione)",
+    "en": "Unexplained deletions (sample)"
+  },
+  "ui.preview.more": {
+    "it": "… e altri {count}",
+    "en": "… and {count} more"
+  },
+  "ui.preview.open_log": {
+    "it": "Apri il log completo",
+    "en": "Open the full log"
+  },
+  "ui.settings.schedule_none": {
+    "it": "Nessuna finestra di pausa configurata.",
+    "en": "No pause window configured."
+  },
+  "ui.settings.schedule_select": {
+    "it": "Seleziona una finestra di pausa.",
+    "en": "Select a pause window."
+  },
+  "ui.settings.exclude_title": {
+    "it": "Esclusioni di sincronizzazione",
+    "en": "Sync exclusions"
+  },
+  "ui.settings.exclude_note": {
+    "it": "Un pattern per riga (es. node_modules/, *.tmp). Vale in entrambe le direzioni.",
+    "en": "One pattern per line (e.g. node_modules/, *.tmp). Applies in both directions."
+  },
+  "ui.settings.exclude_placeholder": {
+    "it": "node_modules/\n*.tmp",
+    "en": "node_modules/\n*.tmp"
+  },
+  "ui.settings.exclude_save": {
+    "it": "Salva esclusioni",
+    "en": "Save exclusions"
+  },
+  "ui.settings.exclude_save_hint": {
+    "it": "Applica i pattern al prossimo passaggio di sincronizzazione.",
+    "en": "Apply the patterns from the next sync pass."
+  },
+  "ui.setup.save": {
+    "it": "Salva e continua",
+    "en": "Save and continue"
+  },
+  "ui.setup.save_hint": {
+    "it": "Verifica la connessione, salva la configurazione e avvia il client.",
+    "en": "Verify the connection, save the configuration and start the client."
+  },
+  "ui.setup.nas_lan": {
+    "it": "Host NAS (LAN)",
+    "en": "NAS host (LAN)"
+  },
+  "ui.setup.nas_user": {
+    "it": "Utente SSH",
+    "en": "SSH user"
+  },
+  "ui.setup.ssh_port": {
+    "it": "Porta SSH",
+    "en": "SSH port"
+  },
+  "ui.setup.prefix": {
+    "it": "Cartella NASBox sul NAS",
+    "en": "NASBox folder on the NAS"
+  },
+  "ui.setup.script": {
+    "it": "Script del server",
+    "en": "Server script"
   }
 }

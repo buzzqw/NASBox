@@ -731,20 +731,22 @@ func gui(args []string) {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-	if cfg.LocalRoot() == "" {
-		fmt.Fprintln(os.Stderr, "cartella locale non configurata: imposta local_root in client.json")
-		os.Exit(1)
+	if cfg.LocalRoot() != "" {
+		if err := bootstrapConfig(cfg); err != nil {
+			fmt.Fprintln(os.Stderr, "bootstrap NAS fallito:", err)
+			os.Exit(1)
+		}
 	}
-	if err := bootstrapConfig(cfg); err != nil {
-		fmt.Fprintln(os.Stderr, "bootstrap NAS fallito:", err)
-		os.Exit(1)
+	var store *state.Store
+	if cfg.LocalRoot() != "" {
+		opened, err := state.Open(cfg)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		store = opened
+		defer store.Close()
 	}
-	store, err := state.Open(cfg)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
-	defer store.Close()
 	logger, logErr := diagnostics.Open()
 	if logErr != nil {
 		fmt.Fprintln(os.Stderr, "diagnostica non disponibile:", logErr)

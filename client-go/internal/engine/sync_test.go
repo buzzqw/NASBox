@@ -62,6 +62,9 @@ func (f *fakeNAS) RenameV2(src, dst, _ string, _ string, _ int64, _ int64, _ str
 	f.renames = append(f.renames, [2]string{src, dst})
 	return true, nil
 }
+func (f *fakeNAS) WaitForRevision(previous, _ int) (remote.RevisionWait, error) {
+	return remote.RevisionWait{Result: "TIMEOUT", Revision: previous}, nil
+}
 
 type fakeTransfer struct {
 	uploaded     []string

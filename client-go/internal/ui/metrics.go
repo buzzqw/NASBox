@@ -5,6 +5,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"nasbox-go/internal/metrics"
 )
 
 // deviceEntry is the UI representation of one journal row returned by the NAS.
@@ -92,36 +94,142 @@ func metricText(value string) string {
 }
 
 func (c *clientApp) updateMetricsUI(values map[string]string) {
+	sample, err := metrics.ParseValues(values)
+	if err != nil {
+		if c.healthValue != nil {
+			c.healthValue.SetText(tr("metrics.status_failed", map[string]any{"detail": err.Error()}))
+		}
+		return
+	}
+	sample = c.metricsCollector.Observe(sample, time.Now())
 	if c.nasLabel != nil {
 		c.nasLabel.SetText(fmt.Sprintf(tr("ui.nas.config_short", nil), valueOrDash(c.cfg.String("nas_lan")),
 			tr("settings.info_version_label", nil), metricText(values["VERSION"])))
 	}
-	available := humanBytes(parseMetricInt(values["DISK_AVAILABLE_BYTES"]))
+	diskText := tr("metrics.disk_value", map[string]any{
+		"available": humanBytes(sample.DiskAvailableBytes),
+		"total":     humanBytes(sample.DiskTotalBytes),
+		"percent":   fmt.Sprintf("%.0f", sample.DiskUsagePercent),
+	})
 	if c.diskValue != nil {
-		c.diskValue.SetText(fmt.Sprintf("%s%% %s · %s %s", metricText(values["DISK_USAGE_PERCENT"]),
-			tr("ui.nas.used", nil), available, tr("ui.nas.free", nil)))
+		c.diskValue.SetText(diskText)
 	}
 	if c.diskBar != nil {
-		c.diskBar.SetValue(parseMetricFloat(values["DISK_USAGE_PERCENT"]) / 100)
+		c.diskBar.SetValue(sample.DiskUsagePercent / 100)
 	}
 	if c.loadValue != nil {
-		c.loadValue.SetText(fmt.Sprintf("1m %s · 5m %s · 15m %s",
-			metricText(values["LOAD_1"]), metricText(values["LOAD_5"]), metricText(values["LOAD_15"])))
+		c.loadValue.SetText(fmt.Sprintf("%.2f / %.2f / %.2f", sample.Load1, sample.Load5, sample.Load15))
+	}
+	if c.cpuValue != nil {
+		if sample.CPUUsagePercent == nil {
+			c.cpuValue.SetText(tr("metrics.first_sample", nil))
+		} else {
+			c.cpuValue.SetText(tr("metrics.cpu_value", map[string]any{
+				"usage":  fmt.Sprintf("%.0f", *sample.CPUUsagePercent),
+				"iowait": fmt.Sprintf("%.0f", valueOrZero(sample.CPUIOWaitPercent)),
+			}))
+		}
 	}
 	if c.memoryValue != nil {
-		c.memoryValue.SetText(fmt.Sprintf("%s %s", humanBytes(parseMetricInt(values["MEM_AVAILABLE_BYTES"])),
-			tr("ui.nas.available", nil)))
+		if sample.MemTotalBytes > 0 {
+			used := sample.MemTotalBytes - sample.MemAvailableBytes
+			if used < 0 {
+				used = 0
+			}
+			c.memoryValue.SetText(tr("metrics.memory_value", map[string]any{
+				"used": humanBytes(used), "total": humanBytes(sample.MemTotalBytes),
+				"percent": fmt.Sprintf("%.0f", float64(used)*100/float64(sample.MemTotalBytes)),
+			}))
+		} else {
+			c.memoryValue.SetText(tr("metrics.not_available", nil))
+		}
+	}
+	if c.swapValue != nil {
+		if sample.SwapTotalBytes > 0 {
+			used := sample.SwapTotalBytes - sample.SwapFreeBytes
+			if used < 0 {
+				used = 0
+			}
+			c.swapValue.SetText(tr("metrics.swap_value", map[string]any{
+				"used": humanBytes(used), "total": humanBytes(sample.SwapTotalBytes),
+			}))
+		} else {
+			c.swapValue.SetText(tr("metrics.swap_disabled", nil))
+		}
+	}
+	if c.netValue != nil {
+		c.netValue.SetText(fmt.Sprintf("↓ %s  ↑ %s", rateText(sample.NetRxRate, sample.NetRxBytes),
+			rateText(sample.NetTxRate, sample.NetTxBytes)))
+	}
+	if c.ioValue != nil {
+		c.ioValue.SetText(fmt.Sprintf("R %s  W %s", rateText(sample.DiskReadRate, sample.DiskReadBytes),
+			rateText(sample.DiskWriteRate, sample.DiskWriteBytes)))
+	}
+	if c.uptimeValue != nil {
+		c.uptimeValue.SetText(metrics.FormatUptime(sample.UptimeSeconds))
 	}
 	if c.lockValue != nil {
-		phase := metricText(values["NASBOX_LOCK_PHASE"])
-		c.lockValue.SetText(fmt.Sprintf("%s · %s", metricText(values["NASBOX_LOCK_HELD"]), phase))
+		c.lockValue.SetText(fmt.Sprintf("%t · %s", sample.NasboxLockHeld, metricText(sample.NasboxLockPhase)))
 	}
 	if c.queueValue != nil {
-		c.queueValue.SetText(metricText(values["NASBOX_QUEUE_COUNT"]))
+		c.queueValue.SetText(fmt.Sprint(sample.QueueCount))
+	}
+	if c.stagingValue != nil {
+		c.stagingValue.SetText(fmt.Sprint(sample.StagingCount))
+	}
+	if c.metadataValue != nil {
+		c.metadataValue.SetText(tr("metrics.metadata_value", map[string]any{
+			"journal": humanBytes(sample.JournalBytes), "manifest": humanBytes(sample.ManifestBytes),
+		}))
+	}
+	if c.activityValue != nil {
+		if sample.NasboxLockHeld {
+			progress := ""
+			if sample.NasboxLockProgressTotal > 0 {
+				progress = fmt.Sprintf(" %d/%d", sample.NasboxLockProgressDone, sample.NasboxLockProgressTotal)
+			}
+			owner := sample.NasboxLockOwner
+			if owner == "" {
+				owner = tr("metrics.unknown_value", nil)
+			}
+			phase := sample.NasboxLockPhase
+			if phase == "" {
+				phase = tr("metrics.unknown_value", nil)
+			}
+			c.activityValue.SetText(tr("metrics.activity_busy", map[string]any{
+				"owner": owner, "phase": phase, "progress": progress,
+			}))
+		} else {
+			c.activityValue.SetText(tr("metrics.activity_idle", nil))
+		}
+	}
+	if c.healthValue != nil {
+		warnings := metrics.HealthWarnings(sample)
+		if len(warnings) > 0 {
+			c.healthValue.SetText(tr("metrics.health_warning", map[string]any{"areas": strings.Join(warnings, ", ")}))
+		} else {
+			c.healthValue.SetText(tr("metrics.health_ok", nil))
+		}
 	}
 	if c.nasUpdatedLabel != nil {
-		c.nasUpdatedLabel.SetText(tr("ui.nas.updated", map[string]any{"time": time.Now().Format("15:04:05")}))
+		c.nasUpdatedLabel.SetText(tr("metrics.status_updated", map[string]any{
+			"time": time.Now().Format("15:04:05"),
+		}))
 	}
+}
+
+func valueOrZero(value *float64) float64 {
+	if value == nil {
+		return 0
+	}
+	return *value
+}
+
+func rateText(rate *float64, total int64) string {
+	if rate == nil {
+		return humanBytes(total)
+	}
+	return fmt.Sprintf("%s/s", humanBytes(int64(*rate)))
 }
 
 func (c *clientApp) updateDevicesUI(raw []string) {

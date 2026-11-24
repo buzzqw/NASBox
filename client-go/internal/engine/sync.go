@@ -33,6 +33,7 @@ type ConfigSource interface {
 	RetryPendingJournal(device string) (bool, string, error)
 	JournalAppend(repositoryID, txid, device string, puts []remote.JournalPut) (bool, error)
 	RenameV2(src, dst, kind, digest string, size, mtimeNS int64, device string) (bool, error)
+	WaitForRevision(previous, timeout int) (remote.RevisionWait, error)
 }
 
 // Transferer uploads and downloads batches of paths. Uploads go through the

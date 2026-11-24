@@ -29,10 +29,12 @@ import (
 	"nasbox-go/internal/history"
 	"nasbox-go/internal/i18n"
 	"nasbox-go/internal/integrity"
+	"nasbox-go/internal/metrics"
 	"nasbox-go/internal/mirror"
 	"nasbox-go/internal/remote"
 	"nasbox-go/internal/selective"
 	"nasbox-go/internal/state"
+	"nasbox-go/internal/storage"
 	"nasbox-go/internal/transfer"
 	"nasbox-go/internal/update"
 	"nasbox-go/internal/version"
@@ -111,10 +113,16 @@ type clientApp struct {
 	pauseBtn       *widget.Button
 	pauseBtnStatus *widget.Button
 	detailsBtn     *hintButton
+	logger         *diagnostics.Logger
 	logLines       []string
 	transferLines  []string
 	activityLines  []string
 	logList        *widget.List
+	logEntries     []diagnostics.Entry
+	logFiltered    []diagnostics.Entry
+	logFilter      *widget.Select
+	logSearch      *widget.Entry
+	logCount       *widget.Label
 	transferList   *widget.List
 	activityList   *widget.List
 	confGroups     []conflicts.Group
@@ -155,6 +163,27 @@ type clientApp struct {
 	selectedDevice      string
 	selectedDeviceLabel *widget.Label
 	monitorDevicesLabel *widget.Label
+	metricsCollector    metrics.Collector
+	healthValue         *widget.Label
+	cpuValue            *widget.Label
+	swapValue           *widget.Label
+	netValue            *widget.Label
+	ioValue             *widget.Label
+	uptimeValue         *widget.Label
+	stagingValue        *widget.Label
+	metadataValue       *widget.Label
+	activityValue       *widget.Label
+	storageInsights     storage.Insights
+	storageBusy         bool
+	storageStatus       *widget.Label
+	storageLast         *widget.Label
+	storageFolders      *widget.Label
+	storageDuplicates   *widget.Label
+	storageTrash        *widget.Label
+	storageProgress     *widget.ProgressBar
+	storageAnalyzeBtn   *widget.Button
+	storageCleanupBtn   *widget.Button
+	logReload           *hintButton
 
 	resolveBtn  *widget.Button
 	keepBothBtn *widget.Button
@@ -171,7 +200,9 @@ type clientApp struct {
 	selectedBrowse   string
 }
 
-// Run starts the native client. It blocks until the window/tray exits.
+// Run starts the native client. It blocks until the window/tray exits. When
+// the client has no local folder yet it shows the first-run setup wizard and
+// only then starts the sync engine, matching the Python client.
 func Run(cfg *config.Config, store *state.Store, loggers ...*diagnostics.Logger) {
 	selectBackend(cfg)
 	detectLanguage(cfg)
@@ -179,6 +210,33 @@ func Run(cfg *config.Config, store *state.Store, loggers ...*diagnostics.Logger)
 	window := fyneApp.NewWindow(fmt.Sprintf("%s %s", version.AppName, version.AppVersion))
 	window.Resize(fyne.NewSize(1120, 760))
 
+	var application *clientApp
+	openedBySetup := store == nil
+	if store == nil || cfg.LocalRoot() == "" {
+		showSetupWizard(fyneApp, window, cfg, func() {
+			opened, err := state.Open(cfg)
+			if err != nil {
+				dialog.ShowError(err, window)
+				return
+			}
+			application = startClient(fyneApp, window, cfg, opened, loggers...)
+		})
+	} else {
+		application = startClient(fyneApp, window, cfg, store, loggers...)
+	}
+	window.ShowAndRun()
+	if application != nil {
+		application.cancel()
+		if openedBySetup && application.store != nil {
+			_ = application.store.Close()
+		}
+	}
+}
+
+func startClient(
+	fyneApp fyne.App, window fyne.Window, cfg *config.Config, store *state.Store,
+	loggers ...*diagnostics.Logger,
+) *clientApp {
 	client := remote.New(cfg)
 	transfers := transfer.New(cfg, client)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -191,6 +249,10 @@ func Run(cfg *config.Config, store *state.Store, loggers ...*diagnostics.Logger)
 		uiTheme: newNAStheme(variantFrom(cfg.String("go_theme"))),
 		level:   statusStarting,
 	}
+	if len(loggers) > 0 {
+		c.logger = loggers[0]
+	}
+	c.storageInsights = storage.Insights{TopFolders: []storage.FolderSize{}, Duplicates: []storage.DuplicateGroup{}}
 	c.setTrayIcon("unconfigured")
 	c.bannerGo = func() { c.onSync() }
 	fyneApp.Settings().SetTheme(c.uiTheme)
@@ -231,12 +293,12 @@ func Run(cfg *config.Config, store *state.Store, loggers ...*diagnostics.Logger)
 	go c.refreshHistory()
 	go c.refreshBrowse()
 	go c.refreshSelective()
+	go c.reloadLog()
 	c.refreshMirrorLabel()
 	c.refreshStats()
 	go c.refreshMonitor()
 	c.appendLog(tr("main_window.brand_tagline", nil) + " — " + version.AppVersion)
-	window.ShowAndRun()
-	c.cancel()
+	return c
 }
 
 // detectLanguage honours the configured language; "auto" follows the session
@@ -431,9 +493,28 @@ func (c *clientApp) refreshCurrentSection() {
 
 func (c *clientApp) installTray() {
 	tray := fyne.NewMenu(version.AppName,
-		fyne.NewMenuItem(tr("ui.tray.show", nil), c.window.Show),
+		fyne.NewMenuItem(tr("ui.tray.show", nil), func() {
+			c.window.Show()
+			c.window.RequestFocus()
+		}),
 		fyne.NewMenuItem(tr("ui.tray.sync", nil), c.onSync),
 		fyne.NewMenuItem(tr("ui.tray.pause_resume", nil), c.onPause),
+		fyne.NewMenuItem(tr("main_window.tab_conflicts", nil), func() {
+			c.window.Show()
+			c.navigate(sectionFiles, 1)
+		}),
+		fyne.NewMenuItem(tr("main_window.tab_history", nil), func() {
+			c.window.Show()
+			c.navigate(sectionFiles, 2)
+		}),
+		fyne.NewMenuItem(tr("main_window.tab_log", nil), func() {
+			c.window.Show()
+			c.navigate(sectionActivity, 2)
+		}),
+		fyne.NewMenuItem(tr("main_window.tab_settings", nil), func() {
+			c.window.Show()
+			c.navigate(sectionSettings, 0)
+		}),
 		fyne.NewMenuItem(tr("ui.tray.undo", nil), c.onUndo),
 		fyne.NewMenuItemSeparator(),
 		fyne.NewMenuItem(tr("ui.tray.quit", nil), func() { c.cancel(); c.fyneApp.Quit() }),
@@ -645,9 +726,28 @@ func (c *clientApp) activityView() fyne.CanvasObject {
 		func(id int, label *widget.Label) { label.SetText(c.transferLines[id]) },
 	)
 	c.logList = newTextList(
-		func() int { return len(c.logLines) },
-		func(id int, label *widget.Label) { label.SetText(c.logLines[id]) },
+		func() int { return len(c.logFiltered) },
+		func(id int, label *widget.Label) {
+			if id < len(c.logFiltered) {
+				label.SetText(diagnostics.FormatEntry(c.logFiltered[id]))
+			}
+		},
 	)
+	c.logFilter = widget.NewSelect([]string{
+		tr("log.all_filter", nil), tr("log.group.transfers", nil),
+		tr("log.group.errors", nil), tr("log.group.safety", nil),
+		tr("log.group.history", nil),
+	}, func(string) { c.refreshLogView() })
+	c.logFilter.SetSelected(tr("log.all_filter", nil))
+	c.logSearch = widget.NewEntry()
+	c.logSearch.SetPlaceHolder(tr("log.search_placeholder", nil))
+	c.logSearch.OnChanged = func(string) { c.refreshLogView() }
+	c.logCount = widget.NewLabel("")
+	c.logReload = newHintButton(tr("log.refresh_btn", nil), theme.ViewRefreshIcon(),
+		tr("log.refresh_tooltip", nil), widget.LowImportance, func() {
+			c.reloadLog()
+			c.appendAction(tr("log.refresh_btn", nil))
+		}, c.setHint)
 	activityPane := container.NewBorder(
 		container.NewVBox(c.sectionTitle(tr("ui.activity.recent_title", nil), tr("ui.activity.recent_note", nil))),
 		nil, nil, nil, container.NewVScroll(c.activityList),
@@ -661,6 +761,8 @@ func (c *clientApp) activityView() fyne.CanvasObject {
 	logPane := container.NewBorder(
 		container.NewVBox(
 			c.sectionTitle(tr("main_window.tab_log", nil), tr("ui.activity.log_note", nil)),
+			container.NewBorder(nil, nil, container.NewHBox(minWidth(c.logFilter, 160), c.logReload), c.logCount,
+				minWidth(c.logSearch, 220)),
 		),
 		nil, nil, nil, container.NewVScroll(c.logList),
 	)
@@ -693,18 +795,32 @@ func (c *clientApp) nasView() fyne.CanvasObject {
 	c.diskValue, _ = c.statTile("—", tr("metrics.disk_title", nil))
 	c.diskBar = widget.NewProgressBar()
 	diskCaption := widget.NewLabelWithStyle(tr("metrics.disk_title", nil), fyne.TextAlignLeading, fyne.TextStyle{Italic: true})
-	var loadTile, memoryTile, lockTile, queueTile fyne.CanvasObject
+	var loadTile, cpuTile, memoryTile, swapTile fyne.CanvasObject
+	var netTile, ioTile, uptimeTile, lockTile fyne.CanvasObject
+	var queueTile, stagingTile, metadataTile fyne.CanvasObject
 	c.loadValue, loadTile = c.statTile("—", tr("metrics.load_title", nil))
+	c.cpuValue, cpuTile = c.statTile("—", tr("metrics.cpu_title", nil))
 	c.memoryValue, memoryTile = c.statTile("—", tr("metrics.memory_title", nil))
+	c.swapValue, swapTile = c.statTile("—", tr("metrics.swap_title", nil))
+	c.netValue, netTile = c.statTile("—", tr("metrics.network_title", nil))
+	c.ioValue, ioTile = c.statTile("—", tr("metrics.io_title", nil))
+	c.uptimeValue, uptimeTile = c.statTile("—", tr("metrics.uptime_title", nil))
 	c.lockValue, lockTile = c.statTile("—", tr("settings.nas_fact_lock_label", nil))
 	c.queueValue, queueTile = c.statTile("—", tr("metrics.queue_label", nil))
+	c.stagingValue, stagingTile = c.statTile("—", tr("metrics.staging_label", nil))
+	c.metadataValue, metadataTile = c.statTile("—", tr("metrics.metadata_label", nil))
+	c.healthValue = widget.NewLabel(tr("metrics.status_unknown", nil))
+	c.healthValue.Wrapping = fyne.TextWrapWord
+	c.activityValue = widget.NewLabel(tr("metrics.activity_idle", nil))
+	c.activityValue.Wrapping = fyne.TextWrapWord
 	metrics := container.NewGridWithColumns(2,
 		c.surface(container.NewVBox(c.diskValue, diskCaption, c.diskBar), ""),
-		loadTile, memoryTile, lockTile, queueTile,
+		loadTile, cpuTile, memoryTile, swapTile, netTile, ioTile, uptimeTile,
+		lockTile, queueTile, stagingTile, metadataTile,
 	)
 	monitorPane := container.NewVBox(
 		c.sectionTitle(tr("metrics.nasbox_title", nil), tr("settings.metrics_refresh_note", nil)),
-		c.surface(container.NewVBox(c.nasLabel, c.nasUpdatedLabel), ""),
+		c.surface(container.NewVBox(c.nasLabel, c.nasUpdatedLabel, c.healthValue, c.activityValue), ""),
 		metrics,
 		c.surface(container.NewVBox(
 			widget.NewLabelWithStyle(tr("status.nas_overview_title", nil), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
@@ -749,6 +865,7 @@ func (c *clientApp) nasView() fyne.CanvasObject {
 	c.nasTabs = container.NewAppTabs(
 		container.NewTabItem(tr("main_window.tab_metrics", nil), monitorPane),
 		container.NewTabItem(tr("devices.title", nil), devicesPane),
+		container.NewTabItem(tr("storage.title", nil), c.buildStoragePane()),
 	)
 	return c.nasTabs
 }
@@ -807,6 +924,7 @@ func (c *clientApp) settingsView() fyne.CanvasObject {
 			c.note(tr("ui.hint.selective", nil)),
 			container.NewGridWrap(fyne.NewSize(1, 150), c.selectiveList),
 		), ""),
+		c.surface(c.excludePatternsSetting(), ""),
 	)
 	about := c.settingsGroup(tr("ui.group.about", nil), "",
 		widget.NewLabel(fmt.Sprintf("%s: %s %s", tr("settings.info_version_label", nil), version.AppName, version.AppVersion)),
@@ -963,10 +1081,15 @@ func (c *clientApp) appendAction(line string) {
 
 func (c *clientApp) appendLog(line string) {
 	fyne.Do(func() {
-		c.appendLine(line)
-		if c.logList != nil {
-			c.logList.Refresh()
+		entry := diagnostics.Entry{
+			Timestamp: time.Now(), Level: "INFO", Action: "UI", Path: "-", Detail: line,
 		}
+		c.logEntries = append([]diagnostics.Entry{entry}, c.logEntries...)
+		if len(c.logEntries) > 3000 {
+			c.logEntries = c.logEntries[:3000]
+		}
+		c.prependLine(&c.logLines, line)
+		c.refreshLogView()
 		if c.transferList != nil {
 			c.transferList.Refresh()
 		}
@@ -977,6 +1100,65 @@ func (c *clientApp) appendLog(line string) {
 			c.eventLabel.SetText(line)
 		}
 	})
+}
+
+// reloadLog replaces the in-memory rows with the persisted events written by
+// the shared diagnostics logger, newest first.
+func (c *clientApp) reloadLog() {
+	if c.logger == nil {
+		return
+	}
+	entries, err := c.logger.Recent(3000)
+	if err != nil {
+		c.appendAction(fmt.Sprintf("%s: %v", tr("ui.log.reload_failed", nil), err))
+		return
+	}
+	reversed := make([]diagnostics.Entry, 0, len(entries))
+	for index := len(entries) - 1; index >= 0; index-- {
+		reversed = append(reversed, entries[index])
+	}
+	fyne.Do(func() {
+		c.logEntries = reversed
+		c.refreshLogView()
+	})
+}
+
+func (c *clientApp) refreshLogView() {
+	if c.logList == nil {
+		return
+	}
+	group, query := "", ""
+	if c.logFilter != nil {
+		group = c.logGroup()
+	}
+	if c.logSearch != nil {
+		query = c.logSearch.Text
+	}
+	c.logFiltered = diagnostics.Filter(c.logEntries, group, query)
+	if c.logCount != nil {
+		c.logCount.SetText(tr("ui.log.count", map[string]any{
+			"shown": len(c.logFiltered), "total": len(c.logEntries),
+		}))
+	}
+	c.logList.Refresh()
+}
+
+// logGroup maps the visible filter label back to a stable internal group name.
+func (c *clientApp) logGroup() string {
+	if c.logFilter == nil {
+		return ""
+	}
+	switch c.logFilter.Selected {
+	case tr("log.group.transfers", nil):
+		return "transfers"
+	case tr("log.group.errors", nil):
+		return "errors"
+	case tr("log.group.safety", nil):
+		return "safety"
+	case tr("log.group.history", nil):
+		return "history"
+	}
+	return ""
 }
 
 func shortHint(text string) string {
@@ -1027,6 +1209,16 @@ func (c *clientApp) consumeEvents() {
 		case "blocked":
 			c.applyStatus(statusBlocked, event.Message)
 			c.appendAction(event.Message)
+		case "notify":
+			c.appendActivity(event.Message)
+			fyne.Do(func() {
+				if app := fyne.CurrentApp(); app != nil {
+					app.SendNotification(&fyne.Notification{
+						Title:   tr("tray.sync_completed_title", nil),
+						Content: event.Message,
+					})
+				}
+			})
 		case "error":
 			level := statusAttention
 			if looksOffline(event.Message) {
@@ -1180,7 +1372,11 @@ func (c *clientApp) refreshMirrorLabel() {
 func (c *clientApp) refreshMonitor() {
 	for {
 		c.pollMetrics()
-		time.Sleep(30 * time.Second)
+		seconds := c.cfg.Int("metrics_refresh_seconds")
+		if seconds <= 0 {
+			seconds = 30
+		}
+		time.Sleep(time.Duration(seconds) * time.Second)
 	}
 }
 
@@ -1217,22 +1413,35 @@ func (c *clientApp) onSync() {
 }
 
 func (c *clientApp) onPause() {
-	paused := !c.runner.IsPaused()
-	c.runner.SetPaused(paused)
-	if paused {
-		c.applyStatus(statusPaused, tr("status.sync_state_paused", nil))
-	} else {
-		c.applyStatus(statusOK, tr("status.sync_state_ready", nil))
+	paused := c.runner.IsPaused() || c.pausedForNow()
+	if !paused {
+		// Offer the same bounded pauses as the Python client instead of a
+		// surprising indefinite pause on the first click.
+		c.showPauseDialog()
+		return
 	}
+	c.runner.SetPaused(false)
+	_ = c.cfg.Set("paused", false, true)
+	_ = c.cfg.Set("pause_until", nil, true)
+	c.applyStatus(statusOK, tr("status.sync_state_ready", nil))
 	fyne.Do(func() {
 		if c.pauseBtn != nil {
-			c.pauseBtn.SetText(labelPause(paused))
+			c.pauseBtn.SetText(labelPause(false))
 		}
 		if c.pauseBtnStatus != nil {
-			c.pauseBtnStatus.SetText(labelPause(paused))
+			c.pauseBtnStatus.SetText(labelPause(false))
 		}
 	})
-	c.appendLog(labelPause(paused))
+	c.appendLog(tr("status.resume_btn", nil))
+}
+
+// pausedForNow reports a timed pause that has not expired yet.
+func (c *clientApp) pausedForNow() bool {
+	until, ok := c.cfg.Get("pause_until").(float64)
+	if !ok {
+		return false
+	}
+	return int64(until) > time.Now().Unix()
 }
 
 func (c *clientApp) onAudit() {
@@ -1273,6 +1482,7 @@ func (c *clientApp) onPreview() {
 			return
 		}
 		c.appendLog(report.Summary())
+		fyne.Do(func() { c.showPreviewDialog(report) })
 	}()
 }
 

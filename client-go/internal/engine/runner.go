@@ -19,6 +19,7 @@ import (
 	"nasbox-go/internal/integrity"
 	"nasbox-go/internal/mirror"
 	"nasbox-go/internal/remote"
+	"nasbox-go/internal/schedule"
 	"nasbox-go/internal/state"
 	"nasbox-go/internal/version"
 	"nasbox-go/internal/watch"
@@ -37,11 +38,12 @@ type Runner struct {
 	client    ConfigSource
 	transfers Transferer
 
-	mu      sync.Mutex
-	paused  bool
-	dirty   map[string]bool
-	backoff time.Duration
-	nextTry time.Time
+	mu            sync.Mutex
+	paused        bool
+	dirty         map[string]bool
+	remotePending bool
+	backoff       time.Duration
+	nextTry       time.Time
 
 	events         chan Event
 	wake           chan struct{}
@@ -137,7 +139,16 @@ func (r *Runner) markDirty(path string) {
 	r.notify()
 }
 
-func (r *Runner) takeDirty() []string {
+// markRemoteDirty asks for a delta pull without forcing a full manifest
+// export. The change feed uses it when another PC published something.
+func (r *Runner) markRemoteDirty() {
+	r.mu.Lock()
+	r.remotePending = true
+	r.mu.Unlock()
+	r.notify()
+}
+
+func (r *Runner) takeDirty() ([]string, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	paths := make([]string, 0, len(r.dirty))
@@ -145,7 +156,15 @@ func (r *Runner) takeDirty() []string {
 		paths = append(paths, path)
 	}
 	r.dirty = map[string]bool{}
-	return paths
+	remote := r.remotePending
+	r.remotePending = false
+	return paths, remote
+}
+
+func (r *Runner) manifestCursor() int {
+	r.manifestMu.Lock()
+	defer r.manifestMu.Unlock()
+	return r.manifestRevision
 }
 
 func (r *Runner) emit(kind, message string) {
@@ -191,6 +210,7 @@ func (r *Runner) Run(ctx context.Context) error {
 	watchCtx, stopWatch := context.WithCancel(ctx)
 	defer stopWatch()
 	go watcher.Run(watchCtx)
+	go r.watchRemoteChanges(watchCtx)
 
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -216,18 +236,23 @@ func (r *Runner) Run(ctx context.Context) error {
 		}
 		r.mu.Lock()
 		paused, next := r.paused, r.nextTry
-		pending := len(r.dirty) > 0
+		pending := len(r.dirty) > 0 || r.remotePending
 		r.mu.Unlock()
-		if paused || scheduledPause(r.cfg) || !pending || time.Now().Before(next) {
+		if paused || timedPause(r.cfg) || scheduledPause(r.cfg) || !pending || time.Now().Before(next) {
 			continue
 		}
-		paths := r.takeDirty()
+		paths, remoteOnly := r.takeDirty()
 		fullPass := false
 		for _, path := range paths {
 			if path == "" {
 				fullPass = true
 				break
 			}
+		}
+		if remoteOnly && len(paths) == 0 {
+			// A remote-only change uses the delta manifest; the full export is
+			// reserved for startup, the periodic full pull and local "sync now".
+			fullPass = false
 		}
 		r.mu.Lock()
 		transferCtx := r.transferCtx
@@ -383,44 +408,82 @@ func (r *Runner) maybeAudit() {
 	}()
 }
 
+// watchRemoteChanges long-polls the NAS change feed when the server advertises
+// it, so a file written by another PC wakes this client immediately instead of
+// waiting for the next poll tick. The call is read-only and never holds the
+// transfer lock.
+func (r *Runner) watchRemoteChanges(ctx context.Context) {
+	if !r.cfg.Bool("remote_change_feed_available") {
+		return
+	}
+	waitSeconds := r.cfg.Int("change_feed_wait_seconds")
+	if waitSeconds <= 0 {
+		waitSeconds = 55
+	}
+	if waitSeconds > 3600 {
+		waitSeconds = 3600
+	}
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+		revision := r.manifestCursor()
+		if revision < 0 {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(5 * time.Second):
+			}
+			continue
+		}
+		wait, err := r.client.WaitForRevision(revision, waitSeconds)
+		if err != nil {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(time.Duration(waitSeconds) * time.Second / 4):
+			}
+			continue
+		}
+		if wait.Result == "CHANGED" {
+			r.markRemoteDirty()
+			// Give the sync loop time to consume the delta before asking again;
+			// otherwise a burst of commits would spin the SSH channel.
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(2 * time.Second):
+			}
+		}
+	}
+}
+
 func scheduledPause(cfg *config.Config) bool {
 	if !cfg.Bool("pause_schedule_enabled") {
 		return false
 	}
-	values, ok := cfg.Get("pause_schedule").([]any)
-	if !ok {
+	return schedule.AnyActive(schedule.FromConfig(cfg.Get("pause_schedule")), time.Now())
+}
+
+// timedPause honours pause_until, the bounded pause shared with the Python
+// client. An expired value is cleared so the button and config stay truthful.
+func timedPause(cfg *config.Config) bool {
+	until, ok := cfg.Get("pause_until").(float64)
+	if !ok || until <= 0 {
 		return false
 	}
-	now := time.Now()
-	current := now.Hour()*60 + now.Minute()
-	for _, raw := range values {
-		entry, ok := raw.(map[string]any)
-		if !ok {
-			continue
-		}
-		start, end := fmt.Sprint(entry["start"]), fmt.Sprint(entry["end"])
-		startMinutes, err1 := parseHHMM(start)
-		endMinutes, err2 := parseHHMM(end)
-		if err1 != nil || err2 != nil {
-			continue
-		}
-		if endMinutes >= startMinutes {
-			if current >= startMinutes && current < endMinutes {
-				return true
-			}
-		} else if current >= startMinutes || current < endMinutes {
-			return true
-		}
+	if int64(until) > time.Now().Unix() {
+		return true
 	}
+	_ = cfg.Set("pause_until", nil, true)
 	return false
 }
 
-func parseHHMM(value string) (int, error) {
-	var hour, minute int
-	if _, err := fmt.Sscanf(value, "%d:%d", &hour, &minute); err != nil {
-		return 0, err
-	}
-	return hour*60 + minute, nil
+// Paused reports manual, timed or scheduled pause for the UI label.
+func (r *Runner) Paused() bool {
+	return r.IsPaused() || timedPause(r.cfg) || scheduledPause(r.cfg)
 }
 
 func (r *Runner) handleFailure(err error) {
