@@ -1,6 +1,9 @@
 """Messaggi di stato guidati: il banner deve dire cosa fare, non solo che c'è un problema."""
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
 import time
 from unittest.mock import MagicMock
 
@@ -128,6 +131,26 @@ def test_confirm_override_button_is_only_visible_while_blocked(status_tab):
     # A later status refresh must not hide it while the block is still recent.
     status_tab.on_status_changed(_status())
     assert not status_tab.confirm_deletes_btn.isHidden()
+
+
+def test_i18n_imports_without_pyqt6_for_headless_tools():
+    client_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    code = (
+        "import sys\n"
+        "class Blocker:\n"
+        "    def find_spec(self, fullname, path=None, target=None):\n"
+        "        if fullname == 'PyQt6' or fullname.startswith('PyQt6.'):\n"
+        "            raise ImportError(fullname)\n"
+        "sys.meta_path.insert(0, Blocker())\n"
+        "import sync_client.i18n as i18n\n"
+        "assert i18n.QLocale is None\n"
+        "assert i18n.t('assurance.guidance_title')\n"
+    )
+    env = dict(os.environ, PYTHONPATH=client_root)
+    result = subprocess.run(
+        [sys.executable, "-c", code], env=env, capture_output=True, text=True,
+    )
+    assert result.returncode == 0, result.stderr
 
 
 def test_delete_safety_error_is_guided(tmp_path):

@@ -17,6 +17,8 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
   realmente bloccata e il suo tooltip avvisa che i file verranno rimossi anche
   dal NAS.
 - La Panoramica aggiunge una riga "Cosa fare" sotto il motivo dell'attenzione.
+- Corretta la pubblicazione del client: i moduli dei messaggi si importano anche
+  senza PyQt6, come negli strumenti headless sul NAS.
 
 ## 1.31.0 - 2026-11-23
 

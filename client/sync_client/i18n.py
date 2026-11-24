@@ -13,7 +13,10 @@ from __future__ import annotations
 import locale  # fallback only: getdefaultlocale() is deprecated
 from typing import Any
 
-from PyQt6.QtCore import QLocale
+try:
+    from PyQt6.QtCore import QLocale
+except ImportError:  # headless tools (e.g. tools/publish_client.py) import i18n without Qt
+    QLocale = None
 
 DEFAULT_LANG = "it"
 SUPPORTED = ("it", "en")
