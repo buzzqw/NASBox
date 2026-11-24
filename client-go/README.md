@@ -29,7 +29,10 @@ binario.
 | 2 | UI nativa Fyne (10 tab: Stato, Trasferimenti, Log, Conflitti, Storico, Sfoglia NAS, Cartelle esterne, Selettivo, Monitor NAS, Impostazioni) con backend X11 + Wayland, tray e motore continuo | completata (Tier A) |
 | 3 | Canale di aggiornamento separato `manifest-go.json`, download/verifica/install con backup | completata |
 | 4 | Tier B: Browse NAS (list/delete/rename), mirror, selective sync, metriche/dispositivi, bandwidth/schedule, lock istanza, setup repository, cambio lingua | completata |
-| 5 | Rollout graduale e rimozione del client Python | da fare |
+| 5 | Ridisegno UX/UI: 5 aree, design system semantic light/dark, banner guidato, card e layout responsive | completata (0.5.0) |
+| 6 | Rollout graduale e rimozione del client Python | da fare |
+
+Il documento di design dell'interfaccia è in `internal/ui/DESIGN.md`.
 
 ## Canale di aggiornamento Go
 

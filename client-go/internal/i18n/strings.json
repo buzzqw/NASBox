@@ -4891,6 +4891,158 @@
     "en": "(via bastion)",
     "it": "(via bastione)"
   },
+  "ui.action.audit_short": {
+    "en": "Audit",
+    "it": "Audit"
+  },
+  "ui.action.check_update": {
+    "en": "Check for updates",
+    "it": "Controlla aggiornamenti"
+  },
+  "ui.action.details": {
+    "en": "Open details",
+    "it": "Vai ai dettagli"
+  },
+  "ui.action.details_hint": {
+    "en": "Open the section that explains this status",
+    "it": "Apri la sezione che spiega questo stato"
+  },
+  "ui.action.preview": {
+    "en": "Preview changes",
+    "it": "Anteprima modifiche"
+  },
+  "ui.action.preview_short": {
+    "en": "Preview",
+    "it": "Anteprima"
+  },
+  "ui.action.resolve": {
+    "en": "Resolve with selected version",
+    "it": "Risolvi con la versione selezionata"
+  },
+  "ui.action.restore": {
+    "en": "Restore selected",
+    "it": "Ripristina selezionato"
+  },
+  "ui.action.sync_folders": {
+    "en": "Sync external folders",
+    "it": "Sincronizza cartelle esterne"
+  },
+  "ui.action.sync_short": {
+    "en": "Sync",
+    "it": "Sincronizza"
+  },
+  "ui.action.undo": {
+    "en": "Undo recent deletions",
+    "it": "Annulla eliminazioni recenti"
+  },
+  "ui.action.undo_hint": {
+    "en": "Restore files deleted recently from the NAS trash.",
+    "it": "Ripristina i file eliminati di recente dal cestino NAS."
+  },
+  "ui.action.undo_short": {
+    "en": "Undo",
+    "it": "Annulla"
+  },
+  "ui.dialog.confirm_delete_body": {
+    "en": "Permanently delete ‘{path}’ from the NAS? (recoverable from history)",
+    "it": "Eliminare definitivamente «{path}» dal NAS? (recuperabile dallo storico)"
+  },
+  "ui.dialog.new_name": {
+    "en": "New name:",
+    "it": "Nuovo nome:"
+  },
+  "ui.group.about": {
+    "en": "About",
+    "it": "Informazioni"
+  },
+  "ui.group.folders": {
+    "en": "Folders & mirrors",
+    "it": "Cartelle e mirror"
+  },
+  "ui.group.general": {
+    "en": "General",
+    "it": "Generale"
+  },
+  "ui.hint.select_first": {
+    "en": "Select an item from the list first.",
+    "it": "Seleziona prima un elemento dall’elenco."
+  },
+  "ui.log.mirror_done": {
+    "en": "External folders synced: {count}",
+    "it": "Cartelle esterne sincronizzate: {count}"
+  },
+  "ui.nas.config": {
+    "en": "NAS %s — server %s, repository %s",
+    "it": "NAS %s — server %s, repository %s"
+  },
+  "ui.nas.config_short": {
+    "en": "NAS %s — %s %s",
+    "it": "NAS %s — %s %s"
+  },
+  "ui.nav.activity": {
+    "en": "Activity",
+    "it": "Attività"
+  },
+  "ui.nav.files": {
+    "en": "Files",
+    "it": "File"
+  },
+  "ui.nav.nas": {
+    "en": "NAS",
+    "it": "NAS"
+  },
+  "ui.settings.display": {
+    "en": "Display",
+    "it": "Display"
+  },
+  "ui.stat.undo": {
+    "en": "Undoable",
+    "it": "Da annullare"
+  },
+  "ui.status.attention_next": {
+    "en": "Check the Log and resolve the reported issue.",
+    "it": "Controlla il Log e risolvi il problema segnalato."
+  },
+  "ui.status.blocked": {
+    "en": "⛔ Blocked",
+    "it": "⛔ Bloccato"
+  },
+  "ui.status.blocked_next": {
+    "en": "Read the reason in the Log, fix it and retry.",
+    "it": "Leggi il motivo nel Log, correggi e riprova."
+  },
+  "ui.status.ok_next": {
+    "en": "Everything is in sync. Use ‘Sync now’ for an immediate check.",
+    "it": "Tutto allineato. Usa «Sincronizza ora» per un controllo immediato."
+  },
+  "ui.status.paused": {
+    "en": "⏸ Paused",
+    "it": "⏸ In pausa"
+  },
+  "ui.status.progress_next": {
+    "en": "Keep the client open: a transfer is in progress.",
+    "it": "Lascia il client aperto: il trasferimento è in corso."
+  },
+  "ui.tray.pause_resume": {
+    "en": "Pause / Resume",
+    "it": "Pausa / Riprendi"
+  },
+  "ui.tray.quit": {
+    "en": "Quit",
+    "it": "Esci"
+  },
+  "ui.tray.show": {
+    "en": "Show window",
+    "it": "Mostra finestra"
+  },
+  "ui.tray.sync": {
+    "en": "Sync now",
+    "it": "Sincronizza ora"
+  },
+  "ui.tray.undo": {
+    "en": "Undo deletions",
+    "it": "Annulla eliminazioni"
+  },
   "updater.available_body": {
     "en": "Client version {version} is available ({origin}).\n\nUpdate and restart NASBox?",
     "it": "È disponibile la versione {version} del client ({origin}).\n\nVuoi aggiornarla e riavviare NASBox?"
