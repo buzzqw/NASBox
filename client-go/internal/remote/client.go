@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,32 +16,263 @@ import (
 	"nasbox-go/internal/config"
 )
 
+// Connection is the route to the NAS, mirroring Python's NasConnection. Host is
+// the final destination (normally the LAN address); ViaJump means the bastion
+// makes the last hop, so Host is still the NAS's LAN address, not the bastion.
+type Connection struct {
+	Host    string
+	ViaJump bool
+}
+
 // Client runs commands on the NAS through SSH. It deliberately uses the same
-// server script and the same NUL protocols as the Python client.
+// server script and the same NUL protocols as the Python client. Every command
+// — and every rsync/update invocation built from Builder() — shares SSHBuilder
+// so the transport options can never drift apart.
 type Client struct {
 	cfg  *config.Config
 	Host string
 	User string
+	conn Connection
 }
 
 func New(cfg *config.Config) *Client {
-	return &Client{cfg: cfg, Host: cfg.String("nas_lan"), User: cfg.String("nas_user")}
+	return NewWithConnection(cfg, Connection{Host: cfg.String("nas_lan")})
 }
 
-// shellQuote protects a single argument for a POSIX shell on the NAS.
-func shellQuote(value string) string {
-	if value != "" && !strings.ContainsAny(value, " \t\n'\"\\$`;&|<>*?[]{}()#!") {
+// NewWithConnection constructs a client on an already resolved route. Tests use
+// it to build synthetic LAN/WAN/jump commands without touching the network.
+func NewWithConnection(cfg *config.Config, conn Connection) *Client {
+	return &Client{
+		cfg:  cfg,
+		Host: conn.Host,
+		User: cfg.String("nas_user"),
+		conn: conn,
+	}
+}
+
+// NewResolved probes LAN, WAN and the bastion (in that order) like Python's
+// resolve_connection(), then returns a client on the working route.
+func NewResolved(cfg *config.Config) (*Client, error) {
+	conn, err := ResolveConnection(cfg)
+	if err != nil {
+		return nil, err
+	}
+	return NewWithConnection(cfg, conn), nil
+}
+
+func (c *Client) SetConnection(conn Connection) {
+	c.conn = conn
+	c.Host = conn.Host
+}
+
+func (c *Client) Connection() Connection { return c.conn }
+
+// Builder returns the shared SSH transport builder for this client's route.
+func (c *Client) Builder() *SSHBuilder { return NewSSHBuilder(c.cfg, c.conn) }
+
+// shlexQuote is the Go counterpart of Python's shlex.quote: a value is left
+// bare only when it contains exclusively ASCII word characters or @%+=:,./-.
+// Everything else (notably spaces, quotes and shell metacharacters) is wrapped
+// in single quotes, with embedded single quotes escaped as backslash-quote-quote.
+func shlexQuote(value string) string {
+	if value == "" {
+		return "''"
+	}
+	safe := true
+	for _, r := range value {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') ||
+			strings.ContainsRune("_@%+=:,./-", r) {
+			continue
+		}
+		safe = false
+		break
+	}
+	if safe {
 		return value
 	}
 	return "'" + strings.ReplaceAll(value, "'", `'\''`) + "'"
 }
 
-func (c *Client) sshBase() []string {
-	args := []string{"-o", "BatchMode=yes", "-o", "ConnectTimeout=10"}
-	if port := c.cfg.Int("ssh_port"); port > 0 && port != 22 {
-		args = append(args, "-p", fmt.Sprint(port))
+// shellQuote protects a single argument for a POSIX shell on the NAS.
+func shellQuote(value string) string { return shlexQuote(value) }
+
+func sshPort(cfg *config.Config) int {
+	if port := cfg.Int("ssh_port"); port > 0 {
+		return port
 	}
-	return append(args, c.User+"@"+c.Host)
+	return 22
+}
+
+func jumpPort(cfg *config.Config) int {
+	if port := cfg.Int("jump_port"); port > 0 {
+		return port
+	}
+	return 22
+}
+
+// CheckPort is Python's check_port: a short TCP connect to decide whether a
+// candidate route is usable before selecting it.
+func CheckPort(host string, port int, timeout time.Duration) bool {
+	if host == "" || port <= 0 {
+		return false
+	}
+	conn, err := net.DialTimeout("tcp", net.JoinHostPort(host, strconv.Itoa(port)), timeout)
+	if err != nil {
+		return false
+	}
+	_ = conn.Close()
+	return true
+}
+
+// probePort is an indirection so tests can supply synthetic reachability.
+var probePort = func(host string, port int, timeout time.Duration) bool {
+	return CheckPort(host, port, timeout)
+}
+
+// ResolveConnection follows Python's priority: direct LAN, then direct WAN,
+// then the bastion reaching the NAS on its LAN. The bastion itself is checked
+// on jump_port; the final destination is always the NAS LAN address.
+func ResolveConnection(cfg *config.Config) (Connection, error) {
+	lan := strings.TrimSpace(cfg.String("nas_lan"))
+	wan := strings.TrimSpace(cfg.String("nas_wan"))
+	jump := strings.TrimSpace(cfg.String("jump_host"))
+	port := sshPort(cfg)
+	if lan != "" && probePort(lan, port, 2*time.Second) {
+		return Connection{Host: lan}, nil
+	}
+	if wan != "" && probePort(wan, port, 5*time.Second) {
+		return Connection{Host: wan}, nil
+	}
+	if jump != "" && lan != "" && probePort(jump, jumpPort(cfg), 5*time.Second) {
+		return Connection{Host: lan, ViaJump: true}, nil
+	}
+	return Connection{}, fmt.Errorf(
+		"NAS non raggiungibile: LAN=%s WAN=%s bastione=%s (porta %d)", lan, wan, jump, port,
+	)
+}
+
+// multiplexSocketDirFn is replaceable in tests; a real run caches one directory
+// per uid, exactly like Python's _multiplex_socket_dir().
+var multiplexSocketDirFn = func() string {
+	directory := filepath.Join(os.TempDir(), fmt.Sprintf("nasbox-ssh-%d", os.Getuid()))
+	if err := os.MkdirAll(directory, 0o700); err != nil {
+		return ""
+	}
+	_ = os.Chmod(directory, 0o700)
+	return directory
+}
+
+// SSHBuilder is the single source of truth for SSH transport arguments. Server
+// commands (Client.Run/AcquireLease), rsync remote specs and the update path
+// all derive their options from here, matching Python's ssh_opts/_ssh_e_arg.
+type SSHBuilder struct {
+	cfg       *config.Config
+	conn      Connection
+	socketDir string
+}
+
+func NewSSHBuilder(cfg *config.Config, conn Connection) *SSHBuilder {
+	return &SSHBuilder{cfg: cfg, conn: conn, socketDir: multiplexSocketDirFn()}
+}
+
+func (b *SSHBuilder) Connection() Connection { return b.conn }
+
+func (b *SSHBuilder) User() string { return b.cfg.String("nas_user") }
+
+func (b *SSHBuilder) Target() string { return b.User() + "@" + b.conn.Host }
+
+// Options mirrors Python's ssh_opts: explicit port, non-interactive batch mode,
+// an explicit StrictHostKeyChecking policy, timeouts, optional ControlMaster
+// multiplexing, a dedicated known_hosts file when pinned and optional ProxyJump.
+func (b *SSHBuilder) Options() []string {
+	strict := "StrictHostKeyChecking=accept-new"
+	if b.cfg.Bool("ssh_host_key_pinned") || b.cfg.Bool("ssh_jump_key_pinned") {
+		strict = "StrictHostKeyChecking=yes"
+	}
+	opts := []string{
+		"-p", strconv.Itoa(sshPort(b.cfg)),
+		"-o", "BatchMode=yes",
+		"-o", strict,
+		"-o", "ConnectTimeout=15",
+		"-o", "ServerAliveInterval=30",
+	}
+	if b.cfg.Bool("ssh_multiplexing") && b.socketDir != "" {
+		opts = append(opts,
+			"-o", "ControlMaster=auto",
+			"-o", "ControlPath="+b.socketDir+"/cm-%C",
+			"-o", "ControlPersist=60",
+		)
+	}
+	if b.cfg.Bool("ssh_host_key_pinned") {
+		if knownHosts := strings.TrimSpace(b.cfg.String("ssh_known_hosts")); knownHosts != "" {
+			opts = append(opts, "-o", "UserKnownHostsFile="+knownHosts)
+		}
+	}
+	if b.conn.ViaJump {
+		jumpUser := strings.TrimSpace(b.cfg.String("jump_user"))
+		if jumpUser == "" {
+			jumpUser = b.User()
+		}
+		jumpHost := strings.TrimSpace(b.cfg.String("jump_host"))
+		opts = append(opts, "-o", "ProxyJump="+jumpUser+"@"+jumpHost+":"+strconv.Itoa(jumpPort(b.cfg)))
+	}
+	return opts
+}
+
+// Args returns the complete ssh argv, including the binary name.
+func (b *SSHBuilder) Args(command string) []string {
+	args := append([]string{"ssh"}, b.Options()...)
+	return append(args, b.Target(), command)
+}
+
+// EArg is the rsync `-e` argument, equivalent to Python's _ssh_e_arg: each
+// option is shlex-quoted so no space or metacharacter reaches the local shell
+// unescaped when rsync hands the string to ssh.
+func (b *SSHBuilder) EArg() string {
+	parts := []string{"ssh"}
+	for _, option := range b.Options() {
+		parts = append(parts, shlexQuote(option))
+	}
+	return strings.Join(parts, " ")
+}
+
+// RemoteSpec builds user@host:path. The path is shlex-quoted exactly like the
+// Python client does for rsync sources, so paths with spaces or metacharacters
+// are never split; --protect-args keeps the argument intact in transit.
+func (b *SSHBuilder) RemoteSpec(path string) string {
+	if path == "" {
+		return b.Target() + ":"
+	}
+	return b.Target() + ":" + shlexQuote(path)
+}
+
+// runCommand is the only place that spawns a process in this package. Tests
+// replace it to capture the exact argv of synthetic SSH/host-key commands.
+type commandFunc func(ctx context.Context, stdin []byte, name string, args ...string) (stdout, stderr []byte, err error)
+
+var runCommand commandFunc = func(ctx context.Context, stdin []byte, name string, args ...string) ([]byte, []byte, error) {
+	cmd := exec.CommandContext(ctx, name, args...)
+	if stdin != nil {
+		cmd.Stdin = bytes.NewReader(stdin)
+	}
+	var out, errOut bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &errOut
+	err := cmd.Run()
+	return out.Bytes(), errOut.Bytes(), err
+}
+
+// cleanSSHStderr strips OpenSSH advisory banners (lines starting with "**")
+// so they cannot bury the real remote error, as in Python's _clean_ssh_stderr.
+func cleanSSHStderr(text string) string {
+	lines := make([]string, 0, strings.Count(text, "\n")+1)
+	for _, line := range strings.Split(text, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "**") {
+			continue
+		}
+		lines = append(lines, line)
+	}
+	return strings.TrimSpace(strings.Join(lines, "\n"))
 }
 
 // Run executes `script args...` on the NAS and returns raw stdout.
@@ -52,18 +284,14 @@ func (c *Client) Run(args []string, stdin []byte, timeout time.Duration) ([]byte
 	for _, arg := range args {
 		quoted = append(quoted, shellQuote(arg))
 	}
-	command := append(c.sshBase(), strings.Join(quoted, " "))
+	command := c.Builder().Args(strings.Join(quoted, " "))
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "ssh", command...)
-	cmd.Stdin = bytes.NewReader(stdin)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		return stdout.Bytes(), fmt.Errorf("ssh: %w: %s", err, strings.TrimSpace(stderr.String()))
+	stdout, stderr, err := runCommand(ctx, stdin, command[0], command[1:]...)
+	if err != nil {
+		return stdout, fmt.Errorf("ssh: %w: %s", err, cleanSSHStderr(string(stderr)))
 	}
-	return stdout.Bytes(), nil
+	return stdout, nil
 }
 
 func parseVersion(value string) []int {
@@ -153,6 +381,9 @@ func (c *Client) Bootstrap() error {
 // RunLocked runs a mutating command while holding the global NAS lease and
 // writing the owner file expected by the server script.
 func (c *Client) RunLocked(args []string, stdin []byte, device string, timeout time.Duration) ([]byte, error) {
+	if err := c.ValidateHostKeyPin(context.Background()); err != nil {
+		return nil, err
+	}
 	lock := c.cfg.String("server_lock_file_remote")
 	owner := c.cfg.String("server_lock_owner_file_remote")
 	if lock == "" || owner == "" {
@@ -183,6 +414,9 @@ func (c *Client) ReadRemoteFile(path string) ([]byte, error) {
 // SSH command. The returned function releases it. This is used by operations
 // (mirrors, browse) that span several local commands.
 func (c *Client) AcquireLease(device string) (func(), error) {
+	if err := c.ValidateHostKeyPin(context.Background()); err != nil {
+		return nil, err
+	}
 	lock := c.cfg.String("server_lock_file_remote")
 	owner := c.cfg.String("server_lock_owner_file_remote")
 	if lock == "" || owner == "" {
@@ -193,9 +427,12 @@ func (c *Client) AcquireLease(device string) (func(), error) {
 		"printf '%%s\\n' %s > %s; trap 'rm -f %s' EXIT; sleep 3600",
 		shellQuote(ownerLine), shellQuote(owner), shellQuote(owner),
 	)
-	command := append(c.sshBase(), "flock", "-x", shellQuote(lock), "-c", shellQuote(inner))
+	builder := c.Builder()
+	command := append([]string{"ssh"}, builder.Options()...)
+	remote := "flock -x " + shellQuote(lock) + " -c " + shellQuote(inner)
+	command = append(command, builder.Target(), remote)
 	ctx, cancel := context.WithCancel(context.Background())
-	cmd := exec.CommandContext(ctx, "ssh", command...)
+	cmd := exec.CommandContext(ctx, command[0], command[1:]...)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Start(); err != nil {
@@ -617,4 +854,270 @@ func parsePairedStatus(output []byte, magic string) (map[string]string, error) {
 		result[string(parts[2+i*2])] = string(parts[3+i*2])
 	}
 	return result, nil
+}
+
+// expandHome is Path.expanduser() for the known_hosts path.
+func expandHome(value string) string {
+	if value == "~" {
+		if home, err := os.UserHomeDir(); err == nil {
+			return home
+		}
+	}
+	if strings.HasPrefix(value, "~/") {
+		if home, err := os.UserHomeDir(); err == nil {
+			return filepath.Join(home, value[2:])
+		}
+	}
+	return value
+}
+
+// scanHostKeys is the shared ssh-keyscan step used by fingerprint listing and
+// by pinning, so the two can never disagree about what the host presented.
+func scanHostKeys(ctx context.Context, host string, port int) ([]byte, error) {
+	if strings.TrimSpace(host) == "" {
+		return nil, fmt.Errorf("host SSH vuoto")
+	}
+	if port <= 0 {
+		port = 22
+	}
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	output, _, err := runCommand(ctx, nil, "ssh-keyscan", "-T", "6", "-p", strconv.Itoa(port), host)
+	if err != nil {
+		return nil, fmt.Errorf("ssh-keyscan per %s:%d: %w", host, port, err)
+	}
+	if len(bytes.TrimSpace(output)) == 0 {
+		return nil, fmt.Errorf("nessuna chiave host ricevuta da %s:%d", host, port)
+	}
+	return output, nil
+}
+
+// fingerprintsFromScan turns ssh-keyscan output (or known_hosts lines, which
+// share the "host type base64" layout) into a deduplicated list of SHA256
+// fingerprints, ignoring comment lines and unparsable output.
+func fingerprintsFromScan(ctx context.Context, raw []byte) ([]string, error) {
+	keys := make([]string, 0)
+	for _, line := range strings.Split(string(raw), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) >= 3 && !strings.HasPrefix(fields[0], "#") {
+			keys = append(keys, strings.Join(fields[1:], " "))
+		}
+	}
+	if len(keys) == 0 {
+		return nil, fmt.Errorf("nessuna chiave host valida da improntare")
+	}
+	input := []byte(strings.Join(keys, "\n") + "\n")
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	output, _, err := runCommand(ctx, input, "ssh-keygen", "-lf", "-", "-E", "sha256")
+	if err != nil {
+		return nil, fmt.Errorf("ssh-keygen -lf: %w", err)
+	}
+	seen := map[string]bool{}
+	fingerprints := make([]string, 0)
+	for _, line := range strings.Split(string(output), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) >= 2 && strings.HasPrefix(fields[1], "SHA256:") && !seen[fields[1]] {
+			seen[fields[1]] = true
+			fingerprints = append(fingerprints, fields[1])
+		}
+	}
+	return fingerprints, nil
+}
+
+// HostKeyFingerprints returns the live host-key fingerprints without modifying
+// known_hosts (Python's host_key_fingerprints).
+func HostKeyFingerprints(ctx context.Context, host string, port int) ([]string, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	raw, err := scanHostKeys(ctx, host, port)
+	if err != nil {
+		return nil, err
+	}
+	return fingerprintsFromScan(ctx, raw)
+}
+
+func (c *Client) HostKeyFingerprints(host string, port int) ([]string, error) {
+	return HostKeyFingerprints(context.Background(), host, port)
+}
+
+// PinHostKey stores a user-confirmed fingerprint in a dedicated known_hosts
+// file (Python's pin_host_key), refusing to pin a fingerprint the host did not
+// actually present. The file is created with 0600 permissions.
+func PinHostKey(ctx context.Context, host string, port int, knownHosts, fingerprint string) (string, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	raw, err := scanHostKeys(ctx, host, port)
+	if err != nil {
+		return "", err
+	}
+	fingerprints, err := fingerprintsFromScan(ctx, raw)
+	if err != nil {
+		return "", err
+	}
+	matched := false
+	for _, candidate := range fingerprints {
+		if candidate == fingerprint {
+			matched = true
+			break
+		}
+	}
+	if !matched {
+		return "", fmt.Errorf("l'impronta scelta non corrisponde alla chiave ricevuta da %s:%d", host, port)
+	}
+	if strings.TrimSpace(knownHosts) == "" {
+		return "", fmt.Errorf("percorso known_hosts vuoto")
+	}
+	target := expandHome(knownHosts)
+	if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
+		return "", err
+	}
+	existing, err := os.ReadFile(target)
+	if err != nil && !os.IsNotExist(err) {
+		return "", err
+	}
+	known := map[string]bool{}
+	for _, line := range strings.Split(string(existing), "\n") {
+		if trimmed := strings.TrimSpace(line); trimmed != "" {
+			known[trimmed] = true
+		}
+	}
+	additions := make([]string, 0)
+	for _, line := range strings.Split(string(raw), "\n") {
+		if trimmed := strings.TrimSpace(line); trimmed != "" && !known[trimmed] {
+			known[trimmed] = true
+			additions = append(additions, trimmed)
+		}
+	}
+	if len(additions) > 0 {
+		content := strings.Join(additions, "\n") + "\n"
+		if len(existing) > 0 && !bytes.HasSuffix(existing, []byte("\n")) {
+			content = "\n" + content
+		}
+		file, err := os.OpenFile(target, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+		if err != nil {
+			return "", err
+		}
+		if _, err := file.WriteString(content); err != nil {
+			_ = file.Close()
+			return "", err
+		}
+		if err := file.Close(); err != nil {
+			return "", err
+		}
+	}
+	if err := os.Chmod(target, 0o600); err != nil {
+		return "", err
+	}
+	return target, nil
+}
+
+// hostPatternMatches recognises the host field of a known_hosts line, both the
+// plain name and the [host]:port form. Hashed entries cannot be matched by name
+// and are deliberately skipped.
+func hostPatternMatches(pattern, host string, port int) bool {
+	pattern = strings.TrimSpace(strings.Trim(pattern, `"`))
+	if pattern == "" || strings.HasPrefix(pattern, "|") {
+		return false
+	}
+	bracketed := "[" + host + "]:" + strconv.Itoa(port)
+	for _, token := range strings.Split(pattern, ",") {
+		token = strings.TrimSpace(token)
+		if token == host || token == bracketed {
+			return true
+		}
+		if matched, err := filepath.Match(token, host); err == nil && matched {
+			return true
+		}
+		if matched, err := filepath.Match(token, bracketed); err == nil && matched {
+			return true
+		}
+	}
+	return false
+}
+
+// pinnedLinesForHost extracts the key portion of the known_hosts lines that
+// belong to host, so their fingerprints can be compared with the live key.
+func pinnedLinesForHost(content []byte, host string, port int) []byte {
+	var out bytes.Buffer
+	for _, line := range strings.Split(string(content), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 3 || strings.HasPrefix(fields[0], "#") {
+			continue
+		}
+		if hostPatternMatches(fields[0], host, port) {
+			// Keep the host field: fingerprintsFromScan expects the same
+			// "host type base64" layout produced by ssh-keyscan.
+			out.WriteString(strings.Join(fields, " ") + "\n")
+		}
+	}
+	return out.Bytes()
+}
+
+func validatePinForHost(ctx context.Context, content []byte, host string, port int) error {
+	pinnedRaw := pinnedLinesForHost(content, host, port)
+	if len(bytes.TrimSpace(pinnedRaw)) == 0 {
+		return fmt.Errorf("nessuna chiave pinned per %s:%d nel known_hosts", host, port)
+	}
+	pinned, err := fingerprintsFromScan(ctx, pinnedRaw)
+	if err != nil {
+		return fmt.Errorf("impronte pinned per %s:%d non leggibili: %w", host, port, err)
+	}
+	live, err := HostKeyFingerprints(ctx, host, port)
+	if err != nil {
+		return fmt.Errorf("impossibile verificare la chiave host di %s:%d: %w", host, port, err)
+	}
+	for _, candidate := range live {
+		for _, expected := range pinned {
+			if candidate == expected {
+				return nil
+			}
+		}
+	}
+	return fmt.Errorf(
+		"impronta host non corrisponde al pin per %s:%d: atteso %v, ricevuto %v",
+		host, port, pinned, live,
+	)
+}
+
+// ValidateHostKeyPin must run before any mutating remote operation. SSH itself
+// already refuses a changed key when StrictHostKeyChecking=yes, but this
+// preflight turns a misconfigured/mismatched pin into an explicit, actionable
+// error instead of a generic SSH failure. It is a no-op when pinning is off.
+func (c *Client) ValidateHostKeyPin(ctx context.Context) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	pinNAS := c.cfg.Bool("ssh_host_key_pinned")
+	pinJump := c.cfg.Bool("ssh_jump_key_pinned")
+	if !pinNAS && !pinJump {
+		return nil
+	}
+	knownHosts := strings.TrimSpace(c.cfg.String("ssh_known_hosts"))
+	if knownHosts == "" {
+		return fmt.Errorf("pin host key attivo ma ssh_known_hosts non configurato")
+	}
+	path := expandHome(knownHosts)
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("file known_hosts del pin non leggibile (%s): %w", path, err)
+	}
+	builder := c.Builder()
+	if pinNAS {
+		if err := validatePinForHost(ctx, content, builder.conn.Host, sshPort(c.cfg)); err != nil {
+			return err
+		}
+	}
+	if pinJump {
+		jump := strings.TrimSpace(c.cfg.String("jump_host"))
+		if jump == "" {
+			return fmt.Errorf("pin del bastione attivo ma jump_host non configurato")
+		}
+		if err := validatePinForHost(ctx, content, jump, jumpPort(c.cfg)); err != nil {
+			return err
+		}
+	}
+	return nil
 }

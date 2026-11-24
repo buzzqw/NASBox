@@ -6,11 +6,17 @@ import (
 	"math/rand"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"nasbox-go/internal/config"
 	"nasbox-go/internal/history"
+	"nasbox-go/internal/i18n"
+	"nasbox-go/internal/integrity"
+	"nasbox-go/internal/mirror"
+	"nasbox-go/internal/remote"
 	"nasbox-go/internal/state"
+	"nasbox-go/internal/version"
 	"nasbox-go/internal/watch"
 )
 
@@ -38,6 +44,8 @@ type Runner struct {
 	transferCtx    context.Context
 	cancelTransfer context.CancelFunc
 	lastPrune      time.Time
+	nextMirror     time.Time
+	auditRunning   atomic.Bool
 }
 
 func NewRunner(
@@ -70,7 +78,7 @@ func (r *Runner) Cancel() {
 	r.transferCtx, r.cancelTransfer = ctx, cancel
 	r.mu.Unlock()
 	r.transfers.SetContext(ctx)
-	r.emit("status", "trasferimento annullato")
+	r.emit("status", i18n.T("log.action.cancelled", nil))
 }
 
 func (r *Runner) IsPaused() bool {
@@ -91,6 +99,14 @@ func (r *Runner) notify() {
 	case r.wake <- struct{}{}:
 	default:
 	}
+}
+
+// mirrorDue reports whether a local mirror pass is due. The first eligible
+// sync pass always runs the mirrors; later ones follow mirror_interval_seconds.
+func (r *Runner) mirrorDue() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return !time.Now().Before(r.nextMirror)
 }
 
 func (r *Runner) markDirty(path string) {
@@ -143,6 +159,12 @@ func (r *Runner) Run(ctx context.Context) error {
 	if interval <= 0 {
 		interval = 300 * time.Second
 	}
+	mirrorInterval := time.Duration(r.cfg.Int("mirror_interval_seconds")) * time.Second
+	if mirrorInterval <= 0 {
+		mirrorInterval = 300 * time.Second
+	}
+	mirrorTicker := time.NewTicker(mirrorInterval)
+	defer mirrorTicker.Stop()
 	watcher := watch.New(r.cfg.LocalRoot(), debounce, r.excluded)
 	watchCtx, stopWatch := context.WithCancel(ctx)
 	defer stopWatch()
@@ -155,6 +177,8 @@ func (r *Runner) Run(ctx context.Context) error {
 		case path := <-watcher.Events():
 			r.markDirty(path)
 		case <-ticker.C:
+			r.markDirty("")
+		case <-mirrorTicker.C:
 			r.markDirty("")
 		case <-r.wake:
 		case <-ctx.Done():
@@ -173,7 +197,23 @@ func (r *Runner) Run(ctx context.Context) error {
 		transferCtx := r.transferCtx
 		r.mu.Unlock()
 		r.transfers.SetContext(transferCtx)
-		r.emit("status", "sincronizzazione in corso…")
+		// Local mirrors run first: the normal push below then picks up the
+		// freshly written copies in local_root and propagates them with the
+		// usual journal and backup. This uses the same cancellable context as
+		// the transfer instead of a remote lease or a sleeping idle loop.
+		if r.mirrorDue() {
+			r.mu.Lock()
+			r.nextMirror = time.Now().Add(mirrorInterval)
+			r.mu.Unlock()
+			count, mirrorErr := mirror.SyncAll(transferCtx, r.cfg)
+			if mirrorErr != nil {
+				r.emit("error", "mirror: "+mirrorErr.Error())
+			}
+			if count > 0 {
+				r.emit("status", fmt.Sprintf("mirror: %d cartelle locali aggiornate", count))
+			}
+		}
+		r.emit("status", i18n.T("metrics.sync_busy_title", nil))
 		result, err := SyncOnce(r.cfg, r.store, r.client, r.transfers)
 		if err != nil {
 			r.handleFailure(err)
@@ -191,18 +231,58 @@ func (r *Runner) Run(ctx context.Context) error {
 		r.backoff = 0
 		r.nextTry = time.Time{}
 		r.mu.Unlock()
-		r.emit("sync", fmt.Sprintf(
-			" caricati %d, scaricati %d, cancellati %d, conflitti %d",
-			result.Uploaded, result.Downloads, result.Deleted, result.Conflicts,
-		))
+		r.emit("sync", i18n.T("assurance.activity", map[string]any{
+			"uploads": result.Uploaded, "downloads": result.Downloads, "deletes": result.Deleted,
+		})+", "+i18n.T("overview.reason_conflicts", map[string]any{"count": result.Conflicts}))
+		// A successful sync is the natural point for the rare full audit. It
+		// runs in its own goroutine so the UI and the next sync never block.
+		r.maybeAudit()
 		if time.Since(r.lastPrune) >= 24*time.Hour {
 			r.lastPrune = time.Now()
 			removed, err := history.Prune(r.cfg.Int("retention_days_local"))
 			if err == nil && removed > 0 {
-				r.emit("status", fmt.Sprintf("rimossi %d file dallo storico locale", removed))
+				r.emit("status", i18n.T("history.prune_local_body", map[string]any{"count": removed}))
 			}
 		}
 	}
+}
+
+// maybeAudit starts the scheduled integrity audit after a successful sync.
+// IsDue owns the cadence (enable flag, check/audit intervals and startup
+// delays); the manifest is read fresh so the audit compares what the sync just
+// published. The work never runs on the sync/UI goroutine.
+func (r *Runner) maybeAudit() {
+	if !integrity.IsDue(r.cfg) || !r.auditRunning.CompareAndSwap(false, true) {
+		return
+	}
+	go func() {
+		defer r.auditRunning.Store(false)
+		raw, err := r.client.ManifestExport("")
+		if err != nil {
+			r.emit("error", i18n.T("audit.error", map[string]any{"detail": err.Error()}))
+			return
+		}
+		manifest, err := remote.ParseManifest(raw)
+		if err != nil {
+			r.emit("error", i18n.T("audit.error", map[string]any{"detail": err.Error()}))
+			return
+		}
+		report := integrity.Run(r.cfg, manifest, version.AppVersion, nil)
+		when := time.Unix(int64(report.FinishedAt), 0).Format("15:04:05")
+		if report.Error != "" {
+			r.emit("error", i18n.T("audit.error", map[string]any{"detail": report.Error}))
+			return
+		}
+		if len(report.Differences) > 0 {
+			r.emit("status", i18n.T("audit.differences", map[string]any{
+				"when": when, "count": len(report.Differences),
+			}))
+			return
+		}
+		r.emit("status", i18n.T("audit.ok", map[string]any{
+			"when": when, "files": report.FilesChecked, "duration": int(report.Duration),
+		}))
+	}()
 }
 
 func scheduledPause(cfg *config.Config) bool {

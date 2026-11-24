@@ -15,6 +15,21 @@ import (
 	"nasbox-go/internal/remote"
 )
 
+// runRsync is the single rsync spawn point. Tests replace it to capture the
+// exact argv (synthetic commands) without starting a real transfer.
+var runRsync = func(ctx context.Context, stdin []byte, args ...string) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, "rsync", args...)
+	if stdin != nil {
+		cmd.Stdin = bytes.NewReader(stdin)
+	}
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return stderr.Bytes(), fmt.Errorf("rsync: %w: %s", err, strings.TrimSpace(stderr.String()))
+	}
+	return nil, nil
+}
+
 type Transfer struct {
 	cfg    *config.Config
 	client *remote.Client
@@ -32,39 +47,46 @@ func (t *Transfer) SetContext(ctx context.Context) {
 	}
 }
 
+// sshArgs returns the rsync -e value from the same SSHBuilder used by server
+// commands and updates, so ports, jump, pinning and multiplexing never drift.
+func (t *Transfer) sshArgs() string { return t.client.Builder().EArg() }
+
+func (t *Transfer) remoteSpec(path string) string { return t.client.Builder().RemoteSpec(path) }
+
 // DownloadPath fetches one remote relative path into the same local path.
 func (t *Transfer) DownloadPath(relative string) error {
 	if relative == "" {
 		return fmt.Errorf("percorso remoto vuoto")
+	}
+	if err := t.client.ValidateHostKeyPin(context.Background()); err != nil {
+		return err
 	}
 	root := t.cfg.LocalRoot()
 	local, err := paths.SafeDestination(root, relative)
 	if err != nil {
 		return err
 	}
-	remoteSpec := fmt.Sprintf("%s@%s:%s/%s", t.client.User, t.client.Host, t.cfg.RemotePrefix(), relative)
-	args := []string{"-a", "--partial", "--partial-dir=.sync-partial", "--mkpath", "--ignore-times", "--protect-args", "-e", "ssh -o BatchMode=yes", remoteSpec, local}
+	remotePath := strings.TrimSuffix(t.cfg.RemotePrefix(), "/") + "/" + relative
+	args := []string{
+		"-a", "--partial", "--partial-dir=.sync-partial", "--mkpath",
+		"--ignore-times", "--protect-args", "-e", t.sshArgs(),
+		t.remoteSpec(remotePath), local,
+	}
 	if limit := t.cfg.Int("bandwidth_kbps"); limit > 0 {
 		args = append(args[:1], append([]string{"--bwlimit", fmt.Sprint(limit)}, args[1:]...)...)
 	}
-	cmd := exec.CommandContext(t.ctx, "rsync", args...)
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	return cmd.Run()
+	_, err = runRsync(t.ctx, nil, args...)
+	return err
 }
 
 // BuildCommand returns the exact rsync argv for a batch (also used by tests).
 func (t *Transfer) BuildCommand(paths []string, upload bool) ([]string, []byte) {
 	root := t.cfg.LocalRoot()
-	remoteSpec := fmt.Sprintf("%s@%s:%s/", t.client.User, t.client.Host, t.cfg.RemotePrefix())
-	sshArgs := "-o BatchMode=yes -o ConnectTimeout=10"
-	if port := t.cfg.Int("ssh_port"); port > 0 && port != 22 {
-		sshArgs += fmt.Sprintf(" -p %d", port)
-	}
+	remoteSpec := t.remoteSpec(strings.TrimSuffix(t.cfg.RemotePrefix(), "/") + "/")
 	args := []string{
 		"-a", "--partial", "--partial-dir=.sync-partial", "--fuzzy",
 		"--delay-updates", "--mkpath", "--ignore-times", "--protect-args",
-		"--files-from=-", "--from0", "-e", "ssh " + sshArgs,
+		"--files-from=-", "--from0", "-e", t.sshArgs(),
 	}
 	if t.cfg.String("compression_mode") == "on" {
 		args = append(args, "--compress")
@@ -89,15 +111,12 @@ func (t *Transfer) run(paths []string, upload bool) error {
 	if len(paths) == 0 {
 		return nil
 	}
-	args, payload := t.BuildCommand(paths, upload)
-	cmd := exec.CommandContext(t.ctx, "rsync", args...)
-	cmd.Stdin = bytes.NewReader(payload)
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("rsync: %w: %s", err, strings.TrimSpace(stderr.String()))
+	if err := t.client.ValidateHostKeyPin(context.Background()); err != nil {
+		return err
 	}
-	return nil
+	args, payload := t.BuildCommand(paths, upload)
+	_, err := runRsync(t.ctx, payload, args...)
+	return err
 }
 
 func (t *Transfer) Upload(paths []string) error   { return t.run(paths, true) }
@@ -109,6 +128,9 @@ func (t *Transfer) UploadStaged(paths []string, device string, files []remote.St
 	if len(paths) == 0 {
 		return nil
 	}
+	if err := t.client.ValidateHostKeyPin(context.Background()); err != nil {
+		return err
+	}
 	txID := "stage-" + time.Now().UTC().Format("20060102-150405-000000")
 	stagingDir, err := t.client.CreateRemoteStaging(txID)
 	if err != nil {
@@ -116,13 +138,10 @@ func (t *Transfer) UploadStaged(paths []string, device string, files []remote.St
 	}
 	defer t.client.CleanupRemoteStaging(stagingDir)
 	args, payload := t.BuildCommand(paths, true)
-	args[len(args)-1] = fmt.Sprintf("%s@%s:%s", t.client.User, t.client.Host, stagingDir)
-	cmd := exec.CommandContext(t.ctx, "rsync", args...)
-	cmd.Stdin = bytes.NewReader(payload)
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("rsync staging: %w: %s", err, strings.TrimSpace(stderr.String()))
+	args[len(args)-1] = t.remoteSpec(stagingDir)
+	stderr, err := runRsync(t.ctx, payload, args...)
+	if err != nil {
+		return fmt.Errorf("rsync staging: %w: %s", err, strings.TrimSpace(string(stderr)))
 	}
 	ok, err := t.client.StagingPublish(stagingDir, txID, device, files)
 	if err != nil {
