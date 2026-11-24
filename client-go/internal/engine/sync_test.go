@@ -73,6 +73,10 @@ type fakeTransfer struct {
 	stagedFiles  []remote.StagedFile
 	stagedDevice string
 	stageErr     error
+	replaced     []remote.ReplaceFile
+	replaceStale map[string]bool
+	replaceErr   error
+	replaceRunTS string
 }
 
 func (f *fakeTransfer) Upload(paths []string) error { f.uploaded = paths; return nil }
@@ -88,6 +92,27 @@ func (f *fakeTransfer) UploadStaged(paths []string, device string, files []remot
 	f.stagedFiles = append([]remote.StagedFile(nil), files...)
 	f.stagedDevice = device
 	return nil
+}
+func (f *fakeTransfer) UploadReplace(
+	files []remote.ReplaceFile, _ string, _ string, runTS string,
+) (remote.ReplaceResult, error) {
+	result := remote.ReplaceResult{}
+	if f.replaceErr != nil {
+		return result, f.replaceErr
+	}
+	f.replaceRunTS = runTS
+	for _, file := range files {
+		if f.replaceStale[file.Path] {
+			result.Stale = append(result.Stale, file.Path)
+			continue
+		}
+		f.replaced = append(f.replaced, file)
+		result.Replaced = append(result.Replaced, remote.JournalPut{
+			Path: file.Path, Digest: file.Digest, Size: file.Size,
+			MTimeNS: file.MTimeNS, Causal: file.Causal,
+		})
+	}
+	return result, nil
 }
 func (f *fakeTransfer) SetContext(ctx context.Context) {}
 
@@ -364,7 +389,7 @@ func TestSyncOnceDownloadsRemoteChangeWithStaleLocalBaseline(t *testing.T) {
 
 // A causal local edit wins over a concurrent remote edit and is published
 // through staging with the clock produced by Observe - not a second increment.
-func TestSyncOnceStagesLocalChangeWithObservedCausal(t *testing.T) {
+func TestSyncOnceReplacesExistingFileWithObservedCausal(t *testing.T) {
 	cfg, store, root := setupTest(t)
 	recordBaseline(t, cfg, store, "edit.txt", digest("base"), 1700000000000000000, "dev-a:1")
 	localPath := filepath.Join(root, "edit.txt")
@@ -382,19 +407,22 @@ func TestSyncOnceStagesLocalChangeWithObservedCausal(t *testing.T) {
 	if result.Uploaded != 1 || result.Downloads != 0 || result.Deleted != 0 || result.Blocked != "" {
 		t.Fatalf("local causal edit was not uploaded: %+v", result)
 	}
-	if len(transfers.stagedPaths) != 1 || transfers.stagedPaths[0] != "edit.txt" {
-		t.Fatalf("upload did not use staging: %v", transfers.stagedPaths)
+	// The NAS already holds edit.txt: staging-publish would refuse it, so it
+	// must be overwritten with the planned NAS version as precondition.
+	if len(transfers.stagedPaths) != 0 {
+		t.Fatalf("existing file sent to staging: %v", transfers.stagedPaths)
 	}
-	if transfers.stagedDevice != store.DeviceID() {
-		t.Fatalf("staging used device %q, want %q", transfers.stagedDevice, store.DeviceID())
+	if len(transfers.replaced) != 1 {
+		t.Fatalf("existing file not replaced: %+v", transfers.replaced)
 	}
-	if nas.journalAppends != 0 {
-		t.Fatalf("direct journal append must not be used after staging: %d", nas.journalAppends)
+	replacement := transfers.replaced[0]
+	if replacement.ExpectedDigest != digest("remote") || replacement.ExpectedSize != 6 {
+		t.Fatalf("precondition is not the planned NAS version: %+v", replacement)
 	}
-	if len(transfers.stagedFiles) != 1 {
-		t.Fatalf("no staged file metadata: %+v", transfers.stagedFiles)
+	if !strings.HasSuffix(transfers.replaceRunTS, "Z") || len(transfers.replaceRunTS) != len("2026-11-24--21-56-55-123456Z") {
+		t.Fatalf("history suffix must use the shared run_ts format: %q", transfers.replaceRunTS)
 	}
-	staged := transfers.stagedFiles[0]
+	staged := replacement.StagedFile
 	if staged.Path != "edit.txt" || staged.Digest != digest("local") || staged.Size != 5 {
 		t.Fatalf("bad staged file: %+v", staged)
 	}
@@ -425,6 +453,66 @@ func TestSyncOnceStagesLocalChangeWithObservedCausal(t *testing.T) {
 	}
 	if entries["edit.txt"].Causal != staged.Causal || entries["edit.txt"].Digest != staged.Digest {
 		t.Fatalf("baseline not committed after publish: %+v", entries["edit.txt"])
+	}
+}
+
+// A pass with a brand-new file and an edited existing file uses staging for
+// the first and a precondition overwrite for the second (2026-11-24: mixing
+// them made staging-publish reject the whole batch on every pass).
+func TestSyncOnceSplitsNewAndExistingUploads(t *testing.T) {
+	cfg, store, root := setupTest(t)
+	recordBaseline(t, cfg, store, "CLAUDE.md", digest("old"), 1700000000000000000, "dev-a:1")
+	if err := os.WriteFile(filepath.Join(root, "CLAUDE.md"), []byte("new text"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "nuovo.txt"), []byte("ciao"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	manifest := "NASBOX_MANIFEST_V1\n" +
+		manifestLine("CLAUDE.md", digest("old"), 3, 1700000000000000000, "dev-a:1")
+	nas := &fakeNAS{config: nasConfig(), manifest: manifest}
+	transfers := &fakeTransfer{}
+	result, err := SyncOnce(cfg, store, nas, transfers)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(transfers.stagedPaths, ",") != "nuovo.txt" {
+		t.Fatalf("staging must only receive new files: %v", transfers.stagedPaths)
+	}
+	if len(transfers.replaced) != 1 || transfers.replaced[0].Path != "CLAUDE.md" ||
+		transfers.replaced[0].ExpectedDigest != digest("old") {
+		t.Fatalf("existing file not replaced with precondition: %+v", transfers.replaced)
+	}
+	if result.Uploaded != 2 {
+		t.Fatalf("both uploads must be counted: %+v", result)
+	}
+}
+
+// If the NAS changed after planning, the overwrite is skipped and the local
+// baseline is left untouched so the next pass re-plans (conflict handling).
+func TestSyncOnceStaleReplacementKeepsBaseline(t *testing.T) {
+	cfg, store, root := setupTest(t)
+	recordBaseline(t, cfg, store, "doc.txt", digest("old"), 1700000000000000000, "dev-a:1")
+	if err := os.WriteFile(filepath.Join(root, "doc.txt"), []byte("mine"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	manifest := "NASBOX_MANIFEST_V1\n" +
+		manifestLine("doc.txt", digest("old"), 3, 1700000000000000000, "dev-a:1")
+	nas := &fakeNAS{config: nasConfig(), manifest: manifest}
+	transfers := &fakeTransfer{replaceStale: map[string]bool{"doc.txt": true}}
+	result, err := SyncOnce(cfg, store, nas, transfers)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Uploaded != 0 || result.Stale != 1 {
+		t.Fatalf("stale overwrite must be skipped and reported: %+v", result)
+	}
+	entries, err := store.EntrySnapshot(cfg.LocalRepositoryID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if entries["doc.txt"].Digest != digest("old") {
+		t.Fatalf("baseline must stay on the old version: %+v", entries["doc.txt"])
 	}
 }
 

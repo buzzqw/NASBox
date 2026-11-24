@@ -279,21 +279,52 @@ func doctor(args []string) int {
 	return 0
 }
 
+// doctorErrorWindow limits "ultimi errori" to recent problems: older entries
+// (for example from the legacy Python client sharing client.log) are history,
+// not the current state, and only produced false alarms.
+const doctorErrorWindow = 24 * time.Hour
+
 func recentErrors(logger *diagnostics.Logger) ([]diagnostics.Entry, error) {
-	errors := make([]diagnostics.Entry, 0)
 	if logger == nil {
-		return errors, nil
+		return make([]diagnostics.Entry, 0), nil
 	}
-	entries, err := logger.Recent(500)
+	entries, err := logger.Recent(2000)
 	if err != nil {
 		return nil, err
 	}
-	for index := len(entries) - 1; index >= 0 && len(errors) < 20; index-- {
-		if entries[index].Level == "ERROR" {
-			errors = append(errors, entries[index])
+	return summarizeErrors(entries, time.Now().Add(-doctorErrorWindow), 10), nil
+}
+
+// summarizeErrors returns the newest distinct ERROR entries after since. A
+// message repeated many times (a failing tick) appears once, with the number
+// of repetitions appended to its detail.
+func summarizeErrors(entries []diagnostics.Entry, since time.Time, limit int) []diagnostics.Entry {
+	result := make([]diagnostics.Entry, 0)
+	position := map[string]int{}
+	counts := map[string]int{}
+	for index := len(entries) - 1; index >= 0; index-- {
+		entry := entries[index]
+		if entry.Level != "ERROR" || entry.Timestamp.Before(since) {
+			continue
+		}
+		key := entry.Action + "\x00" + entry.Path + "\x00" + strings.Join(strings.Fields(entry.Detail), " ")
+		if _, seen := position[key]; seen {
+			counts[key]++
+			continue
+		}
+		if len(result) >= limit {
+			continue
+		}
+		position[key] = len(result)
+		counts[key] = 1
+		result = append(result, entry)
+	}
+	for key, at := range position {
+		if counts[key] > 1 {
+			result[at].Detail = fmt.Sprintf("%s (×%d)", result[at].Detail, counts[key])
 		}
 	}
-	return errors, nil
+	return result
 }
 
 func probeServer(cfg *config.Config) serverProbe {
@@ -378,9 +409,9 @@ func writeDoctorReport(report doctorReport, asJSON bool) error {
 	fmt.Printf("tracked:     %d\n", report.Tracked)
 	fmt.Printf("undo count:  %d\n", report.Undo)
 	if len(report.LastErrors) == 0 {
-		fmt.Println("ultimi errori: nessuno")
+		fmt.Println("ultimi errori: nessuno nelle ultime 24 ore")
 	} else {
-		fmt.Println("ultimi errori:")
+		fmt.Println("ultimi errori (24 ore):")
 		for _, entry := range report.LastErrors {
 			fmt.Printf("  %s [%s] %s %s %s\n",
 				entry.Timestamp.Format(time.RFC3339), entry.Level, entry.Action,

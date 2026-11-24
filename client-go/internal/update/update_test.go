@@ -415,3 +415,37 @@ func TestConfirmFailureRollsBackAfterTwoStarts(t *testing.T) {
 		t.Fatalf("failed state missing: %+v %v", state, err)
 	}
 }
+
+func TestBinaryInsideSyncedTreeNeverWritesState(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, ".nasbox-root"), []byte("NASBOX_REPOSITORY_V1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	channel := filepath.Join(root, ".nasbox-client-update-go")
+	if err := os.MkdirAll(channel, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	binary := filepath.Join(channel, "nasbox-go-0.17.0")
+	if err := os.WriteFile(binary, []byte("bin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if !InsideSyncedTree(binary) {
+		t.Fatal("binary in the channel must be detected inside the synced tree")
+	}
+	if err := RollbackIfNeeded(binary); err != nil {
+		t.Fatalf("rollback: %v", err)
+	}
+	if err := ConfirmStartedOK(binary); err != nil {
+		t.Fatalf("confirm: %v", err)
+	}
+	if _, _, err := Apply(nil, nil, binary); !errors.Is(err, ErrUnmanagedBinary) {
+		t.Fatalf("Apply must refuse an unmanaged binary, got %v", err)
+	}
+	entries, _ := os.ReadDir(channel)
+	if len(entries) != 1 {
+		t.Fatalf("no state or lock file may be created in the synced tree: %v", entries)
+	}
+	if InsideSyncedTree(filepath.Join(t.TempDir(), "nasbox-go")) {
+		t.Fatal("an ordinary install path is managed")
+	}
+}

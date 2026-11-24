@@ -4,6 +4,41 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 0.18.1 - 2026-11-24
+
+Client Go, correzione urgente:
+
+- **Trasferimenti di nuovo funzionanti con il NAS.** Il client Go passava
+  `--mkpath` a rsync; l'opzione viene inoltrata al rsync del NAS (3.1.2 su
+  Synology), che la rifiuta (`--mkpath: unknown option`): da 0.18.0 nessun
+  upload né download riusciva. Con `--files-from` le cartelle intermedie sono
+  già create da rsync; per il download singolo la cartella locale viene creata
+  dal client. Test di regressione che vieta le opzioni sconosciute a rsync 3.1.2.
+- **Modifiche a file già presenti sul NAS di nuovo caricate.** Il client Go
+  mandava ogni upload nello staging, ma `staging-publish` crea solo file nuovi
+  e rifiutava l'intero blocco se un file esisteva già. Ora, come nel client
+  Python, i file esistenti vengono sostituiti sotto il lease NAS: verifica che
+  sul NAS ci sia ancora la versione attesa (altrimenti il file viene saltato e
+  ripianificato), rsync diretto con la versione precedente conservata in
+  `.sync-trash` (storico NAS ripristinabile) e journal con lo stato reale del
+  NAS. I file nuovi continuano a usare lo staging atomico.
+- **Lease NAS rilasciato davvero.** `AcquireLease` (usato da mirror, browse e
+  sostituzioni) teneva il lock con `sleep 3600` e lo rilasciava terminando il
+  processo ssh locale: attraverso la connessione SSH multiplexata la sessione
+  remota sopravviveva e il NAS restava bloccato fino a un'ora per tutti i PC.
+  Ora usa `--transfer-wait` del server come il client Python (coda equa, file
+  owner gestito dal server) e rilascia chiudendo stdin; attesa massima 45 s,
+  poi il lease viene richiesto di nuovo alla passata successiva.
+- Updater: un binario avviato da dentro una cartella NASBox sincronizzata (per
+  esempio direttamente dal canale `.nasbox-client-update-go`) non scrive più
+  stato e lock accanto a sé e rifiuta l'auto-aggiornamento: quei file finivano
+  sul NAS e su tutti i PC.
+- `doctor` mostra solo gli errori delle ultime 24 ore, raggruppando le
+  ripetizioni: gli errori storici del client Python non sembrano più guasti in
+  corso.
+- `tools/publish_go_client.py` conserva solo le ultime versioni nel canale
+  (`--keep`, default 2) e rimuove file spuri (lock e stati dell'updater).
+
 ## 0.18.0 - 2026-11-24
 
 Client Go, parità con il client Python 1.35.2:

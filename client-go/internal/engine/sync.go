@@ -42,6 +42,10 @@ type ConfigSource interface {
 type Transferer interface {
 	Download(paths []string) error
 	UploadStaged(paths []string, device string, files []remote.StagedFile) error
+	// UploadReplace overwrites files that already exist on the NAS
+	// (staging-publish never overwrites), under the NAS lease and with the
+	// previous version kept in the NAS history.
+	UploadReplace(files []remote.ReplaceFile, device, repositoryID, runTS string) (remote.ReplaceResult, error)
 	SetContext(ctx context.Context)
 }
 
@@ -53,6 +57,8 @@ type SyncResult struct {
 	Renames   int
 	Conflicts int
 	Downloads int
+	// Stale counts overwrites skipped because the NAS changed after planning.
+	Stale int
 }
 
 type localFile struct {
@@ -336,29 +342,63 @@ func SyncOnceWithManifest(
 	// subsequent delete pass. The clock was already advanced once by Observe;
 	// staging publishes that exact version, so no second increment is allowed.
 	if len(uploads) > 0 {
+		// staging-publish only creates files: a path the NAS already holds is
+		// overwritten through UploadReplace, with the planned NAS version as
+		// precondition. Mixing both in one staging batch made the server
+		// reject the whole batch ("destinazione gia' esistente").
+		created := make([]string, 0, len(uploads))
 		files := make([]remote.StagedFile, 0, len(uploads))
+		replacements := make([]remote.ReplaceFile, 0)
 		for _, path := range uploads {
 			file := local[path]
-			files = append(files, remote.StagedFile{
+			staged := remote.StagedFile{
 				Path: path, Digest: file.Digest, Size: file.Size,
 				MTimeNS: file.MTimeNS, Causal: localCausals[path],
-			})
+			}
+			if remoteState, exists := manifest[path]; exists && remoteState.Kind == "FILE" {
+				replacements = append(replacements, remote.ReplaceFile{
+					StagedFile: staged, ExpectedDigest: remoteState.Digest, ExpectedSize: remoteState.Size,
+				})
+				continue
+			}
+			created = append(created, path)
+			files = append(files, staged)
 		}
-		if err := transfers.UploadStaged(uploads, device, files); err != nil {
-			return result, err
-		}
-		// Only now, after the server committed the publish, promote the local
-		// observations to baselines. A failed publish leaves them untouched so
-		// the next pass retries with the very same causal.
-		for _, file := range files {
-			if err := store.RecordEntry(cfg.LocalRepositoryID(), file.Path, state.EntryState{
-				Digest: file.Digest, Size: file.Size, MTimeNS: file.MTimeNS,
-				Causal: file.Causal,
-			}); err != nil {
+		if len(created) > 0 {
+			if err := transfers.UploadStaged(created, device, files); err != nil {
 				return result, err
 			}
+			// Only now, after the server committed the publish, promote the
+			// local observations to baselines. A failed publish leaves them
+			// untouched so the next pass retries with the very same causal.
+			for _, file := range files {
+				if err := store.RecordEntry(cfg.LocalRepositoryID(), file.Path, state.EntryState{
+					Digest: file.Digest, Size: file.Size, MTimeNS: file.MTimeNS,
+					Causal: file.Causal,
+				}); err != nil {
+					return result, err
+				}
+			}
+			result.Uploaded += len(files)
 		}
-		result.Uploaded = len(uploads)
+		if len(replacements) > 0 {
+			replaced, err := transfers.UploadReplace(replacements, device, cfg.String("repository_id"), newRunTS())
+			if err != nil {
+				return result, err
+			}
+			// The baseline is what the NAS journaled. If the local file
+			// changed during the upload it differs from the local version, so
+			// the next pass uploads the newer bytes.
+			for _, put := range replaced.Replaced {
+				if err := store.RecordEntry(cfg.LocalRepositoryID(), put.Path, state.EntryState{
+					Digest: put.Digest, Size: put.Size, MTimeNS: put.MTimeNS, Causal: put.Causal,
+				}); err != nil {
+					return result, err
+				}
+			}
+			result.Uploaded += len(replaced.Replaced)
+			result.Stale += len(replaced.Stale)
+		}
 	}
 	if len(downloads) > 0 {
 		if err := transfers.Download(downloads); err != nil {

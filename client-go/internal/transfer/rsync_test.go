@@ -2,6 +2,8 @@ package transfer
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -164,5 +166,44 @@ func TestHostKeyPinMismatchBlocksTransfer(t *testing.T) {
 	}
 	if len(*argsPtr) != 0 {
 		t.Fatalf("rsync must not start when the pin is unverified: %q", *argsPtr)
+	}
+}
+
+// The NAS runs rsync 3.1.2 (Synology DS420j). Every option is forwarded to the
+// remote rsync, which aborts the whole transfer on an option it does not know
+// (2026-11-24: "--mkpath: unknown option", no upload worked on the Go client).
+// Options introduced after 3.1.2 must never be sent.
+func TestCommandsAvoidOptionsUnknownToNASRsync312(t *testing.T) {
+	forbidden := []string{"--mkpath", "--copy-as", "--trust-sender", "--old-args", "--zc", "--cc", "--compress-choice", "--checksum-choice"}
+	cfg := baseConfig()
+	tr := New(cfg, remote.New(cfg))
+	for _, upload := range []bool{true, false} {
+		args, _ := tr.BuildCommand([]string{"a.txt"}, upload)
+		for _, arg := range args {
+			for _, bad := range forbidden {
+				if arg == bad || strings.HasPrefix(arg, bad+"=") {
+					t.Fatalf("option %s is unknown to rsync 3.1.2: %v", bad, args)
+				}
+			}
+		}
+	}
+	root := t.TempDir()
+	cfg.Set("local_root", root, false)
+	captured, _ := captureRsync(t)
+	if err := tr.DownloadPath("cartella nuova/file.txt"); err != nil {
+		t.Fatal(err)
+	}
+	if len(*captured) == 0 {
+		t.Fatal("rsync was not invoked")
+	}
+	if info, err := os.Stat(filepath.Join(root, "cartella nuova")); err != nil || !info.IsDir() {
+		t.Fatalf("local parent directory must be created without --mkpath: %v", err)
+	}
+	for _, arg := range *captured {
+		for _, bad := range forbidden {
+			if arg == bad {
+				t.Fatalf("download uses %s: %v", bad, *captured)
+			}
+		}
 	}
 }

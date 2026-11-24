@@ -407,6 +407,9 @@ func writeState(binary string, state *UpdateState) error {
 // be detected and rolled back by RollbackIfNeeded at the next startup.
 // It returns true when a new binary is ready and a restart is required.
 func Apply(cfg *config.Config, client FileReader, binaryPath string) (bool, string, error) {
+	if err := managed(binaryPath); err != nil {
+		return false, "", err
+	}
 	manifest, err := Newest(cfg, client)
 	if err != nil {
 		return false, "", err
@@ -522,6 +525,9 @@ func healthCheck(binary, expected string) error {
 // newly installed binary, promotes the state to CONFIRMED after two good
 // starts and rolls back after two consecutive failed starts.
 func ConfirmStartedOK(binaryPath string) error {
+	if managed(binaryPath) != nil {
+		return nil // nothing to confirm for a binary run from the synced tree
+	}
 	state, err := readState(binaryPath)
 	if err != nil {
 		return err
@@ -565,6 +571,9 @@ func ConfirmStartedOK(binaryPath string) error {
 // RollbackIfNeeded repairs an interrupted or failed update before any sync
 // work starts. ErrRollbackPerformed signals that a restart is required.
 func RollbackIfNeeded(binaryPath string) error {
+	if managed(binaryPath) != nil {
+		return nil
+	}
 	state, err := readState(binaryPath)
 	if err != nil {
 		return err

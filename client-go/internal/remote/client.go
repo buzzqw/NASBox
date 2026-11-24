@@ -1,9 +1,13 @@
 package remote
 
 import (
+	"bufio"
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/exec"
@@ -11,6 +15,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"nasbox-go/internal/config"
@@ -410,53 +415,147 @@ func (c *Client) ReadRemoteFile(path string) ([]byte, error) {
 	return c.Run([]string{"cat", path}, nil, 30*time.Second)
 }
 
-// AcquireLease holds the NAS global lock for up to one hour via a long-running
-// SSH command. The returned function releases it. This is used by operations
-// (mirrors, browse) that span several local commands.
+// AcquireLease holds the NAS global lease through the server's
+// --transfer-wait scheduler, exactly like the Python client: the server
+// queues requests fairly, writes the owner file and keeps the lease while the
+// SSH session's stdin stays open. Release closes stdin; the EOF crosses a
+// multiplexed (ControlMaster) connection too, so the server always lets go.
+//
+// The previous implementation ran "sleep 3600" and killed the local ssh
+// process to release: through a ControlMaster connection the remote session
+// survived and kept the NAS locked for up to an hour (2026-11-24).
 func (c *Client) AcquireLease(device string) (func(), error) {
 	if err := c.ValidateHostKeyPin(context.Background()); err != nil {
 		return nil, err
 	}
-	lock := c.cfg.String("server_lock_file_remote")
-	owner := c.cfg.String("server_lock_owner_file_remote")
-	if lock == "" || owner == "" {
-		return nil, fmt.Errorf("lock NAS non configurato")
-	}
-	ownerLine := fmt.Sprintf("%s|go-client|0|maintenance|0|0", device)
-	inner := fmt.Sprintf(
-		"printf '%%s\\n' %s > %s; trap 'rm -f %s' EXIT; sleep 3600",
-		shellQuote(ownerLine), shellQuote(owner), shellQuote(owner),
-	)
+	return acquireTransferLease(c, device, leaseWaitTimeout)
+}
+
+// leaseWaitTimeout matches the Python client's remote_lock timeout.
+var leaseWaitTimeout = 45 * time.Second
+
+// leaseCommand starts the long-lived lease session; tests replace it.
+var leaseCommand = func(c *Client) *exec.Cmd {
 	builder := c.Builder()
 	command := append([]string{"ssh"}, builder.Options()...)
-	remote := "flock -x " + shellQuote(lock) + " -c " + shellQuote(inner)
-	command = append(command, builder.Target(), remote)
-	ctx, cancel := context.WithCancel(context.Background())
-	cmd := exec.CommandContext(ctx, command[0], command[1:]...)
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	if err := cmd.Start(); err != nil {
-		cancel()
+	command = append(command, builder.Target(), "exec "+shellQuote(c.script())+" --transfer-wait")
+	return exec.Command(command[0], command[1:]...)
+}
+
+func acquireTransferLease(c *Client, device string, timeout time.Duration) (func(), error) {
+	cmd := leaseCommand(c)
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
 		return nil, err
 	}
-	done := make(chan error, 1)
-	go func() { done <- cmd.Wait() }()
-	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) {
-		select {
-		case err := <-done:
-			cancel()
-			return nil, fmt.Errorf("lease NAS non acquisito: %w: %s", err, stderr.String())
-		default:
-		}
-		output, err := c.Run([]string{"cat", owner}, nil, 3*time.Second)
-		if err == nil && strings.HasPrefix(strings.TrimSpace(string(output)), device+"|") {
-			return func() { cancel(); <-done }, nil
-		}
-		time.Sleep(150 * time.Millisecond)
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, err
 	}
-	cancel()
-	return nil, fmt.Errorf("timeout acquisizione lease NAS: %s", stderr.String())
+	// A pipe, not a bytes.Buffer: with a buffer Wait() also waits for every
+	// process sharing stderr, e.g. an ssh ControlMaster forked by this call.
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return nil, err
+	}
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("lease NAS non avviato: %w", err)
+	}
+	var stderrText strings.Builder
+	var stderrMu sync.Mutex
+	go func() {
+		buffer := make([]byte, 4096)
+		for {
+			n, readErr := stderr.Read(buffer)
+			if n > 0 && stderrText.Len() < 8192 {
+				stderrMu.Lock()
+				stderrText.Write(buffer[:n])
+				stderrMu.Unlock()
+			}
+			if readErr != nil {
+				return
+			}
+		}
+	}()
+	done := make(chan error, 1)
+	waited := false
+	wait := func(limit time.Duration) bool {
+		if waited {
+			return true
+		}
+		select {
+		case <-done:
+			waited = true
+			return true
+		case <-time.After(limit):
+			return false
+		}
+	}
+	lines := make(chan string, 4)
+	go func() {
+		reader := bufio.NewReader(stdout)
+		for {
+			line, readErr := reader.ReadString('\n')
+			if strings.TrimSpace(line) != "" {
+				lines <- strings.TrimSpace(line)
+			}
+			if readErr != nil {
+				close(lines)
+				done <- cmd.Wait()
+				return
+			}
+		}
+	}()
+	abort := func() {
+		_ = stdin.Close()
+		if !wait(3 * time.Second) {
+			_ = cmd.Process.Kill()
+			wait(5 * time.Second)
+		}
+	}
+	host, _ := os.Hostname()
+	if !regexp.MustCompile(`^[A-Za-z0-9._:-]{1,128}$`).MatchString(host) {
+		host = "unknown"
+	}
+	payload := fmt.Sprintf("TRANSFER_WAIT_V1\x00%s\x00%d\x00%s\x00%s\x00", device, 0, leaseRequestID(), host)
+	if _, err := io.WriteString(stdin, payload); err != nil {
+		abort()
+		return nil, fmt.Errorf("lease NAS non richiesto: %w", err)
+	}
+	select {
+	case line, ok := <-lines:
+		if ok && line == "NASBOX_LOCKED" {
+			var once sync.Once
+			return func() {
+				once.Do(func() {
+					_ = stdin.Close()
+					if !wait(10 * time.Second) {
+						_ = cmd.Process.Kill()
+						wait(5 * time.Second)
+					}
+				})
+			}, nil
+		}
+		abort()
+		stderrMu.Lock()
+		detail := strings.TrimSpace(stderrText.String())
+		stderrMu.Unlock()
+		if detail == "" {
+			detail = line
+		}
+		return nil, fmt.Errorf("lease NAS non acquisito: %s", detail)
+	case <-time.After(timeout):
+		abort()
+		return nil, fmt.Errorf("lease NAS occupato da un altro PC: riprovo più tardi")
+	}
+}
+
+func leaseRequestID() string {
+	buffer := make([]byte, 16)
+	if _, err := rand.Read(buffer); err != nil {
+		return fmt.Sprintf("go-%d", time.Now().UnixNano())
+	}
+	return hex.EncodeToString(buffer)
 }
 
 func (c *Client) script() string { return c.cfg.RemoteScript() }
@@ -850,26 +949,9 @@ func (c *Client) JournalAppend(
 	if len(puts) == 0 {
 		return true, nil
 	}
-	useV3 := c.cfg.Bool("remote_causal_versions_available")
-	fields := [][]byte{[]byte("JOURNAL_V3")}
-	if !useV3 {
-		fields = [][]byte{[]byte("JOURNAL_V2")}
-	}
-	fields = append(fields,
-		[]byte(repositoryID), []byte(txid), []byte(device),
-		[]byte(fmt.Sprint(time.Now().Unix())), []byte(fmt.Sprint(len(puts))),
-	)
-	for _, put := range puts {
-		fields = append(fields,
-			[]byte("PUT"), []byte(put.Path), []byte(put.Digest),
-			[]byte(fmt.Sprint(put.Size)), []byte(fmt.Sprint(put.MTimeNS)),
-		)
-		if useV3 {
-			fields = append(fields, []byte(put.Causal))
-		}
-	}
 	_, err := c.RunLocked(
-		[]string{c.script(), "--journal-append"}, nulJoin(fields), device, 5*time.Minute,
+		[]string{c.script(), "--journal-append"},
+		c.journalPayload(repositoryID, txid, device, puts), device, 5*time.Minute,
 	)
 	return err == nil, err
 }

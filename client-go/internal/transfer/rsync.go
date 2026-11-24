@@ -7,7 +7,9 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -35,6 +37,9 @@ type Transfer struct {
 	cfg    *config.Config
 	client *remote.Client
 	ctx    context.Context
+
+	// replaceClient overrides the NAS calls of UploadReplace in tests.
+	replaceClient replaceRemote
 }
 
 func New(cfg *config.Config, client *remote.Client) *Transfer {
@@ -90,9 +95,14 @@ func (t *Transfer) DownloadPath(relative string) error {
 	if err != nil {
 		return err
 	}
+	// The NAS runs rsync 3.1.2, which rejects --mkpath (rsync >= 3.2.3): the
+	// local parent directory is created here instead.
+	if err := os.MkdirAll(filepath.Dir(local), 0o755); err != nil {
+		return err
+	}
 	remotePath := strings.TrimSuffix(t.cfg.RemotePrefix(), "/") + "/" + relative
 	args := []string{
-		"-a", "--partial", "--partial-dir=.sync-partial", "--mkpath",
+		"-a", "--partial", "--partial-dir=.sync-partial",
 		"--ignore-times", "--protect-args", "-e", t.sshArgs(),
 		t.remoteSpec(remotePath), local,
 	}
@@ -112,7 +122,10 @@ func (t *Transfer) BuildCommand(paths []string, upload bool) ([]string, []byte) 
 	remoteSpec := t.remoteSpec(strings.TrimSuffix(t.cfg.RemotePrefix(), "/") + "/")
 	args := []string{
 		"-a", "--partial", "--partial-dir=.sync-partial", "--fuzzy",
-		"--delay-updates", "--mkpath", "--ignore-times", "--protect-args",
+		// No --mkpath: rsync forwards options to the NAS (rsync 3.1.2), which
+		// aborts on unknown ones. --files-from implies --relative, so parent
+		// directories are created anyway.
+		"--delay-updates", "--ignore-times", "--protect-args",
 		"--files-from=-", "--from0", "-e", t.sshArgs(),
 	}
 	if t.shouldCompress() {
