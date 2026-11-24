@@ -3711,6 +3711,10 @@
     "en": "Files synced: {done} of {total}",
     "it": "File sincronizzati: {done} di {total}"
   },
+  "status.cancel_tooltip": {
+    "en": "Stop the current transfer",
+    "it": "Interrompi il trasferimento in corso"
+  },
   "status.config_local_folder": {
     "en": "local folder",
     "it": "cartella locale"
@@ -4895,9 +4899,17 @@
     "en": "Audit",
     "it": "Audit"
   },
+  "ui.action.cancel": {
+    "en": "Cancel transfer",
+    "it": "Annulla trasferimento"
+  },
   "ui.action.check_update": {
     "en": "Check for updates",
     "it": "Controlla aggiornamenti"
+  },
+  "ui.action.confirm_delete": {
+    "en": "Confirm deletions",
+    "it": "Conferma cancellazioni"
   },
   "ui.action.details": {
     "en": "Open details",
@@ -4907,6 +4919,14 @@
     "en": "Open the section that explains this status",
     "it": "Apri la sezione che spiega questo stato"
   },
+  "ui.action.download": {
+    "en": "Download selected",
+    "it": "Scarica selezionato"
+  },
+  "ui.action.keep_both": {
+    "en": "Keep both",
+    "it": "Mantieni entrambi"
+  },
   "ui.action.preview": {
     "en": "Preview changes",
     "it": "Anteprima modifiche"
@@ -4915,6 +4935,14 @@
     "en": "Preview",
     "it": "Anteprima"
   },
+  "ui.action.prune": {
+    "en": "Prune history",
+    "it": "Pulisci storico"
+  },
+  "ui.action.remote_restore": {
+    "en": "Restore NAS version",
+    "it": "Ripristina versione NAS"
+  },
   "ui.action.resolve": {
     "en": "Resolve with selected version",
     "it": "Risolvi con la versione selezionata"
@@ -4922,6 +4950,10 @@
   "ui.action.restore": {
     "en": "Restore selected",
     "it": "Ripristina selezionato"
+  },
+  "ui.action.server_check": {
+    "en": "Check server",
+    "it": "Controlla server"
   },
   "ui.action.sync_folders": {
     "en": "Sync external folders",
@@ -4942,6 +4974,10 @@
   "ui.action.undo_short": {
     "en": "Undo",
     "it": "Annulla"
+  },
+  "ui.action.update_install": {
+    "en": "Install Go update",
+    "it": "Installa aggiornamento Go"
   },
   "ui.dialog.confirm_delete_body": {
     "en": "Permanently delete ‘{path}’ from the NAS? (recoverable from history)",

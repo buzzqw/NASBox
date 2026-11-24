@@ -82,6 +82,36 @@ func TestNavigationSwitchesAreaAndTab(t *testing.T) {
 	}
 }
 
+func TestEveryNavigationButtonSwitchesSection(t *testing.T) {
+	c := newTestClient(t)
+	for _, section := range []sectionID{
+		sectionActivity, sectionFiles, sectionNAS, sectionSettings, sectionStatus,
+	} {
+		item := c.navs[section]
+		if item == nil || item.Button == nil {
+			t.Fatalf("missing nav button for %v", section)
+		}
+		item.Button.Tapped(&fyne.PointEvent{Position: fyne.NewPos(10, 10)})
+		if c.active != section {
+			t.Fatalf("tap on %v left active=%v", section, c.active)
+		}
+	}
+}
+
+func TestStatusActionsAreEnabled(t *testing.T) {
+	c := newTestClient(t)
+	view := c.statusView()
+	if view == nil {
+		t.Fatal("no status view")
+	}
+	if c.pauseBtnStatus == nil || c.detailsBtn == nil {
+		t.Fatal("status actions missing")
+	}
+	if c.pauseBtnStatus.Disabled() || c.detailsBtn.Button.Disabled() {
+		t.Fatal("status actions are disabled")
+	}
+}
+
 func TestStatusBannerSemantics(t *testing.T) {
 	c := newTestClient(t)
 	c.applyStatusUI(statusBlocked, "motivo blocco")

@@ -41,7 +41,7 @@ func (t *nasTheme) loadLight() {
 	t.set(map[fyne.ThemeColorName]color.Color{
 		theme.ColorNameBackground:          nr(0xf6, 0xf8, 0xfb),
 		theme.ColorNameButton:              nr(0xff, 0xff, 0xff),
-		theme.ColorNameDisabled:            nr(0xcb, 0xd5, 0xe1),
+		theme.ColorNameDisabled:            nr(0x94, 0xa3, 0xb8),
 		theme.ColorNameDisabledButton:      nr(0xee, 0xf2, 0xf6),
 		theme.ColorNameError:               nr(0xdc, 0x26, 0x26),
 		theme.ColorNameForeground:          nr(0x1e, 0x29, 0x3b),
@@ -55,7 +55,7 @@ func (t *nasTheme) loadLight() {
 		theme.ColorNameInputBorder:         nr(0xcb, 0xd5, 0xe1),
 		theme.ColorNameMenuBackground:      nr(0xff, 0xff, 0xff),
 		theme.ColorNameOverlayBackground:   nr(0xff, 0xff, 0xff),
-		theme.ColorNamePlaceHolder:         nr(0x64, 0x74, 0x8b),
+		theme.ColorNamePlaceHolder:         nr(0x47, 0x55, 0x69),
 		theme.ColorNamePressed:             color.NRGBA{R: 0x0f, G: 0x17, B: 0x2a, A: 0x1f},
 		theme.ColorNameScrollBar:           color.NRGBA{R: 0x0f, G: 0x17, B: 0x2a, A: 0x80},
 		theme.ColorNameScrollBarBackground: nr(0xf1, 0xf5, 0xf9),
@@ -68,7 +68,7 @@ func (t *nasTheme) loadLight() {
 		theme.ColorNamePrimary:   nr(0x33, 0x41, 0x55),
 		theme.ColorNameHyperlink: nr(0x25, 0x63, 0xeb),
 		theme.ColorNameFocus:     color.NRGBA{R: 0x33, G: 0x41, B: 0x55, A: 0x45},
-		theme.ColorNameSelection: nr(0xe2, 0xe8, 0xf0),
+		theme.ColorNameSelection: nr(0xcb, 0xd5, 0xe1),
 	})
 }
 

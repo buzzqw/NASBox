@@ -20,6 +20,7 @@ import (
 
 	"nasbox-go/internal/config"
 	"nasbox-go/internal/conflicts"
+	"nasbox-go/internal/deletesafety"
 	"nasbox-go/internal/engine"
 	"nasbox-go/internal/history"
 	"nasbox-go/internal/i18n"
@@ -63,9 +64,11 @@ const (
 )
 
 type navButton struct {
-	*hintButton
-	bg      *canvas.Rectangle
-	section sectionID
+	Button     *widget.Button
+	bg         *canvas.Rectangle
+	accent     *canvas.Rectangle
+	buttonView fyne.CanvasObject
+	section    sectionID
 }
 
 type clientApp struct {
@@ -166,6 +169,7 @@ func Run(cfg *config.Config, store *state.Store) {
 
 	c.setHint = c.setHintText
 	window.SetContent(c.buildRoot())
+	c.showSection(sectionStatus)
 	window.SetCloseIntercept(func() { window.Hide() })
 	c.installTray()
 
@@ -293,15 +297,15 @@ func (c *clientApp) buildSidebar() fyne.CanvasObject {
 
 	items := []fyne.CanvasObject{
 		c.makeNav(sectionStatus, tr("main_window.tab_status", nil), theme.HomeIcon(),
-			tr("main_window.tab_status_tooltip", nil)),
+			tr("main_window.tab_status_tooltip", nil)).buttonView,
 		c.makeNav(sectionActivity, tr("ui.nav.activity", nil), theme.ListIcon(),
-			tr("main_window.tab_transfers_tooltip", nil)),
+			tr("main_window.tab_transfers_tooltip", nil)).buttonView,
 		c.makeNav(sectionFiles, tr("ui.nav.files", nil), theme.FolderOpenIcon(),
-			tr("main_window.tab_browse_tooltip", nil)),
+			tr("main_window.tab_browse_tooltip", nil)).buttonView,
 		c.makeNav(sectionNAS, tr("ui.nav.nas", nil), theme.ComputerIcon(),
-			tr("main_window.tab_metrics_tooltip", nil)),
+			tr("main_window.tab_metrics_tooltip", nil)).buttonView,
 		c.makeNav(sectionSettings, tr("main_window.tab_settings", nil), theme.SettingsIcon(),
-			tr("main_window.tab_settings_tooltip", nil)),
+			tr("main_window.tab_settings_tooltip", nil)).buttonView,
 	}
 	lang := container.NewHBox(
 		c.smallButton("IT", "Italiano", func() { c.setLanguage("it") }),
@@ -331,9 +335,20 @@ func (c *clientApp) smallButton(text, hint string, onTap func()) fyne.CanvasObje
 func (c *clientApp) makeNav(id sectionID, label string, icon fyne.Resource, hint string) *navButton {
 	bg := canvas.NewRectangle(colorTransparent)
 	bg.CornerRadius = 8
-	button := newHintButton(label, icon, hint, widget.LowImportance,
-		func() { c.showSection(id) }, c.setHint)
-	item := &navButton{hintButton: button, bg: bg, section: id}
+	accent := canvas.NewRectangle(colorTransparent)
+	accent.SetMinSize(fyne.NewSize(4, 32))
+	// Navigation uses a native Button: Fyne routes taps to it directly, without
+	// a wrapper that could swallow the Tapped callback.
+	button := widget.NewButtonWithIcon(label, icon, func() { c.showSection(id) })
+	button.Importance = widget.LowImportance
+	button.SetText(label)
+	_ = hint
+	item := &navButton{
+		Button: button, bg: bg, accent: accent, section: id,
+	}
+	// Keep the object returned as a single layout unit: the accent bar is
+	// always visible when this section is active.
+	item.buttonView = container.NewBorder(nil, nil, accent, nil, button)
 	c.navs[id] = item
 	return item
 }
@@ -391,12 +406,15 @@ func (c *clientApp) showSection(id sectionID) {
 	for section, item := range c.navs {
 		if section == id {
 			item.bg.FillColor = c.tint(theme.ColorNameSelection)
+			item.accent.FillColor = c.tint(theme.ColorNamePrimary)
 			item.Button.Importance = widget.HighImportance
 		} else {
 			item.bg.FillColor = colorTransparent
+			item.accent.FillColor = colorTransparent
 			item.Button.Importance = widget.LowImportance
 		}
 		item.bg.Refresh()
+		item.accent.Refresh()
 		item.Button.Refresh()
 	}
 }
@@ -453,6 +471,10 @@ func (c *clientApp) statusView() fyne.CanvasObject {
 		newHintButton(tr("ui.action.undo_short", nil), theme.ContentUndoIcon(),
 			tr("ui.action.undo_hint", nil), widget.MediumImportance, c.onUndo, c.setHint),
 		c.detailsBtn,
+		newHintButton(tr("ui.action.confirm_delete", nil), theme.ConfirmIcon(),
+			tr("status.confirm_deletes_tooltip", nil), widget.DangerImportance, c.onConfirmDelete, c.setHint),
+		newHintButton(tr("ui.action.cancel", nil), theme.CancelIcon(),
+			tr("status.cancel_tooltip", nil), widget.LowImportance, c.onCancel, c.setHint),
 	)
 
 	numberTracked, trackedTile := c.statTile("—", tr("assurance.stat_tracked", nil))
@@ -601,6 +623,8 @@ func (c *clientApp) filesView() fyne.CanvasObject {
 					"", widget.LowImportance, c.refreshBrowse, c.setHint),
 				c.deleteBtn,
 				c.renameBtn,
+				newHintButton(tr("ui.action.download", nil), theme.DownloadIcon(),
+					"", widget.MediumImportance, c.onBrowseDownload, c.setHint),
 			),
 		),
 		nil, nil, nil, container.NewVScroll(c.browseList),
@@ -615,6 +639,8 @@ func (c *clientApp) filesView() fyne.CanvasObject {
 			newHintButton(tr("conflicts.refresh_btn", nil), theme.ViewRefreshIcon(),
 				"", widget.LowImportance, c.refreshConflicts, c.setHint),
 			c.resolveBtn,
+			newHintButton(tr("ui.action.keep_both", nil), theme.ContentCopyIcon(),
+				"", widget.MediumImportance, c.onKeepBoth, c.setHint),
 		),
 		nil, nil, container.NewVScroll(c.confList),
 	)
@@ -628,6 +654,10 @@ func (c *clientApp) filesView() fyne.CanvasObject {
 			newHintButton(tr("history.refresh_btn", nil), theme.ViewRefreshIcon(),
 				"", widget.LowImportance, c.refreshHistory, c.setHint),
 			c.restoreBtn,
+			newHintButton(tr("ui.action.remote_restore", nil), theme.ContentRedoIcon(),
+				"", widget.MediumImportance, c.onRemoteRestore, c.setHint),
+			newHintButton(tr("ui.action.prune", nil), theme.DeleteIcon(),
+				"", widget.LowImportance, c.onPrune, c.setHint),
 		),
 		nil, nil, container.NewVScroll(c.histList),
 	)
@@ -653,6 +683,8 @@ func (c *clientApp) nasView() fyne.CanvasObject {
 			fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), c.nasLabel), ""),
 		c.surface(container.NewVBox(widget.NewLabelWithStyle(tr("status.nas_overview_title", nil),
 			fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), c.monitorDevicesLabel), ""),
+		newHintButton(tr("ui.action.server_check", nil), theme.ViewRefreshIcon(),
+			"", widget.MediumImportance, c.onServerCheck, c.setHint),
 	)
 	devicesPane := container.NewVBox(
 		c.sectionTitle(tr("devices.title", nil), tr("a11y.devices_label", nil)),
@@ -727,6 +759,10 @@ func (c *clientApp) settingsView() fyne.CanvasObject {
 			widget.NewLabel(fmt.Sprintf("%s: %s", tr("settings.info_min_server_label", nil), valueOrDash(c.cfg.String("min_server_version")))),
 			newHintButton(tr("ui.action.check_update", nil), theme.ViewRefreshIcon(),
 				tr("main_window.version_tooltip", nil), widget.MediumImportance, c.onCheckUpdate, c.setHint),
+			newHintButton(tr("ui.action.update_install", nil), theme.ViewRefreshIcon(),
+				"", widget.HighImportance, c.onInstallUpdate, c.setHint),
+			newHintButton(tr("ui.action.confirm_delete", nil), theme.ConfirmIcon(),
+				tr("status.confirm_deletes_tooltip", nil), widget.DangerImportance, c.onConfirmDelete, c.setHint),
 		), ""),
 	)
 	c.settingsTabs = container.NewAppTabs(
@@ -1302,6 +1338,133 @@ func (c *clientApp) setLanguage(language string) {
 	c.appendLog(tr("settings.language_title", nil) + ": " + language)
 	dialog.ShowInformation(tr("settings.language_title", nil),
 		tr("settings.language_note", nil), c.window)
+}
+
+func (c *clientApp) onConfirmDelete() {
+	until, err := deletesafety.Shared().Confirm(c.cfg)
+	if err != nil {
+		c.appendLog("Conferma cancellazioni non riuscita: " + err.Error())
+		return
+	}
+	c.appendLog("Cancellazioni di massa confermate fino a " + time.Unix(int64(until), 0).Format("15:04:05"))
+}
+
+func (c *clientApp) onCancel() {
+	c.runner.Cancel()
+}
+
+func (c *clientApp) onBrowseDownload() {
+	if c.selectedBrowse == "" {
+		c.appendLog("Seleziona prima un file dalla lista")
+		return
+	}
+	relative := c.selectedBrowse
+	if c.browsePath != "" {
+		relative = c.browsePath + "/" + relative
+	}
+	go func() {
+		if err := c.transfers.DownloadPath(relative); err != nil {
+			c.appendLog("Download non riuscito: " + err.Error())
+			return
+		}
+		c.appendLog("Scaricato: " + relative)
+	}()
+}
+
+func (c *clientApp) onKeepBoth() {
+	if c.selectedConflict == "" {
+		c.appendLog("Seleziona prima una copia conflitto")
+		return
+	}
+	go func() {
+		for _, group := range c.confGroups {
+			for _, candidate := range group.Candidates {
+				if candidate != c.selectedConflict {
+					continue
+				}
+				kept, err := conflicts.KeepBoth(c.cfg.LocalRoot(), group, candidate)
+				if err != nil {
+					c.appendLog("Keep both non riuscito: " + err.Error())
+				} else {
+					c.appendLog("Versione conservata: " + kept)
+					c.selectedConflict = ""
+					c.refreshConflicts()
+				}
+				return
+			}
+		}
+	}()
+}
+
+func (c *clientApp) onRemoteRestore() {
+	dialog.ShowEntryDialog("Ripristina versione NAS",
+		"Inserisci percorso e suffisso separati da | (percorso|2026-11-24--07-00-00-000000Z)",
+		func(value string) {
+			parts := strings.SplitN(value, "|", 2)
+			if len(parts) != 2 {
+				c.appendLog("Formato non valido: percorso|suffisso")
+				return
+			}
+			go func() {
+				status, err := c.client.RestoreVersion(strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1]), c.store.DeviceID())
+				if err != nil {
+					c.appendLog("Ripristino remoto fallito: " + err.Error())
+					return
+				}
+				c.appendLog("Ripristino remoto: " + status)
+			}()
+		}, c.window)
+}
+
+func (c *clientApp) onPrune() {
+	go func() {
+		removed, err := history.Prune(c.cfg.Int("retention_days_local"))
+		if err != nil {
+			c.appendLog("Pulizia storico fallita: " + err.Error())
+			return
+		}
+		c.appendLog("Rimossi " + fmt.Sprint(removed) + " file dallo storico locale")
+		c.refreshHistory()
+	}()
+}
+
+func (c *clientApp) onServerCheck() {
+	go func() {
+		minimum := c.cfg.String("min_server_version")
+		if minimum == "" {
+			minimum = "3.16.0"
+		}
+		outdated, current, err := c.client.ServerOutdated(minimum)
+		if err != nil {
+			c.appendLog("Controllo server fallito: " + err.Error())
+			return
+		}
+		if outdated {
+			c.appendLog("Server obsoleto: " + current + " (richiesto " + minimum + ")")
+		} else {
+			c.appendLog("Server ok: " + current)
+		}
+	}()
+}
+
+func (c *clientApp) onInstallUpdate() {
+	go func() {
+		binary, err := os.Executable()
+		if err != nil {
+			c.appendLog("Installazione aggiornamento fallita: " + err.Error())
+			return
+		}
+		applied, versionName, err := update.Apply(c.cfg, c.client, binary)
+		if err != nil {
+			c.appendLog("Installazione aggiornamento fallita: " + err.Error())
+			return
+		}
+		if applied {
+			c.appendLog("Aggiornato a " + versionName + " — riavvia il client")
+		} else {
+			c.appendLog("Nessun aggiornamento disponibile")
+		}
+	}()
 }
 
 func (c *clientApp) setTheme(value string) {
