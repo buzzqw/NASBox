@@ -23,9 +23,11 @@ var colorTransparent = color.Transparent
 func (c *clientApp) surface(content fyne.CanvasObject, accent fyne.ThemeColorName) fyne.CanvasObject {
 	bg := canvas.NewRectangle(c.tint(theme.ColorNameHeaderBackground))
 	bg.CornerRadius = 12
+	bg.StrokeColor = c.tint(theme.ColorNameSeparator)
+	bg.StrokeWidth = 1
 	if accent != "" {
 		bg.StrokeColor = c.tint(accent)
-		bg.StrokeWidth = 1
+		bg.StrokeWidth = 2
 	}
 	return container.NewStack(bg, container.NewPadded(content))
 }
@@ -77,6 +79,38 @@ func (c *clientApp) statTile(value, caption string) (*widget.Label, fyne.CanvasO
 // hintButton is a Button that reports a short explanation in the window's
 // hint strip on hover. Fyne 2.7 has no tooltip widget, so this is the closest
 // equivalent and keeps the interface discoverable without popups.
+// hintArea adds hover descriptions to any widget without hiding its Tapped
+// callback (Fyne 2.7 has no native tooltip).
+type hintArea struct {
+	fyne.Widget
+	hint    string
+	setHint func(string)
+}
+
+func (h *hintArea) MouseIn(*desktop.MouseEvent) {
+	if h.setHint != nil {
+		h.setHint(h.hint)
+	}
+}
+
+func (h *hintArea) MouseMoved(*desktop.MouseEvent) {}
+
+func (h *hintArea) MouseOut() {
+	if h.setHint != nil {
+		h.setHint("")
+	}
+}
+
+func (h *hintArea) Tapped(event *fyne.PointEvent) {
+	if target, ok := h.Widget.(fyne.Tappable); ok {
+		target.Tapped(event)
+	}
+}
+
+func withHint(object fyne.Widget, hint string, setHint func(string)) fyne.CanvasObject {
+	return &hintArea{Widget: object, hint: hint, setHint: setHint}
+}
+
 type hintButton struct {
 	*widget.Button
 	hint    string
@@ -86,6 +120,9 @@ type hintButton struct {
 func newHintButton(
 	label string, icon fyne.Resource, hint string, importance widget.Importance, onTap func(), setHint func(string),
 ) *hintButton {
+	if hint == "" {
+		hint = label
+	}
 	var button *widget.Button
 	if icon == nil {
 		button = widget.NewButton(label, onTap)
@@ -131,14 +168,14 @@ func newTextList(length func() int, update func(int, *widget.Label)) *widget.Lis
 // note is a wrapping secondary label. Long notes must never blow up the
 // minimum window width at 900px.
 func (c *clientApp) note(text string) *widget.Label {
-	label := widget.NewLabelWithStyle(text, fyne.TextAlignLeading, fyne.TextStyle{Italic: true})
+	label := widget.NewLabelWithStyle(text, fyne.TextAlignLeading, fyne.TextStyle{})
 	label.Wrapping = fyne.TextWrapWord
 	return label
 }
 
 // placeholder is a short, muted line used in empty states.
 func placeholder(text string) fyne.CanvasObject {
-	label := widget.NewLabelWithStyle(text, fyne.TextAlignCenter, fyne.TextStyle{Italic: true})
+	label := widget.NewLabelWithStyle(text, fyne.TextAlignCenter, fyne.TextStyle{})
 	label.Wrapping = fyne.TextWrapWord
 	return container.NewPadded(label)
 }

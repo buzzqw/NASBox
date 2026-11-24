@@ -6,6 +6,7 @@ import (
 	_ "embed"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -89,6 +90,7 @@ type clientApp struct {
 	active  sectionID
 
 	headerTitle *widget.Label
+	headerHint  *widget.Label
 	pillLabel   *widget.Label
 	pillBG      *canvas.Rectangle
 	hintLabel   *widget.Label
@@ -110,8 +112,11 @@ type clientApp struct {
 	pauseBtnStatus *widget.Button
 	detailsBtn     *hintButton
 	logLines       []string
+	transferLines  []string
+	activityLines  []string
 	logList        *widget.List
 	transferList   *widget.List
+	activityList   *widget.List
 	confGroups     []conflicts.Group
 	confList       *widget.List
 	versions       []history.Version
@@ -264,7 +269,9 @@ func (c *clientApp) buildHeader() fyne.CanvasObject {
 	brand := widget.NewLabelWithStyle(version.AppName, fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
 	c.headerTitle = widget.NewLabelWithStyle(tr("main_window.tab_status", nil),
 		fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
-	left := container.NewVBox(brand, c.headerTitle)
+	c.headerHint = widget.NewLabel("Passa il mouse su un pulsante per la descrizione")
+	c.headerHint.Wrapping = fyne.TextTruncate
+	left := container.NewVBox(brand, c.headerTitle, c.headerHint)
 
 	c.pillLabel = widget.NewLabel("")
 	c.pillBG = canvas.NewRectangle(c.tint(theme.ColorNamePrimary))
@@ -275,7 +282,10 @@ func (c *clientApp) buildHeader() fyne.CanvasObject {
 		tr("status.sync_now_tooltip", nil), widget.HighImportance, c.onSync, c.setHint)
 	c.pauseBtn = newHintButton(labelPause(c.runner.IsPaused()), theme.MediaPauseIcon(),
 		tr("status.pause_tooltip", nil), widget.MediumImportance, c.onPause, c.setHint).Button
-	right := container.NewHBox(pill, syncButton, c.pauseBtn)
+	right := container.NewHBox(
+		pill, syncButton,
+		withHint(c.pauseBtn, tr("status.pause_tooltip", nil), c.setHint),
+	)
 	return c.surface(container.NewBorder(nil, nil, left, right, nil), "")
 }
 
@@ -329,6 +339,9 @@ func (c *clientApp) buildSidebar() fyne.CanvasObject {
 }
 
 func (c *clientApp) smallButton(text, hint string, onTap func()) fyne.CanvasObject {
+	if hint == "" {
+		hint = text
+	}
 	return newHintButton(text, nil, hint, widget.LowImportance, onTap, c.setHint)
 }
 
@@ -348,7 +361,9 @@ func (c *clientApp) makeNav(id sectionID, label string, icon fyne.Resource, hint
 	}
 	// Keep the object returned as a single layout unit: the accent bar is
 	// always visible when this section is active.
-	item.buttonView = container.NewBorder(nil, nil, accent, nil, button)
+	item.buttonView = container.NewBorder(
+		nil, nil, accent, nil, withHint(button, hint, c.setHint),
+	)
 	c.navs[id] = item
 	return item
 }
@@ -529,13 +544,21 @@ func (c *clientApp) buildBanner() fyne.CanvasObject {
 }
 
 func (c *clientApp) activityView() fyne.CanvasObject {
+	c.activityList = newTextList(
+		func() int { return len(c.activityLines) },
+		func(id int, label *widget.Label) { label.SetText(c.activityLines[id]) },
+	)
 	c.transferList = newTextList(
-		func() int { return len(c.logLines) },
-		func(id int, label *widget.Label) { label.SetText(c.logLines[id]) },
+		func() int { return len(c.transferLines) },
+		func(id int, label *widget.Label) { label.SetText(c.transferLines[id]) },
 	)
 	c.logList = newTextList(
 		func() int { return len(c.logLines) },
 		func(id int, label *widget.Label) { label.SetText(c.logLines[id]) },
+	)
+	activityPane := container.NewBorder(
+		container.NewVBox(c.sectionTitle("Attività recente", "Sincronizzazioni, azioni e decisioni")),
+		nil, nil, nil, container.NewVScroll(c.activityList),
 	)
 	transfers := container.NewBorder(
 		container.NewVBox(
@@ -545,11 +568,12 @@ func (c *clientApp) activityView() fyne.CanvasObject {
 	)
 	logPane := container.NewBorder(
 		container.NewVBox(
-			c.sectionTitle(tr("main_window.tab_log", nil), tr("log.filter_tooltip", nil)),
+			c.sectionTitle(tr("main_window.tab_log", nil), "Eventi grezzi, errori e dettagli tecnici"),
 		),
 		nil, nil, nil, container.NewVScroll(c.logList),
 	)
 	c.activityTabs = container.NewAppTabs(
+		container.NewTabItem("Attività", activityPane),
 		container.NewTabItem(tr("main_window.tab_transfers", nil), transfers),
 		container.NewTabItem(tr("main_window.tab_log", nil), logPane),
 	)
@@ -742,13 +766,18 @@ func (c *clientApp) settingsView() fyne.CanvasObject {
 		c.sectionTitle(tr("ui.group.folders", nil), tr("mirrors.authority_note", nil)),
 		c.surface(container.NewVBox(
 			widget.NewLabelWithStyle(tr("main_window.tab_mirrors", nil), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+			c.note(tr("ui.dialog.mirror_note", nil)),
 			c.mirrorLabel,
-			container.NewHBox(newHintButton(tr("ui.action.sync_folders", nil), theme.ViewRefreshIcon(),
-				tr("mirrors.sync_now_tooltip", nil), widget.MediumImportance, c.onMirrorSync, c.setHint)),
+			container.NewHBox(
+				newHintButton(tr("ui.action.sync_folders", nil), theme.ViewRefreshIcon(),
+					tr("mirrors.sync_now_tooltip", nil), widget.MediumImportance, c.onMirrorSync, c.setHint),
+				newHintButton(tr("ui.action.add_mirror", nil), theme.ContentAddIcon(),
+					"", widget.HighImportance, c.onAddMirror, c.setHint),
+			),
 		), ""),
 		c.surface(container.NewVBox(
 			widget.NewLabelWithStyle(tr("dialogs.selective.title", nil), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-			c.note(tr("dialogs.selective.intro", nil)),
+			c.note(tr("ui.hint.selective", nil)),
 			container.NewVScroll(c.selectiveList),
 		), ""),
 	)
@@ -840,9 +869,25 @@ func looksOffline(message string) bool {
 }
 
 func (c *clientApp) appendLine(line string) {
-	c.logLines = append([]string{time.Now().Format("15:04:05") + "  " + line}, c.logLines...)
+	stamp := time.Now().Format("15:04:05") + "  "
+	entry := stamp + line
+	c.logLines = append([]string{entry}, c.logLines...)
 	if len(c.logLines) > 300 {
 		c.logLines = c.logLines[:300]
+	}
+	c.activityLines = append([]string{entry}, c.activityLines...)
+	if len(c.activityLines) > 300 {
+		c.activityLines = c.activityLines[:300]
+	}
+	lower := strings.ToLower(line)
+	if strings.Contains(lower, "sync") || strings.Contains(lower, "sincron") ||
+		strings.Contains(lower, "caricat") || strings.Contains(lower, "scaricat") ||
+		strings.Contains(lower, "upload") || strings.Contains(lower, "download") ||
+		strings.Contains(lower, "trasfer") {
+		c.transferLines = append([]string{entry}, c.transferLines...)
+		if len(c.transferLines) > 300 {
+			c.transferLines = c.transferLines[:300]
+		}
 	}
 }
 
@@ -855,6 +900,9 @@ func (c *clientApp) appendLog(line string) {
 		if c.transferList != nil {
 			c.transferList.Refresh()
 		}
+		if c.activityList != nil {
+			c.activityList.Refresh()
+		}
 		if c.eventLabel != nil {
 			c.eventLabel.SetText(line)
 		}
@@ -863,8 +911,14 @@ func (c *clientApp) appendLog(line string) {
 
 func (c *clientApp) setHintText(text string) {
 	fyne.Do(func() {
+		if text == "" {
+			text = "Passa il mouse su un pulsante per la descrizione"
+		}
 		if c.hintLabel != nil {
 			c.hintLabel.SetText(text)
+		}
+		if c.headerHint != nil {
+			c.headerHint.SetText(text)
 		}
 	})
 }
@@ -908,8 +962,8 @@ func (c *clientApp) consumeEvents() {
 // ---------------------------------------------------------------------------
 
 func (c *clientApp) refreshStats() {
-	tracked := c.store.EntryCount(c.cfg.RepositoryID())
-	undo := c.store.UndoCount(c.cfg.RepositoryID(), 24)
+	tracked := c.store.EntryCount(c.cfg.LocalRepositoryID())
+	undo := c.store.UndoCount(c.cfg.LocalRepositoryID(), 24)
 	audit := tr("audit.never", nil)
 	if reports := integrity.Load(); len(reports) > 0 {
 		last := reports[len(reports)-1]
@@ -1040,7 +1094,25 @@ func (c *clientApp) pollMetrics() {
 	if err == nil {
 		text := tr("devices.empty", nil)
 		if len(devices) > 0 {
-			text = strings.Join(devices, "\n")
+			lines := make([]string, 0, len(devices))
+			for _, raw := range devices {
+				parts := strings.Split(raw, "|")
+				if len(parts) < 3 {
+					lines = append(lines, raw)
+					continue
+				}
+				stamp := "?"
+				if seconds, err := strconv.ParseInt(parts[1], 10, 64); err == nil {
+					stamp = time.Unix(seconds, 0).Format("02/01 15:04")
+				}
+				active := ""
+				if len(parts) > 3 && parts[3] == "ACTIVE" {
+					active = " — in uso ora"
+				}
+				lines = append(lines, fmt.Sprintf("PC %s · ultima attività %s · %s operazioni%s",
+					parts[0], stamp, parts[2], active))
+			}
+			text = "Dispositivi identificati dal journal NAS:\n" + strings.Join(lines, "\n")
 		}
 		fyne.Do(func() {
 			if c.devicesLabel != nil {
@@ -1125,7 +1197,7 @@ func (c *clientApp) onPreview() {
 
 func (c *clientApp) onUndo() {
 	go func() {
-		entries, err := c.store.RecentUndo(c.cfg.RepositoryID(), 24, 500)
+		entries, err := c.store.RecentUndo(c.cfg.LocalRepositoryID(), 24, 500)
 		if err != nil || len(entries) == 0 {
 			c.appendLog(tr("status.last_problem_none", nil))
 			return
@@ -1144,7 +1216,7 @@ func (c *clientApp) onUndo() {
 		restored := 0
 		for path, status := range statuses {
 			if status == "RESTORED" {
-				_ = c.store.MarkUndoApplied(c.cfg.RepositoryID(), batchByPath[path], []string{path})
+				_ = c.store.MarkUndoApplied(c.cfg.LocalRepositoryID(), batchByPath[path], []string{path})
 				restored++
 			}
 		}
@@ -1228,25 +1300,38 @@ func (c *clientApp) onBrowseRename() {
 		return
 	}
 	current := c.selectedBrowse
-	dialog.ShowEntryDialog(tr("browse.rename_btn", nil), tr("ui.dialog.new_name", nil), func(name string) {
-		if name == "" {
-			return
-		}
-		src, dst := current, name
-		if c.browsePath != "" {
-			src = c.browsePath + "/" + src
-			dst = c.browsePath + "/" + dst
-		}
-		go func() {
-			status, err := c.client.BrowseRename(src, dst, remote.RunTimestamp(), c.store.DeviceID())
-			if err != nil {
-				c.appendLog(tr("browse.rename_failed_title", nil) + ": " + err.Error())
+	entry := widget.NewEntry()
+	entry.SetText(current)
+	content := container.NewVBox(
+		widget.NewLabel(tr("ui.dialog.new_name", nil)),
+		entry,
+		widget.NewLabel("Percorso: "+current),
+	)
+	confirm := dialog.NewCustomConfirm(
+		tr("browse.rename_btn", nil), tr("browse.rename_btn", nil), "Annulla",
+		content, func(ok bool) {
+			if !ok || strings.TrimSpace(entry.Text) == "" {
 				return
 			}
-			c.appendLog(tr("log.action.browse_rename", nil) + ": " + status)
-			c.refreshBrowse()
-		}()
-	}, c.window)
+			dst := strings.TrimSpace(entry.Text)
+			src, target := current, dst
+			if c.browsePath != "" {
+				src = c.browsePath + "/" + src
+				target = c.browsePath + "/" + dst
+			}
+			go func() {
+				status, err := c.client.BrowseRename(src, target, remote.RunTimestamp(), c.store.DeviceID())
+				if err != nil {
+					c.appendLog(tr("browse.rename_failed_title", nil) + ": " + err.Error())
+					return
+				}
+				c.appendLog(tr("log.action.browse_rename", nil) + ": " + status)
+				c.refreshBrowse()
+			}()
+		}, c.window,
+	)
+	confirm.Resize(fyne.NewSize(480, 190))
+	confirm.Show()
 }
 
 func (c *clientApp) onToggleSelective(id widget.ListItemID) {
@@ -1266,6 +1351,34 @@ func (c *clientApp) onToggleSelective(id widget.ListItemID) {
 	selective.SetExcluded(c.cfg, excluded)
 	c.selectiveList.Refresh()
 	c.appendLog(tr("settings.selective_btn", nil) + ": " + dir)
+}
+
+func (c *clientApp) onAddMirror() {
+	source := widget.NewEntry()
+	source.SetPlaceHolder(tr("ui.hint.mirror_source", nil))
+	destination := widget.NewEntry()
+	destination.SetPlaceHolder(tr("ui.hint.mirror_dest", nil))
+	content := container.NewVBox(
+		widget.NewLabel(tr("ui.hint.mirror_source", nil)), source,
+		widget.NewLabel(tr("ui.hint.mirror_dest", nil)), destination,
+	)
+	dialog.NewCustomConfirm(
+		tr("ui.action.add_mirror", nil), tr("ui.action.add_mirror", nil), "Annulla",
+		content, func(ok bool) {
+			if !ok || strings.TrimSpace(source.Text) == "" || strings.TrimSpace(destination.Text) == "" {
+				return
+			}
+			values, _ := c.cfg.Get("mirrors").([]any)
+			values = append(values, map[string]any{
+				"source":  strings.TrimSpace(source.Text),
+				"dest":    strings.TrimSpace(destination.Text),
+				"enabled": true,
+			})
+			c.cfg.Set("mirrors", values, true)
+			c.appendLog("Cartella esterna aggiunta: " + source.Text + " → " + destination.Text)
+			c.refreshMirrorLabel()
+		}, c.window,
+	).Show()
 }
 
 func (c *clientApp) onMirrorSync() {
@@ -1362,6 +1475,7 @@ func (c *clientApp) onBrowseDownload() {
 	if c.browsePath != "" {
 		relative = c.browsePath + "/" + relative
 	}
+	c.appendLog("Download avviato: " + relative)
 	go func() {
 		if err := c.transfers.DownloadPath(relative); err != nil {
 			c.appendLog("Download non riuscito: " + err.Error())

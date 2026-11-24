@@ -99,8 +99,8 @@ func doctor(args []string) {
 	fmt.Printf("config:      %s\n", cfg.Path)
 	fmt.Printf("local root:  %s\n", cfg.LocalRoot())
 	fmt.Printf("repository:  %s\n", cfg.RepositoryID())
-	fmt.Printf("tracked:     %d\n", store.EntryCount(cfg.RepositoryID()))
-	fmt.Printf("undo count:  %d\n", store.UndoCount(cfg.RepositoryID(), 24))
+	fmt.Printf("tracked:     %d\n", store.EntryCount(cfg.LocalRepositoryID()))
+	fmt.Printf("undo count:  %d\n", store.UndoCount(cfg.LocalRepositoryID(), 24))
 }
 
 func updateCheck(args []string) {
@@ -352,7 +352,7 @@ func undoDeletions(args []string) {
 		os.Exit(1)
 	}
 	defer store.Close()
-	entries, err := store.RecentUndo(cfg.RepositoryID(), 24, 500)
+	entries, err := store.RecentUndo(cfg.LocalRepositoryID(), 24, 500)
 	if err != nil || len(entries) == 0 {
 		fmt.Println("nessuna eliminazione recente da annullare")
 		return
@@ -379,7 +379,7 @@ func undoDeletions(args []string) {
 			}
 		}
 		if len(done) > 0 {
-			_ = store.MarkUndoApplied(cfg.RepositoryID(), batchID, done)
+			_ = store.MarkUndoApplied(cfg.LocalRepositoryID(), batchID, done)
 			restored += len(done)
 		}
 	}

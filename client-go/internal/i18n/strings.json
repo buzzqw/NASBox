@@ -4895,6 +4895,10 @@
     "en": "(via bastion)",
     "it": "(via bastione)"
   },
+  "ui.action.add_mirror": {
+    "en": "Add external folder",
+    "it": "Aggiungi cartella esterna"
+  },
   "ui.action.audit_short": {
     "en": "Audit",
     "it": "Audit"
@@ -4983,6 +4987,10 @@
     "en": "Permanently delete ‘{path}’ from the NAS? (recoverable from history)",
     "it": "Eliminare definitivamente «{path}» dal NAS? (recuperabile dallo storico)"
   },
+  "ui.dialog.mirror_note": {
+    "en": "Local source folder and destination name on the NAS. Copy is local → NAS only.",
+    "it": "Cartella locale sorgente e nome della cartella sul NAS. La copia è solo locale → NAS."
+  },
   "ui.dialog.new_name": {
     "en": "New name:",
     "it": "Nuovo nome:"
@@ -4999,9 +5007,21 @@
     "en": "General",
     "it": "Generale"
   },
+  "ui.hint.mirror_dest": {
+    "en": "Name on the NAS (e.g. Photos)",
+    "it": "Nome sul NAS (es. Foto)"
+  },
+  "ui.hint.mirror_source": {
+    "en": "Local path (e.g. /home/user/Photos)",
+    "it": "Percorso locale (es. /home/utente/Foto)"
+  },
   "ui.hint.select_first": {
     "en": "Select an item from the list first.",
     "it": "Seleziona prima un elemento dall’elenco."
+  },
+  "ui.hint.selective": {
+    "en": "Click a folder: ☑ synced, ☐ excluded",
+    "it": "Clic su una cartella: ☑ sincronizzata, ☐ esclusa"
   },
   "ui.log.mirror_done": {
     "en": "External folders synced: {count}",

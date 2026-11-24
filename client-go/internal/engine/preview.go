@@ -29,7 +29,7 @@ func Preview(
 			missing = append(missing, path)
 		}
 	}
-	identities, err := store.IdentitySnapshot(cfg.RepositoryID())
+	identities, err := store.IdentitySnapshot(cfg.LocalRepositoryID())
 	if err != nil {
 		return classify.Report{}, err
 	}

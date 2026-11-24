@@ -32,6 +32,7 @@ binario.
 | 5 | Ridisegno UX/UI: 5 aree, design system semantic light/dark, banner guidato con wash semantici chiari (non pieni), card e layout responsive; palette meno blu e pulsanti sempre azionabili con feedback | completata (0.5.2) |
 | 6 | Funzioni complete: journal upload, rename atomico, guardia cumulativa + conferma, esclusioni/selective, browse download, keep-both, storico remoto, audit, controllo server, prune, cancel | completata (0.6.0) |
 | 7 | UI ricostruita su funzioni complete: navigazione nativa con selezione visibile, contrasto, tutte le azioni collegate (conferma, cancel, download, keep-both, storico remoto, audit, server-check, update) | completata (0.7.0) |
+| 7b | Fix UX: barra hint/tooltip per ogni pulsante, tre liste attività distinte, chiave repository locale corretta (file tracciati), form rename grande, dispositivi leggibili, aggiunta mirror guidata, bordi card visibili | completata (0.8.0) |
 | 8 | Rollout graduale e rimozione del client Python | da fare |
 
 Il documento di design dell'interfaccia è in `internal/ui/DESIGN.md`.

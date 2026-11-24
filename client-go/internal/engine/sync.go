@@ -99,11 +99,11 @@ func SyncOnce(
 		}
 		return result, fmt.Errorf("journal NAS: %s", detail)
 	}
-	identities, err := store.IdentitySnapshot(cfg.RepositoryID())
+	identities, err := store.IdentitySnapshot(cfg.LocalRepositoryID())
 	if err != nil {
 		return result, err
 	}
-	entries, err := store.EntrySnapshot(cfg.RepositoryID())
+	entries, err := store.EntrySnapshot(cfg.LocalRepositoryID())
 	if err != nil {
 		return result, err
 	}
@@ -197,7 +197,7 @@ func SyncOnce(
 			}
 			file := local[path]
 			next := clock.Increment(device).Encode()
-			_ = store.RecordEntry(cfg.RepositoryID(), path, state.EntryState{
+			_ = store.RecordEntry(cfg.LocalRepositoryID(), path, state.EntryState{
 				Digest: file.Digest, Size: file.Size, MTimeNS: file.MTimeNS,
 				Causal: next,
 			})
@@ -226,7 +226,7 @@ func SyncOnce(
 			if clock == nil {
 				clock = &causal.Version{}
 			}
-			_ = store.RecordEntry(cfg.RepositoryID(), path, state.EntryState{
+			_ = store.RecordEntry(cfg.LocalRepositoryID(), path, state.EntryState{
 				Digest: remoteState.Digest, Size: remoteState.Size,
 				MTimeNS: remoteState.MTimeNS, Causal: clock.Encode(),
 			})
@@ -264,7 +264,7 @@ func SyncOnce(
 				done = append(done, path)
 			}
 		}
-		if err := store.RecordUndo(cfg.RepositoryID(), done, runTS); err != nil {
+		if err := store.RecordUndo(cfg.LocalRepositoryID(), done, runTS); err != nil {
 			return result, err
 		}
 		result.Deleted = len(done)

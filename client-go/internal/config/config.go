@@ -3,7 +3,9 @@
 package config
 
 import (
+	"crypto/sha256"
 	_ "embed"
+	"encoding/hex"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -127,4 +129,16 @@ func (c *Config) Save() error {
 func (c *Config) LocalRoot() string    { return c.String("local_root") }
 func (c *Config) RemoteScript() string { return c.String("remote_server_script") }
 func (c *Config) RepositoryID() string { return c.String("repository_id") }
+
+// LocalRepositoryID is the key used in the local SQLite state. It matches the
+// Python client's sha256("repository-id\0" + repository_id), so both clients
+// read the same rows.
+func (c *Config) LocalRepositoryID() string {
+	id := c.RepositoryID()
+	if id == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte("repository-id\x00" + id))
+	return hex.EncodeToString(sum[:])
+}
 func (c *Config) RemotePrefix() string { return c.String("remote_prefix") }
