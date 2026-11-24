@@ -176,8 +176,8 @@ func TestThemeAndMinSize(t *testing.T) {
 		t.Fatal("primary colour is not an NRGBA")
 	}
 	size := c.window.Content().MinSize()
-	if size.Width > 900 || size.Height > 640 {
-		t.Fatalf("minimum content size %v exceeds the 900x640 target", size)
+	if size.Width > 1120 || size.Height > 760 {
+		t.Fatalf("minimum content size %v exceeds the 1120x760 target", size)
 	}
-	_ = fyne.NewSize(900, 640)
+	_ = fyne.NewSize(1120, 760)
 }

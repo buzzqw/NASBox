@@ -18,6 +18,7 @@
   "delete_guard_classify": true,
   "delete_safety_window_seconds": 3600,
   "delete_sentinels": "",
+  "device_labels": {},
   "exclude_patterns": [],
   "file_stability_seconds": 0.75,
   "full_pull_interval_seconds": 7200,

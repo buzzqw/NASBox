@@ -8,6 +8,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"fyne.io/fyne/v2"
@@ -34,9 +35,6 @@ import (
 	"nasbox-go/internal/update"
 	"nasbox-go/internal/version"
 )
-
-//go:embed icon.png
-var iconBytes []byte
 
 // sectionID identifies one of the five top-level navigational areas. The old
 // ten flat tabs are grouped underneath these areas as secondary tabs.
@@ -69,6 +67,7 @@ type navButton struct {
 	bg         *canvas.Rectangle
 	accent     *canvas.Rectangle
 	buttonView fyne.CanvasObject
+	label      string
 	section    sectionID
 }
 
@@ -80,14 +79,15 @@ type clientApp struct {
 	runner    *engine.Runner
 	cancel    context.CancelFunc
 
-	uiTheme *nasTheme
-	fyneApp fyne.App
-	window  fyne.Window
-	setHint func(string)
-	content *fyne.Container
-	views   map[sectionID]fyne.CanvasObject
-	navs    map[sectionID]*navButton
-	active  sectionID
+	uiTheme    *nasTheme
+	fyneApp    fyne.App
+	window     fyne.Window
+	setHint    func(string)
+	syncActive atomic.Bool
+	content    *fyne.Container
+	views      map[sectionID]fyne.CanvasObject
+	navs       map[sectionID]*navButton
+	active     sectionID
 
 	headerTitle *widget.Label
 	headerHint  *widget.Label
@@ -121,6 +121,7 @@ type clientApp struct {
 	confList       *widget.List
 	versions       []history.Version
 	histList       *widget.List
+	historyFilter  *widget.Entry
 
 	browsePath          string
 	browsePathLabel     *widget.Label
@@ -131,6 +132,9 @@ type clientApp struct {
 	selectiveList       *widget.List
 	nasLabel            *widget.Label
 	devicesLabel        *widget.Label
+	deviceList          *widget.List
+	deviceEntries       []string
+	selectedDevice      string
 	monitorDevicesLabel *widget.Label
 
 	resolveBtn *widget.Button
@@ -153,7 +157,6 @@ func Run(cfg *config.Config, store *state.Store) {
 	selectBackend(cfg)
 	detectLanguage(cfg)
 	fyneApp := app.NewWithID("it.nasbox.client")
-	fyneApp.SetIcon(fyne.NewStaticResource("icon.png", iconBytes))
 	window := fyneApp.NewWindow(fmt.Sprintf("%s %s", version.AppName, version.AppVersion))
 	window.Resize(fyne.NewSize(1120, 760))
 
@@ -169,6 +172,7 @@ func Run(cfg *config.Config, store *state.Store) {
 		uiTheme: newNAStheme(variantFrom(cfg.String("go_theme"))),
 		level:   statusStarting,
 	}
+	c.setTrayIcon("unconfigured")
 	c.bannerGo = func() { c.onSync() }
 	fyneApp.Settings().SetTheme(c.uiTheme)
 
@@ -180,6 +184,7 @@ func Run(cfg *config.Config, store *state.Store) {
 
 	c.applyStatus(statusStarting, tr("status.sync_state_starting", nil))
 	go c.consumeEvents()
+	c.animateTray(func() bool { return c.syncActive.Load() })
 	go func() { _ = c.runner.Run(ctx) }()
 	go func() {
 		values, err := c.client.PrintConfig()
@@ -269,9 +274,10 @@ func (c *clientApp) buildHeader() fyne.CanvasObject {
 	brand := widget.NewLabelWithStyle(version.AppName, fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
 	c.headerTitle = widget.NewLabelWithStyle(tr("main_window.tab_status", nil),
 		fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
-	c.headerHint = widget.NewLabel("Passa il mouse su un pulsante per la descrizione")
+	c.headerHint = widget.NewLabel("Passa il mouse per i dettagli")
 	c.headerHint.Wrapping = fyne.TextTruncate
-	left := container.NewVBox(brand, c.headerTitle, c.headerHint)
+	// The hint lives in the footer: in the header it was truncated mid-word.
+	left := container.NewVBox(brand, c.headerTitle)
 
 	c.pillLabel = widget.NewLabel("")
 	c.pillBG = canvas.NewRectangle(c.tint(theme.ColorNamePrimary))
@@ -357,7 +363,7 @@ func (c *clientApp) makeNav(id sectionID, label string, icon fyne.Resource, hint
 	button.SetText(label)
 	_ = hint
 	item := &navButton{
-		Button: button, bg: bg, accent: accent, section: id,
+		Button: button, bg: bg, accent: accent, section: id, label: label,
 	}
 	// Keep the object returned as a single layout unit: the accent bar is
 	// always visible when this section is active.
@@ -423,10 +429,12 @@ func (c *clientApp) showSection(id sectionID) {
 			item.bg.FillColor = c.tint(theme.ColorNameSelection)
 			item.accent.FillColor = c.tint(theme.ColorNamePrimary)
 			item.Button.Importance = widget.HighImportance
+			item.Button.SetText("▸ " + item.label)
 		} else {
 			item.bg.FillColor = colorTransparent
 			item.accent.FillColor = colorTransparent
 			item.Button.Importance = widget.LowImportance
+			item.Button.SetText(item.label)
 		}
 		item.bg.Refresh()
 		item.accent.Refresh()
@@ -475,7 +483,7 @@ func (c *clientApp) statusView() fyne.CanvasObject {
 				c.bannerGo()
 			}
 		}, c.setHint)
-	actions := container.NewGridWithColumns(3,
+	actions := container.NewGridWithColumns(4,
 		newHintButton(tr("ui.action.sync_short", nil), theme.MediaReplayIcon(),
 			tr("status.sync_now_tooltip", nil), widget.HighImportance, c.onSync, c.setHint),
 		c.pauseBtnStatus,
@@ -514,10 +522,46 @@ func (c *clientApp) statusView() fyne.CanvasObject {
 		c.sectionTitle(tr("assurance.title", nil), tr("main_window.brand_tagline", nil)),
 		banner,
 		container.NewPadded(actions),
-		c.sectionTitle(tr("assurance.guidance_title", nil), ""),
 		stats,
 		c.surface(container.NewVBox(detail, backend), ""),
 	)
+}
+
+func (c *clientApp) filteredVersions() []history.Version {
+	query := ""
+	if c.historyFilter != nil {
+		query = strings.ToLower(strings.TrimSpace(c.historyFilter.Text))
+	}
+	if query == "" {
+		return c.versions
+	}
+	result := make([]history.Version, 0)
+	for _, version := range c.versions {
+		if strings.Contains(strings.ToLower(version.Original), query) {
+			result = append(result, version)
+		}
+	}
+	return result
+}
+
+func shortTimestamp(value string) string {
+	if len(value) >= 16 {
+		return value[5:10] + " " + value[11:16]
+	}
+	return value
+}
+
+func humanBytes(size int64) string {
+	switch {
+	case size >= 1<<30:
+		return fmt.Sprintf("%.1f GB", float64(size)/(1<<30))
+	case size >= 1<<20:
+		return fmt.Sprintf("%.1f MB", float64(size)/(1<<20))
+	case size >= 1<<10:
+		return fmt.Sprintf("%.1f KB", float64(size)/(1<<10))
+	default:
+		return fmt.Sprintf("%d B", size)
+	}
 }
 
 func valueOrDash(value string) string {
@@ -597,16 +641,24 @@ func (c *clientApp) filesView() fyne.CanvasObject {
 			}
 		}
 	}
+	c.historyFilter = widget.NewEntry()
+	c.historyFilter.SetPlaceHolder("Filtra per nome…")
+	c.historyFilter.OnChanged = func(string) { c.histList.Refresh() }
 	c.histList = newTextList(
-		func() int { return len(c.versions) },
+		func() int { return len(c.filteredVersions()) },
 		func(id int, label *widget.Label) {
-			item := c.versions[id]
-			label.SetText(fmt.Sprintf("%s  —  %s", item.Original, item.Timestamp))
+			versions := c.filteredVersions()
+			if id >= len(versions) {
+				return
+			}
+			item := versions[id]
+			label.SetText(fmt.Sprintf("%-10s  %s  %s", shortTimestamp(item.Timestamp), item.Original, humanBytes(item.Size)))
 		},
 	)
 	c.histList.OnSelected = func(id widget.ListItemID) {
-		if int(id) < len(c.versions) {
-			c.selectedVersion = c.versions[id].TrashPath
+		versions := c.filteredVersions()
+		if int(id) < len(versions) {
+			c.selectedVersion = versions[id].TrashPath
 			if c.restoreBtn != nil {
 				c.restoreBtn.Enable()
 			}
@@ -620,17 +672,23 @@ func (c *clientApp) filesView() fyne.CanvasObject {
 		},
 	)
 	c.browseList.OnSelected = func(id widget.ListItemID) {
-		if int(id) < len(c.browseEntries) {
-			c.selectedBrowse = c.browseEntries[id].Name
-			if c.deleteBtn != nil {
-				c.deleteBtn.Enable()
-			}
-			if c.renameBtn != nil {
-				c.renameBtn.Enable()
-			}
+		if int(id) >= len(c.browseEntries) {
+			return
 		}
+		entry := c.browseEntries[id]
+		if entry.Kind == "DIR" {
+			if c.browsePath == "" {
+				c.browsePath = entry.Name
+			} else {
+				c.browsePath += "/" + entry.Name
+			}
+			c.selectedBrowse = ""
+			c.refreshBrowse()
+			return
+		}
+		c.selectedBrowse = entry.Name
 	}
-	c.browsePathLabel = widget.NewLabel("")
+	c.browsePathLabel = widget.NewLabel("Percorso: /")
 	c.deleteBtn = newHintButton(tr("browse.delete_btn", nil), theme.DeleteIcon(),
 		tr("browse.confirm_delete_title", nil), widget.DangerImportance, c.onBrowseDelete, c.setHint).Button
 	c.renameBtn = newHintButton(tr("browse.rename_btn", nil), theme.DocumentCreateIcon(),
@@ -673,6 +731,7 @@ func (c *clientApp) filesView() fyne.CanvasObject {
 	historyPane := container.NewBorder(
 		container.NewVBox(
 			c.sectionTitle(tr("main_window.tab_history", nil), tr("settings.maint_delete_tooltip", nil)),
+			c.historyFilter,
 		),
 		container.NewHBox(
 			newHintButton(tr("history.refresh_btn", nil), theme.ViewRefreshIcon(),
@@ -710,9 +769,23 @@ func (c *clientApp) nasView() fyne.CanvasObject {
 		newHintButton(tr("ui.action.server_check", nil), theme.ViewRefreshIcon(),
 			"", widget.MediumImportance, c.onServerCheck, c.setHint),
 	)
+	c.deviceList = newTextList(
+		func() int { return len(c.deviceEntries) },
+		func(id int, label *widget.Label) { label.SetText(c.deviceEntries[id]) },
+	)
+	c.deviceList.OnSelected = func(id widget.ListItemID) {
+		if int(id) < len(c.deviceEntries) {
+			c.selectedDevice = strings.Split(c.deviceEntries[id], " ")[0]
+		}
+	}
 	devicesPane := container.NewVBox(
-		c.sectionTitle(tr("devices.title", nil), tr("a11y.devices_label", nil)),
-		c.surface(container.NewVBox(c.devicesLabel), ""),
+		c.sectionTitle(tr("devices.title", nil), "ID dispositivo dal journal NAS; assegna un nome leggibile"),
+		c.surface(container.NewVBox(
+			c.devicesLabel,
+			c.deviceList,
+			newHintButton(tr("ui.action.assign_device", nil), theme.DocumentCreateIcon(),
+				"", widget.MediumImportance, c.onAssignDevice, c.setHint),
+		), ""),
 	)
 	c.nasTabs = container.NewAppTabs(
 		container.NewTabItem(tr("main_window.tab_metrics", nil), monitorPane),
@@ -810,8 +883,27 @@ func (c *clientApp) applyStatus(level statusLevel, reason string) {
 	fyne.Do(func() { c.applyStatusUI(level, reason) })
 }
 
+func iconStateForLevel(level statusLevel) string {
+	switch level {
+	case statusOK:
+		return "synced"
+	case statusProgress:
+		return "syncing"
+	case statusPaused:
+		return "paused"
+	case statusAttention, statusBlocked, statusOffline:
+		return "error"
+	default:
+		return "unconfigured"
+	}
+}
+
 func (c *clientApp) applyStatusUI(level statusLevel, reason string) {
 	c.level = level
+	c.syncActive.Store(level == statusProgress)
+	if level != statusProgress {
+		c.setTrayIcon(iconStateForLevel(level))
+	}
 	var title, next, action string
 	var colour fyne.ThemeColorName
 	var goFn func()
@@ -909,11 +1001,23 @@ func (c *clientApp) appendLog(line string) {
 	})
 }
 
+func shortHint(text string) string {
+	if len(text) <= 64 {
+		return text
+	}
+	cut := text[:64]
+	if index := strings.LastIndex(cut, " "); index > 32 {
+		cut = cut[:index]
+	}
+	return cut + "…"
+}
+
 func (c *clientApp) setHintText(text string) {
 	fyne.Do(func() {
 		if text == "" {
-			text = "Passa il mouse su un pulsante per la descrizione"
+			text = "Passa il mouse per i dettagli"
 		}
+		text = shortHint(text)
 		if c.hintLabel != nil {
 			c.hintLabel.SetText(text)
 		}
@@ -1095,6 +1199,7 @@ func (c *clientApp) pollMetrics() {
 		text := tr("devices.empty", nil)
 		if len(devices) > 0 {
 			lines := make([]string, 0, len(devices))
+			labelMap, _ := c.cfg.Get("device_labels").(map[string]any)
 			for _, raw := range devices {
 				parts := strings.Split(raw, "|")
 				if len(parts) < 3 {
@@ -1109,14 +1214,26 @@ func (c *clientApp) pollMetrics() {
 				if len(parts) > 3 && parts[3] == "ACTIVE" {
 					active = " — in uso ora"
 				}
-				lines = append(lines, fmt.Sprintf("PC %s · ultima attività %s · %s operazioni%s",
-					parts[0], stamp, parts[2], active))
+				name := "PC " + parts[0]
+				if label, ok := labelMap[parts[0]].(map[string]any); ok {
+					computer := valueOrDash(fmt.Sprint(label["name"]))
+					ip := valueOrDash(fmt.Sprint(label["ip"]))
+					name = computer + " (" + ip + ")"
+				}
+				lines = append(lines, fmt.Sprintf("%s · %s · %s operazioni%s",
+					name, stamp, parts[2], active))
 			}
 			text = "Dispositivi identificati dal journal NAS:\n" + strings.Join(lines, "\n")
+			fyne.Do(func() {
+				c.deviceEntries = lines
+				if c.deviceList != nil {
+					c.deviceList.Refresh()
+				}
+			})
 		}
 		fyne.Do(func() {
 			if c.devicesLabel != nil {
-				c.devicesLabel.SetText(text)
+				c.devicesLabel.SetText("Seleziona un dispositivo e assegna nome/IP per renderlo leggibile.")
 			}
 			if c.monitorDevicesLabel != nil {
 				c.monitorDevicesLabel.SetText(text)
@@ -1540,6 +1657,41 @@ func (c *clientApp) onPrune() {
 		c.appendLog("Rimossi " + fmt.Sprint(removed) + " file dallo storico locale")
 		c.refreshHistory()
 	}()
+}
+
+func (c *clientApp) onAssignDevice() {
+	if c.selectedDevice == "" {
+		c.appendLog("Seleziona prima un dispositivo dalla lista")
+		return
+	}
+	name := widget.NewEntry()
+	name.SetPlaceHolder(tr("ui.hint.device_name", nil))
+	ip := widget.NewEntry()
+	ip.SetPlaceHolder(tr("ui.hint.device_ip", nil))
+	content := container.NewVBox(
+		widget.NewLabel("Dispositivo: "+c.selectedDevice),
+		widget.NewLabel(tr("ui.hint.device_name", nil)), name,
+		widget.NewLabel(tr("ui.hint.device_ip", nil)), ip,
+	)
+	dialog.NewCustomConfirm(
+		tr("ui.action.assign_device", nil), "Salva", "Annulla", content,
+		func(ok bool) {
+			if !ok {
+				return
+			}
+			labels, _ := c.cfg.Get("device_labels").(map[string]any)
+			if labels == nil {
+				labels = map[string]any{}
+			}
+			labels[c.selectedDevice] = map[string]any{
+				"name": strings.TrimSpace(name.Text),
+				"ip":   strings.TrimSpace(ip.Text),
+			}
+			c.cfg.Set("device_labels", labels, true)
+			c.appendLog("Dispositivo " + c.selectedDevice + " rinominato")
+			c.pollMetrics()
+		}, c.window,
+	).Show()
 }
 
 func (c *clientApp) onServerCheck() {

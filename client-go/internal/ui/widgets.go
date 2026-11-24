@@ -48,7 +48,7 @@ func (c *clientApp) bannerTint(name fyne.ThemeColorName) color.Color {
 	case theme.ColorNameSuccess:
 		return nr(0xdc, 0xfc, 0xe7)
 	case theme.ColorNamePrimary:
-		return nr(0xe2, 0xe8, 0xf0)
+		return nr(0xef, 0xf6, 0xff)
 	default:
 		return c.tint(name)
 	}

@@ -4899,6 +4899,10 @@
     "en": "Add external folder",
     "it": "Aggiungi cartella esterna"
   },
+  "ui.action.assign_device": {
+    "en": "Assign name/IP",
+    "it": "Assegna nome/IP"
+  },
   "ui.action.audit_short": {
     "en": "Audit",
     "it": "Audit"
@@ -5006,6 +5010,14 @@
   "ui.group.general": {
     "en": "General",
     "it": "Generale"
+  },
+  "ui.hint.device_ip": {
+    "en": "IP address (e.g. 192.168.1.122)",
+    "it": "Indirizzo IP (es. 192.168.1.122)"
+  },
+  "ui.hint.device_name": {
+    "en": "Computer name (e.g. LivingRoom-PC)",
+    "it": "Nome computer (es. PC-Salotto)"
   },
   "ui.hint.mirror_dest": {
     "en": "Name on the NAS (e.g. Photos)",
