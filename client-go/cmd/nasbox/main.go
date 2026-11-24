@@ -7,10 +7,14 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"time"
 
 	"nasbox-go/internal/config"
+	"nasbox-go/internal/deletesafety"
 	"nasbox-go/internal/engine"
+	"nasbox-go/internal/history"
 	"nasbox-go/internal/instance"
+	"nasbox-go/internal/integrity"
 	"nasbox-go/internal/remote"
 	"nasbox-go/internal/repository"
 	"nasbox-go/internal/state"
@@ -38,6 +42,20 @@ func main() {
 		syncOnce(args)
 	case "undo":
 		undoDeletions(args)
+	case "confirm-delete":
+		confirmDelete(args)
+	case "browse-download":
+		browseDownload(args)
+	case "remote-history":
+		remoteHistory(args)
+	case "remote-restore":
+		remoteRestore(args)
+	case "prune-trash":
+		pruneTrash(args)
+	case "audit":
+		runAudit(args)
+	case "server-check":
+		serverCheck(args)
 	case "gui":
 		gui(args)
 	case "update-check":
@@ -51,7 +69,7 @@ func main() {
 }
 
 func usage() {
-	fmt.Println("uso: nasbox <version|doctor|preview|sync|undo|gui|update-check|update-install> [opzioni]")
+	fmt.Println("uso: nasbox <version|doctor|preview|sync|undo|confirm-delete|browse-download|remote-history|remote-restore|prune-trash|audit|server-check|gui|update-check|update-install> [opzioni]")
 }
 
 func loadConfig(args []string) (*config.Config, error) {
@@ -128,6 +146,141 @@ func updateInstall(args []string) {
 	} else {
 		fmt.Println("nessun aggiornamento")
 	}
+}
+
+func browseDownload(args []string) {
+	if len(args) < 1 {
+		fmt.Fprintln(os.Stderr, "uso: nasbox browse-download <percorso-remoto>")
+		os.Exit(2)
+	}
+	cfg, err := loadConfig(args[1:])
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	client := remote.New(cfg)
+	store, err := state.Open(cfg)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	defer store.Close()
+	if err := transfer.New(cfg, client).DownloadPath(args[0]); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	fmt.Println("scaricato:", args[0])
+}
+
+func remoteHistory(args []string) {
+	cfg, err := loadConfig(args)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	versions, err := remote.New(cfg).HistoryList()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	for _, version := range versions {
+		fmt.Printf("%s\t%s\t%d\n", version.Original, version.Suffix, version.Size)
+	}
+}
+
+func remoteRestore(args []string) {
+	if len(args) < 2 {
+		fmt.Fprintln(os.Stderr, "uso: nasbox remote-restore <percorso> <suffisso>")
+		os.Exit(2)
+	}
+	cfg, err := loadConfig(args[2:])
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	store, err := state.Open(cfg)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	defer store.Close()
+	status, err := remote.New(cfg).RestoreVersion(args[0], args[1], store.DeviceID())
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	fmt.Println(status)
+}
+
+func runAudit(args []string) {
+	cfg, err := loadConfig(args)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	client := remote.New(cfg)
+	raw, err := client.ManifestExport("")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	manifest, err := remote.ParseManifest(raw)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	report := integrity.Run(cfg, manifest, version.AppVersion, nil)
+	fmt.Printf("%s: %d file, %d differenze\n", report.Status, report.FilesChecked, len(report.Differences))
+}
+
+func serverCheck(args []string) {
+	cfg, err := loadConfig(args)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	minimum := cfg.String("min_server_version")
+	if minimum == "" {
+		minimum = "3.16.0"
+	}
+	outdated, current, err := remote.New(cfg).ServerOutdated(minimum)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	if outdated {
+		fmt.Printf("server obsoleto: %s (richiesto %s)\n", current, minimum)
+	} else {
+		fmt.Printf("server ok: %s\n", current)
+	}
+}
+
+func pruneTrash(args []string) {
+	cfg, err := loadConfig(args)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	removed, err := history.Prune(cfg.Int("retention_days_local"))
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	fmt.Printf("rimossi %d file dallo storico locale\n", removed)
+}
+
+func confirmDelete(args []string) {
+	cfg, err := loadConfig(args)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	until, err := deletesafety.Shared().Confirm(cfg)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	fmt.Printf("cancellazioni di massa confermate fino a %s\n", time.Unix(int64(until), 0).Format(time.RFC3339))
 }
 
 func gui(args []string) {

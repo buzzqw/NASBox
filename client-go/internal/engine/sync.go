@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -15,6 +16,7 @@ import (
 	"nasbox-go/internal/classify"
 	"nasbox-go/internal/config"
 	"nasbox-go/internal/conflicts"
+	"nasbox-go/internal/deletesafety"
 	"nasbox-go/internal/i18n"
 	"nasbox-go/internal/remote"
 	"nasbox-go/internal/repository"
@@ -27,12 +29,15 @@ type ConfigSource interface {
 	ManifestExport(since string) ([]byte, error)
 	CheckedDelete(requests []remote.CheckedRequest, runTS, device string) (map[string]string, error)
 	RetryPendingJournal(device string) (bool, string, error)
+	JournalAppend(repositoryID, txid, device string, puts []remote.JournalPut) (bool, error)
+	RenameV2(src, dst, kind, digest string, size, mtimeNS int64, device string) (bool, error)
 }
 
 // Transferer uploads and downloads batches of paths.
 type Transferer interface {
 	Upload(paths []string) error
 	Download(paths []string) error
+	SetContext(ctx context.Context)
 }
 
 type SyncResult struct {
@@ -102,7 +107,7 @@ func SyncOnce(
 	if err != nil {
 		return result, err
 	}
-	local, err := scanLocal(cfg.LocalRoot(), identities)
+	local, err := scanLocal(cfg, identities)
 	if err != nil {
 		return result, err
 	}
@@ -113,7 +118,7 @@ func SyncOnce(
 	device := store.DeviceID()
 	manualConflicts := cfg.String("conflict_policy") == "manual"
 	for path, remoteState := range manifest {
-		if remoteState.Kind != "FILE" {
+		if remoteState.Kind != "FILE" || excluded(cfg, path) {
 			continue
 		}
 		current, present := local[path]
@@ -159,6 +164,24 @@ func SyncOnce(
 		return result, nil
 	}
 
+	// Renames are atomic server mutations. A failed rename must abort the pass:
+	// falling back to delete+upload would risk losing the file if the upload
+	// then failed.
+	for _, rename := range report.Renames {
+		state := manifest[rename.Missing]
+		ok, err := client.RenameV2(
+			rename.Missing, rename.Local, "FILE",
+			state.Digest, state.Size, state.MTimeNS, device,
+		)
+		if err != nil || !ok {
+			if err == nil {
+				err = fmt.Errorf("rename remoto rifiutato: %s -> %s", rename.Missing, rename.Local)
+			}
+			return result, err
+		}
+		delete(manifest, rename.Missing)
+	}
+
 	// Uploads first: a file that still exists locally must never be lost to a
 	// subsequent delete pass.
 	if len(uploads) > 0 {
@@ -166,16 +189,30 @@ func SyncOnce(
 			return result, err
 		}
 		result.Uploaded = len(uploads)
+		puts := make([]remote.JournalPut, 0, len(uploads))
 		for _, path := range uploads {
 			clock, _ := causal.Parse(entries[path].Causal)
 			if clock == nil {
 				clock = &causal.Version{}
 			}
 			file := local[path]
+			next := clock.Increment(device).Encode()
 			_ = store.RecordEntry(cfg.RepositoryID(), path, state.EntryState{
 				Digest: file.Digest, Size: file.Size, MTimeNS: file.MTimeNS,
-				Causal: clock.Increment(device).Encode(),
+				Causal: next,
 			})
+			puts = append(puts, remote.JournalPut{
+				Path: path, Digest: file.Digest, Size: file.Size,
+				MTimeNS: file.MTimeNS, Causal: next,
+			})
+		}
+		if ok, err := client.JournalAppend(
+			cfg.RepositoryID(), "upload-"+newRunTS(), device, puts,
+		); err != nil || !ok {
+			if err == nil {
+				err = fmt.Errorf("journal NAS non aggiornato dopo upload")
+			}
+			return result, err
 		}
 	}
 	if len(downloads) > 0 {
@@ -196,6 +233,16 @@ func SyncOnce(
 		}
 	}
 	deletions := report.Unexplained
+	if err := deletesafety.Shared().Check(cfg, len(deletions), "sync"); err != nil {
+		if blocked, ok := err.(*deletesafety.BlockedError); ok {
+			result.Blocked = i18n.T("safety.blocked_cumulative", map[string]any{
+				"count": blocked.Total, "limit": blocked.Limit,
+			})
+		} else {
+			result.Blocked = err.Error()
+		}
+		return result, nil
+	}
 	if len(deletions) > 0 {
 		runTS := newRunTS()
 		device := store.DeviceID()
@@ -221,6 +268,9 @@ func SyncOnce(
 			return result, err
 		}
 		result.Deleted = len(done)
+		if err := deletesafety.Shared().Record(cfg, len(done), "sync"); err != nil {
+			return result, err
+		}
 	}
 	return result, nil
 }
@@ -284,7 +334,8 @@ func guardMessage(cfg *config.Config, report classify.Report) string {
 	return ""
 }
 
-func scanLocal(root string, identities map[string]state.Identity) (map[string]localFile, error) {
+func scanLocal(cfg *config.Config, identities map[string]state.Identity) (map[string]localFile, error) {
+	root := cfg.LocalRoot()
 	result := make(map[string]localFile)
 	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 		if err != nil || info == nil || !info.Mode().IsRegular() {
@@ -295,8 +346,9 @@ func scanLocal(root string, identities map[string]state.Identity) (map[string]lo
 			return nil
 		}
 		rel = filepath.ToSlash(rel)
-		if strings.HasPrefix(rel, ".git/") || strings.HasPrefix(rel, ".venv/") ||
-			strings.HasPrefix(rel, ".nasbox-client-update/") || strings.HasSuffix(rel, ".pyc") {
+		if excluded(cfg, rel) || strings.HasPrefix(rel, ".git/") ||
+			strings.HasPrefix(rel, ".venv/") || strings.HasPrefix(rel, ".nasbox-client-update/") ||
+			strings.HasSuffix(rel, ".pyc") {
 			return nil
 		}
 		stat := statOf(info)

@@ -44,6 +44,7 @@
   "max_delete_files": 1000,
   "max_delete_files_per_window": 1000,
   "metrics_refresh_seconds": 30,
+  "min_server_version": "3.16.0",
   "mirrors": [],
   "nas_lan": "",
   "nas_user": "",

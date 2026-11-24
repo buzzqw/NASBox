@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"nasbox-go/internal/config"
+	"nasbox-go/internal/history"
 	"nasbox-go/internal/state"
 	"nasbox-go/internal/watch"
 )
@@ -32,16 +33,21 @@ type Runner struct {
 	backoff time.Duration
 	nextTry time.Time
 
-	events chan Event
-	wake   chan struct{}
+	events         chan Event
+	wake           chan struct{}
+	transferCtx    context.Context
+	cancelTransfer context.CancelFunc
+	lastPrune      time.Time
 }
 
 func NewRunner(
 	cfg *config.Config, store *state.Store, client ConfigSource, transfers Transferer,
 ) *Runner {
+	ctx, cancel := context.WithCancel(context.Background())
 	return &Runner{
 		cfg: cfg, store: store, client: client, transfers: transfers,
 		dirty: map[string]bool{}, events: make(chan Event, 64), wake: make(chan struct{}, 1),
+		transferCtx: ctx, cancelTransfer: cancel,
 	}
 }
 
@@ -52,6 +58,19 @@ func (r *Runner) SetPaused(paused bool) {
 	r.paused = paused
 	r.mu.Unlock()
 	r.notify()
+}
+
+// Cancel stops the in-flight transfer and lets the current pass fail safely.
+func (r *Runner) Cancel() {
+	r.mu.Lock()
+	if r.cancelTransfer != nil {
+		r.cancelTransfer()
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	r.transferCtx, r.cancelTransfer = ctx, cancel
+	r.mu.Unlock()
+	r.transfers.SetContext(ctx)
+	r.emit("status", "trasferimento annullato")
 }
 
 func (r *Runner) IsPaused() bool {
@@ -150,6 +169,10 @@ func (r *Runner) Run(ctx context.Context) error {
 		}
 		paths := r.takeDirty()
 		_ = paths // SyncOnce reconciles the whole tree; paths only drive the wake-up.
+		r.mu.Lock()
+		transferCtx := r.transferCtx
+		r.mu.Unlock()
+		r.transfers.SetContext(transferCtx)
 		r.emit("status", "sincronizzazione in corso…")
 		result, err := SyncOnce(r.cfg, r.store, r.client, r.transfers)
 		if err != nil {
@@ -172,6 +195,13 @@ func (r *Runner) Run(ctx context.Context) error {
 			" caricati %d, scaricati %d, cancellati %d, conflitti %d",
 			result.Uploaded, result.Downloads, result.Deleted, result.Conflicts,
 		))
+		if time.Since(r.lastPrune) >= 24*time.Hour {
+			r.lastPrune = time.Now()
+			removed, err := history.Prune(r.cfg.Int("retention_days_local"))
+			if err == nil && removed > 0 {
+				r.emit("status", fmt.Sprintf("rimossi %d file dallo storico locale", removed))
+			}
+		}
 	}
 }
 

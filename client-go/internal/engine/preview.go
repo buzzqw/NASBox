@@ -51,18 +51,20 @@ func Preview(
 }
 
 func excluded(cfg *config.Config, path string) bool {
-	patterns, ok := cfg.Get("exclude_patterns").([]any)
-	if !ok {
-		return false
-	}
-	for _, pattern := range patterns {
-		text, ok := pattern.(string)
+	for _, key := range []string{"exclude_patterns", "selective_sync_excludes"} {
+		patterns, ok := cfg.Get(key).([]any)
 		if !ok {
 			continue
 		}
-		text = strings.TrimSuffix(text, "/")
-		if text != "" && (path == text || strings.HasPrefix(path, text+"/")) {
-			return true
+		for _, pattern := range patterns {
+			text, ok := pattern.(string)
+			if !ok {
+				continue
+			}
+			text = strings.TrimSuffix(text, "/")
+			if text != "" && (path == text || strings.HasPrefix(path, text+"/")) {
+				return true
+			}
 		}
 	}
 	return false

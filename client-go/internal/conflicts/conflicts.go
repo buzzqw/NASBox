@@ -131,6 +131,39 @@ func Resolve(root string, group Group, chosen string) error {
 	return nil
 }
 
+// KeepBoth preserves the chosen candidate under a new deterministic name and
+// keeps the original untouched. It is the non-destructive resolution mode.
+func KeepBoth(root string, group Group, chosen string) (string, error) {
+	if chosen == group.Original {
+		return "", fmt.Errorf("per tenere entrambe scegli una copia conflitto")
+	}
+	found := false
+	for _, candidate := range group.Candidates {
+		if candidate == chosen {
+			found = true
+		}
+	}
+	if !found {
+		return "", fmt.Errorf("la versione scelta non e' piu' disponibile")
+	}
+	source := filepath.Join(root, filepath.FromSlash(chosen))
+	target := source + ".kept"
+	for index := 1; ; index++ {
+		if _, err := os.Stat(target); os.IsNotExist(err) {
+			break
+		}
+		target = fmt.Sprintf("%s.kept-%d", source, index)
+	}
+	if err := os.Rename(source, target); err != nil {
+		return "", err
+	}
+	relative, err := filepath.Rel(root, target)
+	if err != nil {
+		return "", err
+	}
+	return filepath.ToSlash(relative), nil
+}
+
 // Create makes a conflict copy for a remote version that lost against a local
 // edit. The suffix matches the Python client's convention.
 func Create(root, originalRelative, originDevice, digest string) (string, error) {

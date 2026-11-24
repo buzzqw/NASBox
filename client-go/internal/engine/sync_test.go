@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -33,11 +34,18 @@ func (f *fakeNAS) CheckedDelete(reqs []remote.CheckedRequest, _ string, _ string
 }
 
 func (f *fakeNAS) RetryPendingJournal(string) (bool, string, error) { return true, "", nil }
+func (f *fakeNAS) JournalAppend(string, string, string, []remote.JournalPut) (bool, error) {
+	return true, nil
+}
+func (f *fakeNAS) RenameV2(string, string, string, string, int64, int64, string) (bool, error) {
+	return true, nil
+}
 
 type fakeTransfer struct{ uploaded []string }
 
-func (f *fakeTransfer) Upload(paths []string) error   { f.uploaded = paths; return nil }
-func (f *fakeTransfer) Download(paths []string) error { return nil }
+func (f *fakeTransfer) Upload(paths []string) error    { f.uploaded = paths; return nil }
+func (f *fakeTransfer) Download(paths []string) error  { return nil }
+func (f *fakeTransfer) SetContext(ctx context.Context) {}
 
 func digest(data string) string {
 	sum := sha256.Sum256([]byte(data))

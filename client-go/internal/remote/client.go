@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -63,6 +64,44 @@ func (c *Client) Run(args []string, stdin []byte, timeout time.Duration) ([]byte
 		return stdout.Bytes(), fmt.Errorf("ssh: %w: %s", err, strings.TrimSpace(stderr.String()))
 	}
 	return stdout.Bytes(), nil
+}
+
+// ServerOutdated compares the NAS script version with the minimum required.
+func (c *Client) ServerOutdated(minimum string) (bool, string, error) {
+	values, err := c.PrintConfig()
+	if err != nil {
+		return false, "", err
+	}
+	current := values["VERSION"]
+	if current == "" {
+		return true, "", fmt.Errorf("versione server sconosciuta")
+	}
+	parse := func(value string) []int {
+		parts := strings.Split(value, ".")
+		out := make([]int, 0, len(parts))
+		for _, part := range parts {
+			n, _ := strconv.Atoi(part)
+			out = append(out, n)
+		}
+		return out
+	}
+	a, b := parse(current), parse(minimum)
+	for index := 0; index < len(a) || index < len(b); index++ {
+		left, right := 0, 0
+		if index < len(a) {
+			left = a[index]
+		}
+		if index < len(b) {
+			right = b[index]
+		}
+		if left < right {
+			return true, current, nil
+		}
+		if left > right {
+			return false, current, nil
+		}
+	}
+	return false, current, nil
 }
 
 // RunLocked runs a mutating command while holding the global NAS lease and
@@ -329,6 +368,121 @@ func (c *Client) RetryPendingJournal(device string) (bool, string, error) {
 	}
 	_ = os.Remove(path)
 	return true, strings.TrimSpace(string(output)), nil
+}
+
+// RenameV2 atomically moves a path on the NAS and writes both journal records
+// in one recoverable transaction (src precondition included).
+func (c *Client) RenameV2(
+	src, dst, kind, digest string, size, mtimeNS int64, device string,
+) (bool, error) {
+	fields := [][]byte{
+		[]byte("BROWSE_RENAME_V2"), []byte(RunTimestamp()), []byte(device),
+		[]byte(src), []byte(dst), []byte(kind), []byte(digest),
+		[]byte(fmt.Sprint(size)), []byte(fmt.Sprint(mtimeNS)),
+	}
+	output, err := c.RunLocked(
+		[]string{c.script(), "--browse-rename"}, nulJoin(fields), device, 5*time.Minute,
+	)
+	if err != nil {
+		return false, err
+	}
+	parts := bytes.Split(output, []byte{0})
+	if len(parts) < 2 || string(parts[0]) != "BROWSE_RENAME_V2" {
+		return false, fmt.Errorf("risposta rename non valida")
+	}
+	if string(parts[1]) == "OK" {
+		return true, nil
+	}
+	detail := ""
+	if len(parts) > 2 {
+		detail = string(parts[2])
+	}
+	return false, fmt.Errorf("rename remoto fallito: %s", detail)
+}
+
+type HistoryVersion struct {
+	Original, Suffix, TrashRel string
+	Size                       int64
+}
+
+func (c *Client) HistoryList() ([]HistoryVersion, error) {
+	output, err := c.Run([]string{c.script(), "--history-list"}, nil, 2*time.Minute)
+	if err != nil {
+		return nil, err
+	}
+	parts := bytes.Split(output, []byte{0})
+	if len(parts) > 0 && len(parts[len(parts)-1]) == 0 {
+		parts = parts[:len(parts)-1]
+	}
+	if len(parts) == 0 || string(parts[0]) != "HISTORY_V1" {
+		return nil, fmt.Errorf("risposta history non valida")
+	}
+	var result []HistoryVersion
+	for index := 1; index+3 < len(parts); index += 4 {
+		size, _ := strconv.ParseInt(string(parts[index+3]), 10, 64)
+		result = append(result, HistoryVersion{
+			Original: string(parts[index]), Suffix: string(parts[index+1]),
+			TrashRel: string(parts[index+2]), Size: size,
+		})
+	}
+	return result, nil
+}
+
+// RestoreVersion restores one remote trash version by its history suffix.
+func normaliseVersionSuffix(suffix string) string {
+	version := strings.TrimPrefix(suffix, "-")
+	if !strings.HasSuffix(version, "Z") {
+		if regexp.MustCompile(`^\d{4}-\d{2}-\d{2}--\d{2}-\d{2}-\d{2}$`).MatchString(version) {
+			version += "-000000Z"
+		}
+	}
+	return version
+}
+
+func (c *Client) RestoreVersion(original, suffix, device string) (string, error) {
+	version := normaliseVersionSuffix(suffix)
+	statuses, err := c.RestoreBatch([]RestoreRequest{{Path: original, VersionTS: version}}, device)
+	if err != nil {
+		return "", err
+	}
+	return statuses[original], nil
+}
+
+type JournalPut struct {
+	Path, Digest, Causal string
+	Size, MTimeNS        int64
+}
+
+// JournalAppend records uploads in the authoritative NAS journal so other PCs
+// see them immediately. It uses V3 when causal versions are available.
+func (c *Client) JournalAppend(
+	repositoryID, txid, device string, puts []JournalPut,
+) (bool, error) {
+	if len(puts) == 0 {
+		return true, nil
+	}
+	useV3 := strings.ToLower(c.cfg.String("remote_causal_versions_available")) == "true"
+	fields := [][]byte{[]byte("JOURNAL_V3")}
+	if !useV3 {
+		fields = [][]byte{[]byte("JOURNAL_V2")}
+	}
+	fields = append(fields,
+		[]byte(repositoryID), []byte(txid), []byte(device),
+		[]byte(fmt.Sprint(time.Now().Unix())), []byte(fmt.Sprint(len(puts))),
+	)
+	for _, put := range puts {
+		fields = append(fields,
+			[]byte("PUT"), []byte(put.Path), []byte(put.Digest),
+			[]byte(fmt.Sprint(put.Size)), []byte(fmt.Sprint(put.MTimeNS)),
+		)
+		if useV3 {
+			fields = append(fields, []byte(put.Causal))
+		}
+	}
+	_, err := c.RunLocked(
+		[]string{c.script(), "--journal-append"}, nulJoin(fields), device, 5*time.Minute,
+	)
+	return err == nil, err
 }
 
 type StagedFile struct {

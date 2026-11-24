@@ -32,6 +32,31 @@ func TestScanAndResolveConflictGroup(t *testing.T) {
 	}
 }
 
+func TestKeepBothPreservesOriginal(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "doc.txt"), []byte("original"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	candidate := "doc (conflitto da pc2 abcdef12).txt"
+	if err := os.WriteFile(filepath.Join(root, candidate), []byte("copy"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	group := Group{Original: "doc.txt", Candidates: []string{candidate}}
+	kept, err := KeepBoth(root, group, candidate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if kept == "" {
+		t.Fatal("no kept path returned")
+	}
+	original, _ := os.ReadFile(filepath.Join(root, "doc.txt"))
+	copyBytes, _ := os.ReadFile(filepath.Join(root, kept))
+	if string(original) != "original" || string(copyBytes) != "copy" {
+		t.Fatal("keep-both did not preserve both versions")
+	}
+}
+
 func TestCreateUsesPythonNaming(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "a.txt"), []byte("x"), 0o600); err != nil {

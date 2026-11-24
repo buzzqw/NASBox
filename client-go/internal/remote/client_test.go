@@ -27,6 +27,13 @@ func TestShellQuoteKeepsSimplePathsReadable(t *testing.T) {
 	}
 }
 
+func TestRestoreVersionNormalisesSuffix(t *testing.T) {
+	version := normaliseVersionSuffix("-2026-11-24--07-00-00")
+	if version != "2026-11-24--07-00-00-000000Z" {
+		t.Fatalf("bad normalisation: %q", version)
+	}
+}
+
 func TestNulJoin(t *testing.T) {
 	if got := string(nulJoin([][]byte{[]byte("a"), []byte("b")})); got != "a\x00b\x00" {
 		t.Fatalf("bad NUL framing: %q", got)
