@@ -116,6 +116,23 @@ func nasConfig() map[string]string {
 	}
 }
 
+func TestExclusionMatchesNestedInternalDirectories(t *testing.T) {
+	cfg, _, _ := setupTest(t)
+	for _, path := range []string{
+		"LoreKeep/.venv/bin/python",
+		"a/node_modules/x.js",
+		"sub/.git/config",
+		"x/y.pyc",
+	} {
+		if !excluded(cfg, path) {
+			t.Fatalf("expected %q to be excluded", path)
+		}
+	}
+	if excluded(cfg, "LoreKeep/docs/readme.md") {
+		t.Fatal("normal file must not be excluded")
+	}
+}
+
 func TestScanLocalFailsClosedOnUnreadableFile(t *testing.T) {
 	cfg, _, root := setupTest(t)
 	path := filepath.Join(root, "locked.txt")

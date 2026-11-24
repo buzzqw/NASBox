@@ -51,6 +51,19 @@ func Preview(
 }
 
 func excluded(cfg *config.Config, path string) bool {
+	normalized := filepath.ToSlash(path)
+	parts := strings.Split(normalized, "/")
+	// Internal directories are excluded at any depth, not only at the root.
+	for _, part := range parts {
+		switch part {
+		case ".sync-trash", ".sync-partial", ".nasbox-staging", ".nasbox-root",
+			"@eaDir", ".git", ".venv", ".hg", ".svn", "__pycache__", "node_modules":
+			return true
+		}
+	}
+	if len(parts) > 0 && strings.HasSuffix(parts[len(parts)-1], ".pyc") {
+		return true
+	}
 	for _, key := range []string{"exclude_patterns", "selective_sync_excludes"} {
 		patterns, ok := cfg.Get(key).([]any)
 		if !ok {
@@ -62,8 +75,26 @@ func excluded(cfg *config.Config, path string) bool {
 				continue
 			}
 			text = strings.TrimSuffix(text, "/")
-			if text != "" && (path == text || strings.HasPrefix(path, text+"/")) {
+			if text == "" {
+				continue
+			}
+			if path == text || strings.HasPrefix(normalized, text+"/") {
 				return true
+			}
+			// A configured directory name excludes that component at any depth
+			// (e.g. "build/" excludes "a/build/x").
+			if !strings.Contains(text, "/") {
+				for _, part := range parts {
+					if part == text {
+						return true
+					}
+				}
+			}
+			// Simple basename globs such as "*.pyc".
+			if strings.HasPrefix(text, "*.") && len(parts) > 0 {
+				if strings.HasSuffix(parts[len(parts)-1], text[1:]) {
+					return true
+				}
 			}
 		}
 	}
