@@ -25,6 +25,7 @@ from PyQt6.QtCore import pyqtSignal
 
 from . import rsync_ops
 from . import delete_safety
+from . import perf
 from .conflicts import CONFLICT_TAG
 from .config import Config, normalize_conflict_policy
 from .i18n import t
@@ -229,7 +230,10 @@ class PushWorker(TransferWorker):
                 # walks the tree. Otherwise ScanWorker can claim the scheduler
                 # in this gap and delay the real push behind its own preview.
                 self.sync_state.mark_pending({""})
-                dirty_paths = self.sync_state.changed_paths(self.cfg.local_root())
+                with perf.timed(
+                    "changed_paths", lambda detail: self._log("PERF", "-", detail),
+                ):
+                    dirty_paths = self.sync_state.changed_paths(self.cfg.local_root())
                 swept_paths = set(dirty_paths)
                 # A full sweep reports every locally missing file, including
                 # deletions whose NAS counterpart is already gone. Those are
@@ -528,12 +532,15 @@ class PushWorker(TransferWorker):
             self._causal_journal_versions = {}
             self.transfer_phase.emit("upload", "checking", remote_progress_done, remote_progress_total)
             lock.set_activity("checking", remote_progress_done, remote_progress_total)
-            upload_paths, delete_requests, adopted_paths, remote_wins_paths, remote_adoptions, rename_plans = self._build_plan(
-                chunk_set,
-                remote_progress_offset=remote_progress_done,
-                remote_progress_total=remote_progress_total,
-                compact_remote_manifest=chunk_index == 0,
-            )
+            with perf.timed(
+                "push_plan_chunk", lambda detail: self._log("PERF", "-", detail),
+            ):
+                upload_paths, delete_requests, adopted_paths, remote_wins_paths, remote_adoptions, rename_plans = self._build_plan(
+                    chunk_set,
+                    remote_progress_offset=remote_progress_done,
+                    remote_progress_total=remote_progress_total,
+                    compact_remote_manifest=chunk_index == 0,
+                )
             self._completed_rename_paths = set()
             rename_items, failed_rename_paths = self._run_renames(rename_plans, watcher, lock)
             if failed_rename_paths:
@@ -711,12 +718,15 @@ class PushWorker(TransferWorker):
             self._staging_upload_paths = set()
             self.transfer_phase.emit("upload", "checking", remote_progress_done, remote_progress_total)
             lock.set_activity("checking", remote_progress_done, remote_progress_total)
-            upload_paths, delete_requests, adopted_paths, remote_wins_paths, remote_adoptions, rename_plans = self._build_plan(
-                chunk_set,
-                remote_progress_offset=remote_progress_done,
-                remote_progress_total=remote_progress_total,
-                compact_remote_manifest=chunk_index == 0,
-            )
+            with perf.timed(
+                "push_plan_chunk", lambda detail: self._log("PERF", "-", detail),
+            ):
+                upload_paths, delete_requests, adopted_paths, remote_wins_paths, remote_adoptions, rename_plans = self._build_plan(
+                    chunk_set,
+                    remote_progress_offset=remote_progress_done,
+                    remote_progress_total=remote_progress_total,
+                    compact_remote_manifest=chunk_index == 0,
+                )
             if (
                 not upload_paths or upload_paths != self._staging_upload_paths
                 or delete_requests or adopted_paths or remote_wins_paths or remote_adoptions or rename_plans

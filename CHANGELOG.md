@@ -4,6 +4,13 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 1.34.1 - 2026-11-24
+
+- Timer `PERF` nelle operazioni che possono causare picchi CPU (scan completa,
+  export del manifest, pianificazione dei blocchi push, manifest dell'audit):
+  il log registra solo le operazioni oltre 0,5 secondi, senza overhead nelle
+  sync normali. Serve a misurare prima di ottimizzare, non a cambiare il motore.
+
 ## 1.34.0 - 2026-11-24
 
 - **Undo stile Rewind**: le cancellazioni recenti vengono registrate nel DB

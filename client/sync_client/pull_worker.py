@@ -34,7 +34,7 @@ from pathlib import Path
 
 from PyQt6.QtCore import pyqtSignal
 
-from . import delete_safety, rsync_ops
+from . import delete_safety, perf, rsync_ops
 from .config import Config, SYNC_MODE_PULL_ONLY
 from .i18n import t
 from .lock_coordinator import LockCoordinator
@@ -134,7 +134,10 @@ class PullWorker(TransferWorker):
         except (AttributeError, TypeError):
             pending = set()
         if not pending:
-            pending = self.sync_state.changed_paths(self.cfg.local_root())
+            with perf.timed(
+                "changed_paths", lambda detail: self._log("PERF", "-", detail),
+            ):
+                pending = self.sync_state.changed_paths(self.cfg.local_root())
         # A pull deletes/overwrites files itself; inotify reports those writes
         # exactly like a user edit, so PushWorker can briefly queue them. That
         # is not an external local change and must not abort the very pull that
@@ -331,11 +334,15 @@ class PullWorker(TransferWorker):
                         if feed_result is not None and feed_result.result == "CHANGED"
                         else None
                     )
-                    snapshot = rsync_ops.remote_manifest_snapshot(
-                        self.cfg, self._conn, self._last_manifest_revision,
-                        known_revision=known_revision,
-                        previous_entries=self._last_manifest_entries,
-                    )
+                    with perf.timed(
+                        "manifest_export",
+                        lambda detail: self._log("PERF", "-", detail),
+                    ):
+                        snapshot = rsync_ops.remote_manifest_snapshot(
+                            self.cfg, self._conn, self._last_manifest_revision,
+                            known_revision=known_revision,
+                            previous_entries=self._last_manifest_entries,
+                        )
                     if snapshot is None:
                         raise rsync_ops.RemoteLockError("impossibile leggere la revisione del manifest NAS")
                     manifest_revision, manifest_entries = snapshot

@@ -27,7 +27,7 @@ from typing import Optional
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
-from . import delete_safety, integrity_audit, rsync_ops, trash
+from . import delete_safety, integrity_audit, perf, rsync_ops, trash
 from .config import Config
 from .logger import EventLogger
 from .pull_worker import PullWorker
@@ -277,7 +277,11 @@ class SyncEngine(QThread):
         if self._conn is None:
             return None
         try:
-            snapshot = rsync_ops.remote_manifest_snapshot(self.cfg, self._conn, -1)
+            with perf.timed(
+                "audit_manifest_export",
+                lambda detail: self.logger.log("PERF", "-", detail),
+            ):
+                snapshot = rsync_ops.remote_manifest_snapshot(self.cfg, self._conn, -1)
         except Exception:
             return None
         if snapshot is None:
