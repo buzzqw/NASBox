@@ -127,7 +127,8 @@ func Stats(retentionDays float64) (TrashStats, error) {
 func MoveToTrash(localRoot, relative string) error {
 	root := filepath.Clean(localRoot)
 	clean := filepath.Clean(filepath.FromSlash(relative))
-	if clean == "." || filepath.IsAbs(clean) || strings.HasPrefix(clean, "..") {
+	if clean == "." || filepath.IsAbs(clean) || clean == ".." ||
+		strings.HasPrefix(clean, ".."+string(os.PathSeparator)) {
 		return fmt.Errorf("percorso non valido: %s", relative)
 	}
 	source := filepath.Join(root, clean)

@@ -12,7 +12,6 @@ package storage
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -22,6 +21,7 @@ import (
 
 	"nasbox-go/internal/config"
 	"nasbox-go/internal/history"
+	"nasbox-go/internal/i18n"
 )
 
 const (
@@ -403,15 +403,15 @@ func RemoveDuplicates(root string, groups []DuplicateGroup, selected []string) C
 		}
 		seen[relative] = true
 		if keep[relative] {
-			result.Errors = append(result.Errors, fmt.Sprintf("il file da mantenere non può essere rimosso: %s", relative))
+			result.Errors = append(result.Errors, i18n.T("dupclean.error_keep", map[string]any{"path": relative}))
 			continue
 		}
 		if !allowed[relative] {
-			result.Errors = append(result.Errors, fmt.Sprintf("percorso non è un duplicato rimovibile: %s", relative))
+			result.Errors = append(result.Errors, i18n.T("dupclean.error_outside_root", map[string]any{"path": relative}))
 			continue
 		}
 		if err := history.MoveToTrash(root, relative); err != nil {
-			result.Errors = append(result.Errors, fmt.Sprintf("%s: %v", relative, err))
+			result.Errors = append(result.Errors, i18n.T("dupclean.error_move", map[string]any{"path": relative})+": "+err.Error())
 			continue
 		}
 		result.Moved = append(result.Moved, relative)
