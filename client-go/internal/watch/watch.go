@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
@@ -18,7 +19,17 @@ type Watcher struct {
 	events   chan string
 	debounce time.Duration
 	excluded func(string) bool
+	degraded atomic.Bool
 }
+
+// Reliable reports whether every folder is watched by inotify. When false
+// (no inotify, a folder that could not be added, a queue overflow) callers
+// must not trust incremental scans and fall back to complete walks.
+func (w *Watcher) Reliable() bool { return !w.degraded.Load() }
+
+// fallbackInterval is the rescan cadence without inotify: a complete walk
+// every debounce (2 s) on 100k+ files kept the CPU and disk busy forever.
+const fallbackInterval = 60 * time.Second
 
 func New(root string, debounce time.Duration, excluded func(string) bool) *Watcher {
 	if debounce <= 0 {
@@ -49,11 +60,14 @@ func (w *Watcher) Run(ctx context.Context) {
 	}
 	ticker := time.NewTicker(w.debounce)
 	defer ticker.Stop()
+	fallback := time.NewTicker(fallbackInterval)
+	defer fallback.Stop()
 	if err != nil {
 		// No inotify: a coarse scan sentinel is enough to keep sync alive.
+		w.degraded.Store(true)
 		for {
 			select {
-			case <-ticker.C:
+			case <-fallback.C:
 				select {
 				case w.events <- "":
 				case <-ctx.Done():
@@ -66,9 +80,10 @@ func (w *Watcher) Run(ctx context.Context) {
 	}
 	defer fsw.Close()
 	if err := fsw.Add(w.root); err != nil {
+		w.degraded.Store(true)
 		for {
 			select {
-			case <-ticker.C:
+			case <-fallback.C:
 				select {
 				case w.events <- "":
 				case <-ctx.Done():
@@ -88,7 +103,10 @@ func (w *Watcher) Run(ctx context.Context) {
 			if rel != "." && w.excluded != nil && w.excluded(filepath.ToSlash(rel)) {
 				return filepath.SkipDir
 			}
-			_ = fsw.Add(path)
+			if err := fsw.Add(path); err != nil {
+				// Typically fs.inotify.max_user_watches reached.
+				w.degraded.Store(true)
+			}
 			return nil
 		})
 	}

@@ -401,6 +401,68 @@ func (s *Store) IdentitySnapshot(repository string) (map[string]Identity, error)
 	return result, rows.Err()
 }
 
+// ObservationRecord is the stored local observation of one path.
+type ObservationRecord struct {
+	// AllNull: digest, size and mtime are all NULL (a recorded absence).
+	AllNull bool
+	Present bool
+	Digest  string
+	Size    int64
+	MTimeNS int64
+	Causal  string
+}
+
+// ObservationSnapshot loads every stored observation of a repository in one
+// query. The sync pass uses it to skip Observe (one SELECT per file) for
+// the files that did not change: on 120k files that was ~4 s per pass.
+func (s *Store) ObservationSnapshot(repository string) (map[string]ObservationRecord, error) {
+	rows, err := s.db.Query(`
+		SELECT path, digest, size, mtime_ns, causal FROM local_observation WHERE repository = ?
+	`, repository)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make(map[string]ObservationRecord)
+	for rows.Next() {
+		var path string
+		var digest, causalText sql.NullString
+		var size, mtime sql.NullInt64
+		if err := rows.Scan(&path, &digest, &size, &mtime, &causalText); err != nil {
+			return nil, err
+		}
+		result[path] = ObservationRecord{
+			AllNull: !digest.Valid && !size.Valid && !mtime.Valid,
+			Present: digest.Valid, Digest: digest.String, Size: size.Int64,
+			MTimeNS: mtime.Int64, Causal: causalText.String,
+		}
+	}
+	return result, rows.Err()
+}
+
+// UnchangedCausal returns the stored causal version when observation equals
+// the stored one exactly as Observe would decide (same digest, size, mtime;
+// or still absent), so Observe can be skipped.
+func UnchangedCausal(stored ObservationRecord, known bool, observation Observation) (string, bool) {
+	if !known || stored.Causal == "" {
+		return "", false
+	}
+	if _, ok := causal.Parse(stored.Causal); !ok {
+		return "", false
+	}
+	if observation.Present {
+		if stored.Present && stored.Digest == observation.Digest &&
+			stored.Size == observation.Size && stored.MTimeNS == observation.MTimeNS {
+			return stored.Causal, true
+		}
+		return "", false
+	}
+	if stored.AllNull {
+		return stored.Causal, true
+	}
+	return "", false
+}
+
 // UndoEntry is one restorable deletion.
 type UndoEntry struct {
 	BatchID, Path, VersionTS string

@@ -19,6 +19,13 @@ SHARE_ROOT=/volume1/NASBox
 # Examples: 30 (one month), 365 (one year), 0 (disabled -- never auto-prune)
 RETENTION_DAYS=90
 
+# --- History size limit for SHARE_ROOT/.sync-trash, in megabytes ---
+# 0 = no limit (only RETENTION_DAYS applies). Above the limit the oldest
+# versions are removed first, but never versions younger than
+# TRASH_MIN_KEEP_DAYS. Example: TRASH_MAX_MB=51200 (50 GB).
+TRASH_MAX_MB=0
+TRASH_MIN_KEEP_DAYS=7
+
 # --- How often the daemon itself wakes up to check/prune, in minutes ---
 # The daemon is a single always-running process with its own internal timer --
 # no cron/Task Scheduler involved. This just controls that internal sleep.

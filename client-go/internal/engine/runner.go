@@ -51,6 +51,10 @@ type Runner struct {
 	cancelTransfer context.CancelFunc
 	lastPrune      time.Time
 	lastFullSync   time.Time
+	localSnapshot  *LocalSnapshot
+	watchReliable  func() bool
+	lastActivity   time.Time
+	activity       chan struct{}
 	nextMirror     time.Time
 	auditRunning   atomic.Bool
 
@@ -69,6 +73,7 @@ func NewRunner(
 	runner := &Runner{
 		cfg: cfg, store: store, client: client, transfers: transfers,
 		dirty: map[string]bool{}, events: make(chan Event, 64), wake: make(chan struct{}, 1),
+		activity: make(chan struct{}, 1), lastActivity: time.Now(),
 		transferCtx: ctx, cancelTransfer: cancel,
 		manifestRevision: -1,
 		storm: conflicts.NewStormTracker(conflicts.StormConfig{
@@ -136,7 +141,40 @@ func (r *Runner) markDirty(path string) {
 	r.mu.Lock()
 	r.dirty[path] = true
 	r.mu.Unlock()
+	r.touchActivity()
 	r.notify()
+}
+
+// touchActivity records local or remote activity and wakes a power-saving
+// change feed so it returns to instant mode.
+func (r *Runner) touchActivity() {
+	r.mu.Lock()
+	r.lastActivity = time.Now()
+	r.mu.Unlock()
+	select {
+	case r.activity <- struct{}{}:
+	default:
+	}
+}
+
+// powerSavingIdle reports whether the change feed may relax: power saving is
+// on and nothing happened locally or remotely for a while.
+func (r *Runner) powerSavingIdle() (bool, time.Duration) {
+	if !remote.PowerSaving(r.cfg) {
+		return false, 0
+	}
+	idle := time.Duration(r.cfg.Int("power_saving_idle_minutes")) * time.Minute
+	if idle <= 0 {
+		idle = 15 * time.Minute
+	}
+	poll := time.Duration(r.cfg.Int("power_saving_poll_minutes")) * time.Minute
+	if poll <= 0 {
+		poll = 10 * time.Minute
+	}
+	r.mu.Lock()
+	quiet := time.Since(r.lastActivity) >= idle
+	r.mu.Unlock()
+	return quiet, poll
 }
 
 // markRemoteDirty asks for a delta pull without forcing a full manifest
@@ -213,6 +251,9 @@ func (r *Runner) Run(ctx context.Context) error {
 	watchCtx, stopWatch := context.WithCancel(ctx)
 	defer stopWatch()
 	go watcher.Run(watchCtx)
+	r.mu.Lock()
+	r.watchReliable = watcher.Reliable
+	r.mu.Unlock()
 	go r.watchRemoteChanges(watchCtx)
 
 	ticker := time.NewTicker(interval)
@@ -232,7 +273,15 @@ func (r *Runner) Run(ctx context.Context) error {
 				r.markDirty("")
 			}
 		case <-mirrorTicker.C:
-			r.markDirty("")
+			// Only mirrors are due: run them in a normal (delta, incremental)
+			// pass. Before 1.1.0 this forced a complete pass every 5 minutes
+			// even with no mirror configured.
+			if len(mirror.Configured(r.cfg)) == 0 {
+				continue
+			}
+			r.mu.Lock()
+			r.remotePending = true
+			r.mu.Unlock()
 		case <-r.wake:
 		case <-ctx.Done():
 			return nil
@@ -278,15 +327,29 @@ func (r *Runner) Run(ctx context.Context) error {
 			}
 		}
 		r.emit("status", i18n.T("metrics.sync_busy_title", nil))
+		manifestStart := time.Now()
 		manifest, err := r.loadManifest(fullPass)
+		if r.logger != nil {
+			_ = r.logger.Event("PERF", "-", fmt.Sprintf("manifest: %.2fs (completo=%v)", time.Since(manifestStart).Seconds(), fullPass))
+		}
 		if err != nil {
 			r.handleFailure(err)
 			continue
 		}
-		result, err := SyncOnceWithManifest(r.cfg, r.store, r.client, r.transfers, manifest, r.storm)
+		result, err := SyncPass(r.cfg, r.store, r.client, r.transfers, manifest, r.scanScope(paths, fullPass), r.storm)
+		r.mu.Lock()
+		if err == nil && result.Local != nil {
+			r.localSnapshot = result.Local
+		} else {
+			r.localSnapshot = nil // never reuse a snapshot from a failed pass
+		}
+		r.mu.Unlock()
 		if err != nil {
 			r.handleFailure(err)
 			continue
+		}
+		if r.logger != nil && len(result.Timings) > 0 {
+			_ = r.logger.Event("PERF", "-", "sync: "+strings.Join(result.Timings, ", "))
 		}
 		if result.Blocked != "" {
 			r.emit("blocked", result.Blocked)
@@ -432,6 +495,25 @@ func (r *Runner) watchRemoteChanges(ctx context.Context) {
 			return
 		default:
 		}
+		// Power saving: after a quiet period, replace the continuous long
+		// poll with a short check every few minutes, so the NAS (and its
+		// disks) can rest. Any local change switches back immediately.
+		if quiet, poll := r.powerSavingIdle(); quiet {
+			select {
+			case <-ctx.Done():
+				return
+			case <-r.activity:
+				continue
+			case <-time.After(poll):
+			}
+			if revision := r.manifestCursor(); revision >= 0 {
+				if wait, err := r.client.WaitForRevision(revision, 0); err == nil && wait.Result == "CHANGED" {
+					r.touchActivity()
+					r.markRemoteDirty()
+				}
+			}
+			continue
+		}
 		revision := r.manifestCursor()
 		if revision < 0 {
 			select {
@@ -451,6 +533,7 @@ func (r *Runner) watchRemoteChanges(ctx context.Context) {
 			continue
 		}
 		if wait.Result == "CHANGED" {
+			r.touchActivity()
 			r.markRemoteDirty()
 			// Give the sync loop time to consume the delta before asking again;
 			// otherwise a burst of commits would spin the SSH channel.
@@ -513,4 +596,31 @@ func (r *Runner) handleFailure(err error) {
 		return
 	}
 	r.emit("error", message)
+}
+
+// fullScanInterval bounds how long incremental scans are trusted.
+func (r *Runner) fullScanInterval() time.Duration {
+	if seconds := r.cfg.Int("full_scan_interval_seconds"); seconds > 0 {
+		return time.Duration(seconds) * time.Second
+	}
+	return 30 * time.Minute
+}
+
+// scanScope decides between a complete walk and an incremental scan.
+func (r *Runner) scanScope(paths []string, fullPass bool) *ScanScope {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	scope := &ScanScope{Previous: r.localSnapshot, Full: fullPass}
+	if r.localSnapshot == nil || r.watchReliable == nil || !r.watchReliable() ||
+		time.Since(r.localSnapshot.FullAt) >= r.fullScanInterval() || len(paths) > 5000 {
+		scope.Full = true
+	}
+	for _, path := range paths {
+		if path == "" {
+			scope.Full = true
+			continue
+		}
+		scope.Dirty = append(scope.Dirty, path)
+	}
+	return scope
 }

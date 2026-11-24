@@ -33,7 +33,7 @@
 #
 set -uo pipefail
 
-VERSION="3.26.0"
+VERSION="3.27.0"
 SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -179,6 +179,8 @@ load_config() {
     SYNC_LOCK_MAX_AGE_MINUTES=0
     CHECK_INTERVAL_MINUTES=60
     PRUNE_MAX_FILES_PER_PASS=500
+    TRASH_MAX_MB=0
+    TRASH_MIN_KEEP_DAYS=7
     STAGING_RETENTION_HOURS=168
     PRUNE_MAX_STAGING_PER_PASS=20
     LOG_MAX_BYTES=5242880
@@ -197,6 +199,8 @@ load_config() {
             SYNC_LOCK_MAX_AGE_MINUTES) SYNC_LOCK_MAX_AGE_MINUTES="$value" ;;
             CHECK_INTERVAL_MINUTES) CHECK_INTERVAL_MINUTES="$value" ;;
             PRUNE_MAX_FILES_PER_PASS) PRUNE_MAX_FILES_PER_PASS="$value" ;;
+            TRASH_MAX_MB) value="${value%%#*}"; TRASH_MAX_MB="${value//[[:space:]]/}" ;;
+            TRASH_MIN_KEEP_DAYS) value="${value%%#*}"; TRASH_MIN_KEEP_DAYS="${value//[[:space:]]/}" ;;
             STAGING_RETENTION_HOURS) STAGING_RETENTION_HOURS="$value" ;;
             PRUNE_MAX_STAGING_PER_PASS) PRUNE_MAX_STAGING_PER_PASS="$value" ;;
             LOG_MAX_BYTES)
@@ -232,6 +236,8 @@ load_config() {
 
     [[ -n "$SHARE_ROOT" ]] || { log ERROR "SHARE_ROOT non impostato in $CONFIG_FILE"; exit 1; }
     [[ "$RETENTION_DAYS" =~ ^[0-9]+$ ]] || { log ERROR "RETENTION_DAYS deve essere un intero >= 0"; exit 1; }
+    [[ "$TRASH_MAX_MB" =~ ^[0-9]+$ ]] || { log ERROR "TRASH_MAX_MB deve essere un intero >= 0"; exit 1; }
+    [[ "$TRASH_MIN_KEEP_DAYS" =~ ^[0-9]+$ ]] || { log ERROR "TRASH_MIN_KEEP_DAYS deve essere un intero >= 0"; exit 1; }
     [[ "$TOMBSTONE_TTL_DAYS" =~ ^[0-9]+$ ]] || { log ERROR "TOMBSTONE_TTL_DAYS deve essere un intero >= 0"; exit 1; }
     [[ "$SYNC_LOCK_MAX_AGE_MINUTES" =~ ^[0-9]+$ ]] || { log ERROR "SYNC_LOCK_MAX_AGE_MINUTES deve essere un intero >= 0"; exit 1; }
     [[ "$CHECK_INTERVAL_MINUTES" =~ ^[1-9][0-9]*$ ]] || { log ERROR "CHECK_INTERVAL_MINUTES deve essere un intero >= 1"; exit 1; }
@@ -667,7 +673,7 @@ cmd_journal_append() {
         echo "journal: flock non disponibile" >&2
         return 1
     fi
-    exec 9>"$JOURNAL_LOCK_FILE"
+    exec 9>>"$JOURNAL_LOCK_FILE"
     if ! flock -x 9; then
         rm -f "$tmp"
         exec 9>&-
@@ -735,7 +741,7 @@ cmd_journal_compact() {
         echo "Compattazione impossibile: flock non disponibile." >&2
         return 1
     fi
-    exec 9>"$JOURNAL_LOCK_FILE"
+    exec 9>>"$JOURNAL_LOCK_FILE"
     flock -x 9 || { exec 9>&-; return 1; }
     recover_pending_transactions_unlocked || { flock -u 9; exec 9>&-; return 1; }
     compact_manifest_unlocked
@@ -752,7 +758,7 @@ cmd_manifest_export() {
     # other readers or rewriting anything. Writers still take the exclusive
     # side, so an export cannot observe half an append.
     if command -v flock >/dev/null 2>&1; then
-        exec 9>"$JOURNAL_LOCK_FILE" 2>/dev/null || true
+        exec 9>>"$JOURNAL_LOCK_FILE" 2>/dev/null || true
         if flock -s 9 2>/dev/null; then
             lock_held="true"
         fi
@@ -862,7 +868,7 @@ cmd_manifest_export_delta() {
 
     ensure_journal_files
     if command -v flock >/dev/null 2>&1; then
-        exec 9>"$JOURNAL_LOCK_FILE" 2>/dev/null || true
+        exec 9>>"$JOURNAL_LOCK_FILE" 2>/dev/null || true
         if flock -s 9 2>/dev/null; then
             lock_held="true"
         fi
@@ -986,7 +992,7 @@ cmd_manifest_get() {
     ensure_journal_files
     local lock_held="false"
     if command -v flock >/dev/null 2>&1; then
-        exec 9>"$JOURNAL_LOCK_FILE" 2>/dev/null || true
+        exec 9>>"$JOURNAL_LOCK_FILE" 2>/dev/null || true
         if flock -s 9 2>/dev/null; then
             lock_held="true"
         fi
@@ -1359,7 +1365,7 @@ valid_staging_directory() {
 }
 
 sync_transfer_lock_is_held() {
-    exec 8>"$SYNC_LOCK_FILE" || return 1
+    exec 8>>"$SYNC_LOCK_FILE" || return 1
     if flock -n 8; then
         flock -u 8
         exec 8>&-
@@ -1538,7 +1544,7 @@ cmd_staging_publish() {
         echo "staging-publish: lease NAS non posseduto dal device" >&2
         return 75
     fi
-    exec 9>"$JOURNAL_LOCK_FILE"
+    exec 9>>"$JOURNAL_LOCK_FILE"
     flock -x 9 || { exec 9>&-; rm -f "$paths_file"; return 1; }
     ensure_journal_files
     recover_pending_transactions_unlocked || { flock -u 9; exec 9>&-; rm -f "$paths_file"; return 1; }
@@ -1623,7 +1629,7 @@ cmd_checked_delete() {
 
     require_sync_transfer_owner "$device" || return $?
 
-    exec 9>"$JOURNAL_LOCK_FILE"
+    exec 9>>"$JOURNAL_LOCK_FILE"
     flock -x 9 || { exec 9>&-; return 1; }
     ensure_journal_files
     recover_pending_transactions_unlocked || { flock -u 9; exec 9>&-; return 1; }
@@ -1739,7 +1745,7 @@ cmd_restore_batch() {
     done
 
     require_sync_transfer_owner "$device" || return $?
-    exec 9>"$JOURNAL_LOCK_FILE"
+    exec 9>>"$JOURNAL_LOCK_FILE"
     flock -x 9 || { exec 9>&-; return 1; }
     ensure_journal_files
     recover_pending_transactions_unlocked || { flock -u 9; exec 9>&-; return 1; }
@@ -1953,7 +1959,7 @@ cmd_browse_delete() {
     fi
     backup="$SHARE_ROOT/$TRASH_DIRNAME/$relative-$run_ts"
 
-    exec 9>"$JOURNAL_LOCK_FILE"
+    exec 9>>"$JOURNAL_LOCK_FILE"
     flock -x 9 || { exec 9>&-; printf 'BROWSE_DELETE_V1\0ERROR\0lock non acquisito\0'; return 1; }
     ensure_journal_files
     recover_pending_transactions_unlocked || { flock -u 9; exec 9>&-; printf 'BROWSE_DELETE_V1\0ERROR\0recupero transazioni fallito\0'; return 1; }
@@ -2065,7 +2071,7 @@ cmd_browse_rename() {
         printf '%s\0ERROR\0esiste gia un percorso con questo nome\0' "$magic"; return 1
     fi
 
-    exec 9>"$JOURNAL_LOCK_FILE"
+    exec 9>>"$JOURNAL_LOCK_FILE"
     flock -x 9 || { exec 9>&-; printf '%s\0ERROR\0lock non acquisito\0' "$magic"; return 1; }
     ensure_journal_files
     recover_pending_transactions_unlocked || { flock -u 9; exec 9>&-; printf '%s\0ERROR\0recupero transazioni fallito\0' "$magic"; return 1; }
@@ -2612,6 +2618,67 @@ staging_is_referenced() {
     return 1
 }
 
+# --- History quota (TRASH_MAX_MB) -----------------------------------------
+# Age retention alone lets .sync-trash grow without bound when many large
+# files change. The quota pass removes the OLDEST versions first until the
+# history fits, never touching versions younger than TRASH_MIN_KEEP_DAYS.
+# The usage is recorded in TRASH_USAGE_FILE so --print-config can report it
+# without walking the tree (clients show it; the NAS disks stay asleep).
+
+trash_usage_file() { printf '%s/trash-usage' "$STATE_DIR"; }
+
+record_trash_usage() {
+    local bytes="$1" files="$2" tmp
+    tmp="$(trash_usage_file).tmp.$$"
+    if printf '%s %s %s\n' "$bytes" "$files" "$(date '+%s')" > "$tmp" 2>/dev/null; then
+        mv -f "$tmp" "$(trash_usage_file)" 2>/dev/null || rm -f "$tmp"
+    fi
+}
+
+# enforce_trash_quota <trash>: prints the number of removed versions.
+enforce_trash_quota() {
+    local trash="$1" listing total=0 files=0 limit keep_seconds now removed=0
+    local epoch size file
+    listing="$(mktemp "$STATE_DIR/quota-list.XXXXXX")" || { echo 0; return 1; }
+    find "$trash" -type f -printf '%T@ %s %p\0' 2>/dev/null | sort -z -n > "$listing"
+    while IFS= read -r -d '' line; do
+        size="${line#* }"; size="${size%% *}"
+        [[ "$size" =~ ^[0-9]+$ ]] || continue
+        total=$(( total + size )); files=$(( files + 1 ))
+    done < "$listing"
+    limit=$(( TRASH_MAX_MB * 1048576 ))
+    keep_seconds=$(( TRASH_MIN_KEEP_DAYS * 86400 ))
+    now=$(date '+%s')
+    if (( TRASH_MAX_MB > 0 && total > limit )); then
+        exec 8>>"$SYNC_LOCK_FILE" || { rm -f "$listing"; echo 0; return 1; }
+        if flock -n 8; then
+            while IFS= read -r -d '' line && (( total > limit )); do
+                epoch="${line%% *}"; epoch="${epoch%%.*}"
+                size="${line#* }"; file="${size#* }"; size="${size%% *}"
+                [[ "$epoch" =~ ^[0-9]+$ && "$size" =~ ^[0-9]+$ ]] || continue
+                (( now - epoch >= keep_seconds )) || break
+                [[ "$file" == "$trash"/* && -f "$file" ]] || continue
+                if [[ "$DRY_RUN" == "true" ]]; then
+                    log INFO "[dry-run] quota storico: rimuoverei ${file#"$trash"/}"
+                elif rm -f "$file"; then
+                    log_event "PRUNE_REMOTE_TRASH" "${file#"$trash"/}" "quota=${TRASH_MAX_MB}MB"
+                else
+                    continue
+                fi
+                total=$(( total - size )); files=$(( files - 1 )); removed=$(( removed + 1 ))
+            done < "$listing"
+            flock -u 8
+            log INFO "Quota storico ${TRASH_MAX_MB} MB: rimosse $removed versioni, occupati $(( total / 1048576 )) MB."
+        else
+            log INFO "Quota storico rimandata: trasferimento NASBox in corso."
+        fi
+        exec 8>&-
+    fi
+    rm -f "$listing"
+    record_trash_usage "$total" "$files"
+    echo "$removed"
+}
+
 prune_staging_candidates() {
     local candidates="$1" directory removed=0 processed=0
     while IFS= read -r -d '' directory; do
@@ -2683,6 +2750,9 @@ run_once_pass() {
         log ERROR "Impossibile eseguire il pruning: flock non disponibile."
         return 1
     }
+    # Maintenance walks the history tree: run it at low CPU priority so DSM
+    # and file sharing stay responsive (ionice is not available on DSM).
+    command -v renice >/dev/null 2>&1 && renice -n 10 -p $$ >/dev/null 2>&1 || true
     log INFO "sync-daemon-server v$VERSION: avvio pass di pruning (SHARE_ROOT=$SHARE_ROOT, retention=${RETENTION_DAYS}gg, dry-run=$DRY_RUN)"
     maintain_state_files
     local trash file_candidates dir_candidates staging_candidates
@@ -2696,7 +2766,7 @@ run_once_pass() {
                 file_candidates="$(mktemp "$STATE_DIR/prune-files.XXXXXX")" || return 1
                 collect_prune_candidates "$trash" "$file_candidates"
                 if [[ -s "$file_candidates" ]]; then
-                    exec 8>"$SYNC_LOCK_FILE" || { rm -f "$file_candidates"; return 1; }
+                    exec 8>>"$SYNC_LOCK_FILE" || { rm -f "$file_candidates"; return 1; }
                     if flock -n 8; then
                         removed="$(prune_candidates "$trash" "$file_candidates")"
                         flock -u 8
@@ -2723,7 +2793,7 @@ run_once_pass() {
                     dir_candidates="$(mktemp "$STATE_DIR/prune-dirs.XXXXXX")" || return 1
                     collect_empty_dirs "$trash" "$dir_candidates"
                     if [[ -s "$dir_candidates" ]]; then
-                        exec 8>"$SYNC_LOCK_FILE" || { rm -f "$dir_candidates"; return 1; }
+                        exec 8>>"$SYNC_LOCK_FILE" || { rm -f "$dir_candidates"; return 1; }
                         if flock -n 8; then
                             remove_empty_dirs "$dir_candidates"
                             flock -u 8
@@ -2738,13 +2808,16 @@ run_once_pass() {
                 log INFO "Pruning saltato: la versione piu' vecchia dello storico e' ancora entro la retention (${RETENTION_DAYS}gg)."
             fi
         fi
+        # Quota and usage: one metadata walk per pass (every
+        # CHECK_INTERVAL_MINUTES), never on client requests.
+        enforce_trash_quota "$trash" >/dev/null
     else
         log INFO "Nessuno storico ancora presente ($trash non esiste)."
     fi
     staging_candidates="$(mktemp "$STATE_DIR/prune-staging.XXXXXX")" || return 1
     collect_staging_candidates "$SHARE_ROOT/$STAGING_DIRNAME" "$staging_candidates"
     if [[ -s "$staging_candidates" ]]; then
-        exec 8>"$SYNC_LOCK_FILE" || { rm -f "$staging_candidates"; return 1; }
+        exec 8>>"$SYNC_LOCK_FILE" || { rm -f "$staging_candidates"; return 1; }
         if flock -n 8; then
             prune_staging_candidates "$staging_candidates"
             flock -u 8
@@ -2766,7 +2839,7 @@ run_foreground() {
         log ERROR "Impossibile avviare il demone: flock non disponibile."
         return 1
     fi
-    exec 9>"$DAEMON_LOCK_FILE"
+    exec 9>>"$DAEMON_LOCK_FILE"
     if ! flock -n 9; then
         log WARN "Avvio ignorato: un'altra istanza del demone è già attiva."
         return 0
@@ -2877,7 +2950,7 @@ read_sync_lock_diagnostics() {
     SYNC_LOCK_PHASE=""
     SYNC_LOCK_PROGRESS_DONE="0"
     SYNC_LOCK_PROGRESS_TOTAL="0"
-    exec 8>"$SYNC_LOCK_FILE" || return 0
+    exec 8>>"$SYNC_LOCK_FILE" || return 0
     if flock -n 8; then
         flock -u 8
         exec 8>&-
@@ -2943,7 +3016,7 @@ cmd_transfer_wait() {
     mkdir -p "$TRANSFER_QUEUE_DIR" || return 1
     TRANSFER_ACTIVE_TICKET="$TRANSFER_QUEUE_DIR/$request_id.ticket"
     now=$(date '+%s')
-    exec 7>"$TRANSFER_QUEUE_LOCK_FILE"
+    exec 7>>"$TRANSFER_QUEUE_LOCK_FILE"
     flock -x 7 || { exec 7>&-; return 1; }
     printf '%s|%s|%s|%s\n' "$priority" "$now" "$device" "$$" > "$TRANSFER_ACTIVE_TICKET" || {
         flock -u 7; exec 7>&-; return 1;
@@ -2961,15 +3034,15 @@ cmd_transfer_wait() {
     trap 'exit 143' HUP INT TERM
 
     while :; do
-        exec 7>"$TRANSFER_QUEUE_LOCK_FILE" || return 1
+        exec 7>>"$TRANSFER_QUEUE_LOCK_FILE" || return 1
         flock -x 7 || { exec 7>&-; return 1; }
         queue_head=$(transfer_queue_head || true)
         if [[ "$queue_head" == "$TRANSFER_ACTIVE_TICKET" ]]; then
-            exec 8>"$SYNC_LOCK_FILE" || { flock -u 7; exec 7>&-; return 1; }
+            exec 8>>"$SYNC_LOCK_FILE" || { flock -u 7; exec 7>&-; return 1; }
             if flock -n 8; then
                 # Recovery of a staged publish may itself move files, so do it
                 # only after this SSH session owns the global transfer lease.
-                exec 9>"$JOURNAL_LOCK_FILE" || { flock -u 8; exec 8>&-; flock -u 7; exec 7>&-; return 1; }
+                exec 9>>"$JOURNAL_LOCK_FILE" || { flock -u 8; exec 8>&-; flock -u 7; exec 7>&-; return 1; }
                 if ! flock -x 9 || ! recover_pending_transactions_unlocked; then
                     flock -u 9; exec 9>&-
                     flock -u 8; exec 8>&-
@@ -3090,6 +3163,15 @@ cmd_print_config() {
         echo "REPOSITORY_READY=false"
     fi
     echo "RETENTION_DAYS=$RETENTION_DAYS"
+    echo "TRASH_MAX_MB=$TRASH_MAX_MB"
+    echo "TRASH_MIN_KEEP_DAYS=$TRASH_MIN_KEEP_DAYS"
+    local usage_bytes="" usage_files="" usage_at=""
+    if [[ -r "$(trash_usage_file)" ]]; then
+        read -r usage_bytes usage_files usage_at < "$(trash_usage_file)" || true
+    fi
+    echo "TRASH_USED_BYTES=${usage_bytes}"
+    echo "TRASH_FILES=${usage_files}"
+    echo "TRASH_USAGE_AT=${usage_at}"
     echo "TOMBSTONE_TTL_DAYS=$TOMBSTONE_TTL_DAYS"
     echo "SYNC_LOCK_MAX_AGE_MINUTES=0"
     read_sync_lock_diagnostics
@@ -3288,7 +3370,7 @@ cmd_metrics() {
     ' /proc/net/dev 2>/dev/null || true)
 
     if [[ -e "$SYNC_LOCK_FILE" ]]; then
-        exec 8>"$SYNC_LOCK_FILE" 2>/dev/null || true
+        exec 8>>"$SYNC_LOCK_FILE" 2>/dev/null || true
         if ! flock -n 8 2>/dev/null; then
             lock_held="true"
             if [[ -f "$SYNC_LOCK_OWNER_FILE" ]]; then

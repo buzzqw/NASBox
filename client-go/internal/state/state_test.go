@@ -123,3 +123,60 @@ func TestIdentityAndUndoRoundTrip(t *testing.T) {
 		t.Fatal("undo should be consumed after apply")
 	}
 }
+
+// The snapshot fast path must return exactly what Observe returns, and only
+// skip Observe when Observe would not change anything.
+func TestUnchangedCausalMatchesObserve(t *testing.T) {
+	store := openTestStore(t)
+	repo, device := "repo1", "dev-a"
+	present := Observation{Digest: "d1", Size: 3, MTimeNS: 10, Present: true}
+	absent := Observation{Present: false}
+	first, err := store.Observe(repo, "a.txt", device, present)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gone, err := store.Observe(repo, "b.txt", device, absent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := store.ObservationSnapshot(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		path        string
+		observation Observation
+		skip        bool
+		want        string
+	}{
+		{"a.txt", present, true, first},
+		{"a.txt", Observation{Digest: "d2", Size: 3, MTimeNS: 10, Present: true}, false, ""},
+		{"a.txt", absent, false, ""},
+		{"b.txt", absent, true, gone},
+		{"b.txt", present, false, ""},
+		{"nuovo.txt", present, false, ""},
+	} {
+		record, known := snapshot[tc.path]
+		got, skip := UnchangedCausal(record, known, tc.observation)
+		if skip != tc.skip || got != tc.want {
+			t.Fatalf("%s %+v: skip=%v got=%q, want skip=%v %q", tc.path, tc.observation, skip, got, tc.skip, tc.want)
+		}
+		if skip {
+			again, err := store.Observe(repo, tc.path, device, tc.observation)
+			if err != nil || again != got {
+				t.Fatalf("Observe disagrees with the fast path: %q vs %q (%v)", again, got, err)
+			}
+		}
+	}
+}
+
+func openTestStore(t *testing.T) *Store {
+	t.Helper()
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	store, err := Open(config.New(""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { store.Close() })
+	return store
+}

@@ -205,7 +205,7 @@ func (b *SSHBuilder) Options() []string {
 		opts = append(opts,
 			"-o", "ControlMaster=auto",
 			"-o", "ControlPath="+b.socketDir+"/cm-%C",
-			"-o", "ControlPersist=60",
+			"-o", "ControlPersist="+strconv.Itoa(controlPersist(b.cfg)),
 		)
 	}
 	if b.cfg.Bool("ssh_host_key_pinned") {
@@ -222,6 +222,23 @@ func (b *SSHBuilder) Options() []string {
 		opts = append(opts, "-o", "ProxyJump="+jumpUser+"@"+jumpHost+":"+strconv.Itoa(jumpPort(b.cfg)))
 	}
 	return opts
+}
+
+// controlPersist keeps the shared SSH connection open between commands. In
+// NAS power-saving mode it stays open for an hour: every new connection is a
+// full SSH login, which DSM logs on the system partition (on the same HDDs)
+// and so wakes the disks.
+func controlPersist(cfg *config.Config) int {
+	if PowerSaving(cfg) {
+		return 3600
+	}
+	return 60
+}
+
+// PowerSaving reports whether NAS power-saving mode is enabled
+// ("power_saving": "auto"; default "off").
+func PowerSaving(cfg *config.Config) bool {
+	return strings.EqualFold(strings.TrimSpace(cfg.String("power_saving")), "auto")
 }
 
 // Args returns the complete ssh argv, including the binary name.
@@ -896,7 +913,7 @@ type HistoryVersion struct {
 }
 
 func (c *Client) HistoryList() ([]HistoryVersion, error) {
-	output, err := c.Run([]string{c.script(), "--history-list"}, nil, 2*time.Minute)
+	output, err := c.Run([]string{"nice", "-n", "10", c.script(), "--history-list"}, nil, 2*time.Minute)
 	if err != nil {
 		return nil, err
 	}

@@ -48,7 +48,8 @@ func (c *Client) FileStatesCurrent(paths []string) (map[string]FileState, error)
 	for _, path := range paths {
 		fields = append(fields, []byte(path))
 	}
-	output, err := c.Run([]string{c.script(), "--file-states-current"}, nulJoin(fields), 10*time.Minute)
+	// Hashing on the NAS: lower priority so DSM and other services stay responsive.
+	output, err := c.Run([]string{"nice", "-n", "10", c.script(), "--file-states-current"}, nulJoin(fields), 10*time.Minute)
 	if err != nil {
 		return nil, err
 	}
@@ -153,7 +154,7 @@ func (c *Client) DirSizes(relative string) (map[string]int64, error) {
 		base += "/" + relative
 	}
 	output, err := c.Run([]string{"sh", "-c",
-		"cd " + shellQuote(base) + " && du -sk -- */ 2>/dev/null; true"}, nil, 10*time.Minute)
+		"cd " + shellQuote(base) + " && nice -n 10 du -sk -- */ 2>/dev/null; true"}, nil, 10*time.Minute)
 	if err != nil {
 		return nil, err
 	}

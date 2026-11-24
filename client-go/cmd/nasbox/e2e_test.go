@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"syscall"
@@ -376,7 +377,7 @@ func TestE2EServerSelfUpdate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	newer := strings.Replace(string(content), "VERSION=\"3.26.0\"", "VERSION=\"9.9.9\"", 1)
+	newer := regexp.MustCompile(`(?m)^VERSION="[0-9.]+"`).ReplaceAllString(string(content), `VERSION="9.9.9"`)
 	if newer == string(content) {
 		t.Skip("versione del server non riconosciuta nello script")
 	}
@@ -482,6 +483,82 @@ func TestE2ESelectiveSyncIsSafe(t *testing.T) {
 		}
 		if readOrEmpty(filepath.Join(nas.share, filepath.FromSlash(path))) == "<assente>" {
 			t.Fatalf("escludere una cartella non deve cancellare %s dal NAS", path)
+		}
+	}
+}
+
+// Server 3.27.0: the history quota removes the oldest versions first, keeps
+// recent ones, reports the usage in --print-config; lock files are opened
+// without truncation (no disk writes while idle: HDD spin-down).
+func TestE2EServerTrashQuotaAndQuietLocks(t *testing.T) {
+	nas := newE2ENAS(t)
+	conf := filepath.Join(filepath.Dir(nas.script), "server.conf")
+	if err := os.WriteFile(conf, []byte("SHARE_ROOT="+nas.share+"\nRETENTION_DAYS=0\nTRASH_MAX_MB=1\nTRASH_MIN_KEEP_DAYS=1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	trash := filepath.Join(nas.share, ".sync-trash")
+	if err := os.MkdirAll(filepath.Join(trash, "doc"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	versions := []struct {
+		name string
+		age  time.Duration
+	}{
+		{"doc/a.bin-2026-01-01--00-00-00-000000Z", 90 * 24 * time.Hour},
+		{"doc/a.bin-2026-02-01--00-00-00-000000Z", 60 * 24 * time.Hour},
+		{"doc/a.bin-2026-03-01--00-00-00-000000Z", 30 * 24 * time.Hour},
+		{"doc/a.bin-2026-11-24--00-00-00-000000Z", time.Hour}, // too recent: never removed
+	}
+	payload := bytes.Repeat([]byte("x"), 600*1024)
+	for _, version := range versions {
+		path := filepath.Join(trash, filepath.FromSlash(version.name))
+		if err := os.WriteFile(path, payload, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		stamp := now.Add(-version.age)
+		if err := os.Chtimes(path, stamp, stamp); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if out, err := exec.Command(nas.script, "--run-once").CombinedOutput(); err != nil {
+		t.Fatalf("run-once: %v\n%s", err, out)
+	}
+	left, _ := filepath.Glob(filepath.Join(trash, "doc", "a.bin-*"))
+	names := []string{}
+	for _, path := range left {
+		names = append(names, filepath.Base(path))
+	}
+	// 4 x 600 KB with a 1 MB quota: the three old versions go (oldest
+	// first) and the protected recent one stays.
+	if strings.Join(names, ",") != "a.bin-2026-11-24--00-00-00-000000Z" {
+		t.Fatalf("versioni rimaste: %v", names)
+	}
+	out, err := exec.Command(nas.script, "--print-config").CombinedOutput()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(out), "TRASH_MAX_MB=1") || !strings.Contains(string(out), "TRASH_USED_BYTES=") ||
+		strings.Contains(string(out), "TRASH_USED_BYTES=\n") {
+		t.Fatalf("print-config deve riportare quota e occupazione:\n%s", out)
+	}
+
+	// Quiet locks: an idle read-only command must not change the lock files.
+	state := filepath.Join(filepath.Dir(nas.script), "state")
+	locks, _ := filepath.Glob(filepath.Join(state, "*.lock"))
+	old := now.Add(-time.Hour)
+	for _, lock := range locks {
+		_ = os.Chtimes(lock, old, old)
+	}
+	for _, args := range [][]string{{"--print-config"}, {"--journal-status"}, {"--manifest-export", ""}} {
+		if out, err := exec.Command(nas.script, args...).CombinedOutput(); err != nil {
+			t.Fatalf("%v: %v\n%s", args, err, out)
+		}
+	}
+	for _, lock := range locks {
+		info, err := os.Stat(lock)
+		if err == nil && info.ModTime().After(old.Add(time.Minute)) {
+			t.Fatalf("%s modificato da un comando di sola lettura: i dischi non potrebbero dormire", filepath.Base(lock))
 		}
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -73,6 +74,22 @@ func (c *clientApp) runHealthChecks() []healthCheck {
 			add("error", tr("ui.health.server", nil), serverVersion, tr("ui.health.server_old_hint", map[string]any{"min": minimum}))
 		} else {
 			add("ok", tr("ui.health.server", nil), fmt.Sprintf("%s · %s", c.cfg.String("nas_lan"), serverVersion), "")
+		}
+		if strings.ToLower(values["RUNNING"]) != "true" {
+			add("warn", tr("ui.health.daemon", nil), tr("ui.health.daemon_stopped", nil), tr("ui.health.daemon_hint", nil))
+		} else {
+			add("ok", tr("ui.health.daemon", nil), tr("ui.health.daemon_running", nil), "")
+		}
+		if used, err := strconv.ParseInt(values["TRASH_USED_BYTES"], 10, 64); err == nil {
+			limit, _ := strconv.ParseInt(values["TRASH_MAX_MB"], 10, 64)
+			detail := humanBytes(used)
+			if limit > 0 {
+				detail += " / " + humanBytes(limit*1048576)
+				add("ok", tr("ui.health.trash", nil), detail, "")
+			} else {
+				add("warn", tr("ui.health.trash", nil), detail+" · "+tr("ui.health.trash_no_quota", nil),
+					tr("ui.health.trash_hint", nil))
+			}
 		}
 		if strings.ToLower(values["JOURNAL_READY"]) != "true" {
 			add("error", tr("ui.health.journal", nil), values["JOURNAL_READY"], tr("ui.health.journal_hint", nil))

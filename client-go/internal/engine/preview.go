@@ -8,6 +8,7 @@ import (
 	pathpkg "path"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"nasbox-go/internal/classify"
 	"nasbox-go/internal/config"
@@ -76,58 +77,140 @@ var systemExcludes = []string{
 }
 
 func excluded(cfg *config.Config, path string) bool {
-	normalized := filepath.ToSlash(path)
-	parts := strings.Split(normalized, "/")
-	for _, part := range parts {
-		if internalDirNames[part] {
-			return true
+	return matcherFor(cfg).match(filepath.ToSlash(path))
+}
+
+// excludeMatcher is the compiled form of the exclusion rules. The previous
+// implementation ran ~40 path.Match calls on the full path and on every
+// component for each file: 5.2 s per 120k files, paid three times per pass.
+// Same semantics, now plain map/prefix/suffix checks for the usual patterns.
+type excludeMatcher struct {
+	owner     *config.Config
+	revision  uint64
+	key       string
+	selective []string
+	names     map[string]bool // component equals
+	suffixes  []string        // "*.pyc": component ends with
+	prefixes  []string        // "~$*": component starts with
+	compGlobs []string        // other slash-free globs, per component
+	fullExact map[string]bool // pattern with "/" and no metacharacters
+	fullGlobs []string        // pattern with "/" and metacharacters
+}
+
+var (
+	matcherMu    sync.Mutex
+	matcherCache *excludeMatcher
+)
+
+func stringValues(cfg *config.Config, key string) []string {
+	values, ok := cfg.Get(key).([]any)
+	if !ok {
+		return nil
+	}
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		if text, ok := value.(string); ok {
+			result = append(result, text)
 		}
 	}
-	// Selective sync excludes are exact folder paths anchored at the root:
-	// the folder and everything below it, never a glob and never a name that
-	// matches at other depths (before 1.0.0 "Documenti/Progetti" excluded only
-	// the folder entry, not its files, and "Foto" also hid "Lavoro/Foto").
-	if values, ok := cfg.Get("selective_sync_excludes").([]any); ok {
-		for _, value := range values {
-			folder, ok := value.(string)
-			folder = strings.Trim(strings.TrimSpace(folder), "/")
-			if !ok || folder == "" {
-				continue
-			}
-			if normalized == folder || strings.HasPrefix(normalized, folder+"/") {
-				return true
-			}
+	return result
+}
+
+// matcherFor returns the compiled matcher, rebuilt only when the
+// configured patterns change (settings can be edited while running).
+func matcherFor(cfg *config.Config) *excludeMatcher {
+	revision := cfg.Revision()
+	matcherMu.Lock()
+	if cached := matcherCache; cached != nil && cached.owner == cfg && cached.revision == revision {
+		matcherMu.Unlock()
+		return cached
+	}
+	matcherMu.Unlock()
+	selective := stringValues(cfg, "selective_sync_excludes")
+	patterns := stringValues(cfg, "exclude_patterns")
+	key := strings.Join(selective, "\x00") + "\x01" + strings.Join(patterns, "\x00")
+	matcherMu.Lock()
+	defer matcherMu.Unlock()
+	if matcherCache != nil && matcherCache.key == key {
+		matcherCache.owner, matcherCache.revision = cfg, revision
+		return matcherCache
+	}
+	m := &excludeMatcher{owner: cfg, revision: revision, key: key, names: map[string]bool{}, fullExact: map[string]bool{}}
+	for name := range internalDirNames {
+		m.names[name] = true
+	}
+	for _, folder := range selective {
+		if folder = strings.Trim(strings.TrimSpace(folder), "/"); folder != "" {
+			m.selective = append(m.selective, folder)
 		}
 	}
-	patterns := append([]string{}, systemExcludes...)
-	for _, key := range []string{"exclude_patterns"} {
-		values, ok := cfg.Get(key).([]any)
-		if !ok {
-			continue
-		}
-		for _, value := range values {
-			if text, ok := value.(string); ok {
-				patterns = append(patterns, text)
-			}
-		}
-	}
-	for _, raw := range patterns {
+	for _, raw := range append(append([]string{}, systemExcludes...), patterns...) {
 		pattern := strings.TrimSuffix(strings.TrimSpace(strings.ReplaceAll(raw, `\`, "/")), "/")
 		if pattern == "" {
 			continue
 		}
+		meta := strings.ContainsAny(pattern, "*?[")
+		switch {
+		case strings.Contains(pattern, "/") && !meta:
+			m.fullExact[pattern] = true
+		case strings.Contains(pattern, "/"):
+			m.fullGlobs = append(m.fullGlobs, pattern)
+		case !meta:
+			m.names[pattern] = true
+		case strings.HasPrefix(pattern, "*") && !strings.ContainsAny(pattern[1:], "*?["):
+			m.suffixes = append(m.suffixes, pattern[1:])
+		case strings.HasSuffix(pattern, "*") && !strings.ContainsAny(pattern[:len(pattern)-1], "*?["):
+			m.prefixes = append(m.prefixes, pattern[:len(pattern)-1])
+		default:
+			m.compGlobs = append(m.compGlobs, pattern)
+		}
+	}
+	matcherCache = m
+	return m
+}
+
+func (m *excludeMatcher) match(normalized string) bool {
+	for _, folder := range m.selective {
+		if normalized == folder || strings.HasPrefix(normalized, folder+"/") {
+			return true
+		}
+	}
+	if m.fullExact[normalized] {
+		return true
+	}
+	for _, pattern := range m.fullGlobs {
 		if matched, _ := pathpkg.Match(pattern, normalized); matched {
 			return true
 		}
-		// Slash-free patterns also match any single path component, so
-		// "venv", "build" and "*.pyc" apply at any depth like the Python client.
-		if !strings.Contains(pattern, "/") {
-			for _, part := range parts {
-				if matched, _ := pathpkg.Match(pattern, part); matched {
-					return true
-				}
+	}
+	rest := normalized
+	for {
+		part := rest
+		slash := strings.IndexByte(rest, '/')
+		if slash >= 0 {
+			part = rest[:slash]
+		}
+		if m.names[part] {
+			return true
+		}
+		for _, suffix := range m.suffixes {
+			if strings.HasSuffix(part, suffix) {
+				return true
 			}
 		}
+		for _, prefix := range m.prefixes {
+			if strings.HasPrefix(part, prefix) {
+				return true
+			}
+		}
+		for _, pattern := range m.compGlobs {
+			if matched, _ := pathpkg.Match(pattern, part); matched {
+				return true
+			}
+		}
+		if slash < 0 {
+			return false
+		}
+		rest = rest[slash+1:]
 	}
-	return false
 }

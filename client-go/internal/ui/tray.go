@@ -52,6 +52,9 @@ func (c *clientApp) showWindow() {
 	}
 	c.window.Show()
 	c.window.RequestFocus()
+	if !c.windowVisible.Swap(true) {
+		go c.pollMetrics() // fresh numbers when the window reopens
+	}
 }
 
 // pauseMenu offers bounded pauses (like the dialog) plus resume.

@@ -73,15 +73,16 @@ type clientApp struct {
 	runner    *engine.Runner
 	cancel    context.CancelFunc
 
-	uiTheme    *nasTheme
-	fyneApp    fyne.App
-	window     fyne.Window
-	setHint    func(string)
-	syncActive atomic.Bool
-	content    *fyne.Container
-	views      map[sectionID]fyne.CanvasObject
-	navs       map[sectionID]*navButton
-	active     sectionID
+	uiTheme       *nasTheme
+	fyneApp       fyne.App
+	window        fyne.Window
+	setHint       func(string)
+	syncActive    atomic.Bool
+	windowVisible atomic.Bool
+	content       *fyne.Container
+	views         map[sectionID]fyne.CanvasObject
+	navs          map[sectionID]*navButton
+	active        sectionID
 
 	headerTitle  *widget.Label
 	headerStatus *widget.Label
@@ -221,6 +222,7 @@ type clientApp struct {
 	homeDiskLabel    *widget.Label
 	homeDiskBar      *widget.ProgressBar
 	homeDevicesLabel *widget.Label
+	homeTrashLabel   *widget.Label
 
 	progressMu    sync.Mutex
 	progress      transfer.Progress
@@ -311,7 +313,11 @@ func startClient(
 	case "settings":
 		c.showSection(sectionSettings)
 	}
-	window.SetCloseIntercept(func() { window.Hide() })
+	window.SetCloseIntercept(func() {
+		c.windowVisible.Store(false)
+		window.Hide()
+	})
+	c.windowVisible.Store(os.Getenv("NASBOX_SERVICE") != "1")
 	c.installTray()
 
 	c.applyStatus(statusStarting, tr("status.sync_state_starting", nil))
@@ -327,6 +333,7 @@ func startClient(
 		fyne.Do(func() {
 			c.nasLabel.SetText(fmt.Sprintf(tr("ui.nas.config", nil),
 				c.cfg.String("nas_lan"), values["VERSION"], values["REPOSITORY_ID"]))
+			c.updateTrashUsage(values)
 		})
 	}()
 	go c.refreshConflicts()
@@ -1328,7 +1335,11 @@ func (c *clientApp) updateMirrorButtons() {
 
 func (c *clientApp) refreshMonitor() {
 	for {
-		c.pollMetrics()
+		// Nobody is looking (window in the tray): do not query the NAS every
+		// minute. The home card and the monitor refresh when it reopens.
+		if c.windowVisible.Load() || c.window == nil {
+			c.pollMetrics()
+		}
 		seconds := c.cfg.Int("metrics_refresh_seconds")
 		if seconds <= 0 {
 			seconds = 30
@@ -1997,4 +2008,23 @@ func (c *clientApp) setTheme(value string) {
 	c.showSection(c.active)
 	c.applyStatusUI(c.level, reason)
 	c.appendLog(tr("settings.theme_title", nil) + ": " + value)
+}
+
+// updateTrashUsage shows the NAS history size (recorded by the server at
+// each maintenance pass, no tree walk) on the home NAS card.
+func (c *clientApp) updateTrashUsage(values map[string]string) {
+	if c.homeTrashLabel == nil {
+		return
+	}
+	used, err := strconv.ParseInt(values["TRASH_USED_BYTES"], 10, 64)
+	if err != nil {
+		c.homeTrashLabel.Hide()
+		return
+	}
+	text := tr("ui.home.trash", map[string]any{"size": humanBytes(used)})
+	if limit, err := strconv.ParseInt(values["TRASH_MAX_MB"], 10, 64); err == nil && limit > 0 {
+		text = tr("ui.home.trash_quota", map[string]any{"size": humanBytes(used), "limit": humanBytes(limit * 1048576)})
+	}
+	c.homeTrashLabel.SetText(text)
+	c.homeTrashLabel.Show()
 }

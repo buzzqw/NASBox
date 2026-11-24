@@ -6381,5 +6381,57 @@
   "ui.update.package_managed": {
     "en": "NASBox is installed by the package manager: update it with the package manager.",
     "it": "NASBox è installato dal gestore pacchetti: aggiornalo con il gestore pacchetti."
+  },
+  "ui.settings.power_saving": {
+    "en": "NAS power saving",
+    "it": "Risparmio energetico NAS"
+  },
+  "ui.settings.power_saving_off": {
+    "en": "Off: changes from other PCs within seconds",
+    "it": "Disattivato: modifiche dagli altri PC in pochi secondi"
+  },
+  "ui.settings.power_saving_auto": {
+    "en": "Automatic: after 15 idle minutes checks the NAS every few minutes (recommended with spinning disks)",
+    "it": "Automatico: dopo 15 min di inattività controlla il NAS ogni pochi minuti (consigliato con dischi meccanici)"
+  },
+  "ui.settings.power_saving_poll": {
+    "en": "NAS check while saving power (minutes)",
+    "it": "Controllo del NAS in risparmio (minuti)"
+  },
+  "ui.home.trash": {
+    "en": "Version history on the NAS: {size}",
+    "it": "Storico versioni sul NAS: {size}"
+  },
+  "ui.home.trash_quota": {
+    "en": "Version history on the NAS: {size} of {limit}",
+    "it": "Storico versioni sul NAS: {size} di {limit}"
+  },
+  "ui.health.daemon": {
+    "en": "NAS server daemon",
+    "it": "Demone del server NAS"
+  },
+  "ui.health.daemon_running": {
+    "en": "running",
+    "it": "in esecuzione"
+  },
+  "ui.health.daemon_stopped": {
+    "en": "not running",
+    "it": "non in esecuzione"
+  },
+  "ui.health.daemon_hint": {
+    "en": "Without the daemon the history is never pruned: start it on the NAS with \"sync-daemon-server.sh --start\" and add it to the DSM boot tasks.",
+    "it": "Senza demone lo storico non viene ripulito: avvialo sul NAS con «sync-daemon-server.sh --start» e aggiungilo alle attività di avvio di DSM."
+  },
+  "ui.health.trash": {
+    "en": "Version history on the NAS",
+    "it": "Storico versioni sul NAS"
+  },
+  "ui.health.trash_no_quota": {
+    "en": "no size limit",
+    "it": "nessun limite di spazio"
+  },
+  "ui.health.trash_hint": {
+    "en": "Set TRASH_MAX_MB in server.conf (e.g. 51200 = 50 GB) so the history cannot fill the NAS.",
+    "it": "Imposta TRASH_MAX_MB in server.conf (es. 51200 = 50 GB) per evitare che lo storico riempia il NAS."
   }
 }

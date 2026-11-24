@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"nasbox-go/internal/config"
 	"os"
 	"path/filepath"
 	"strings"
@@ -176,5 +177,28 @@ func TestRunnerSyncsAfterFilesystemEvent(t *testing.T) {
 		case <-deadline:
 			t.Fatal("runner did not sync after a filesystem event")
 		}
+	}
+}
+
+func TestPowerSavingIdleOnlyAfterQuietPeriod(t *testing.T) {
+	cfg := config.New("")
+	r := &Runner{cfg: cfg, activity: make(chan struct{}, 1), lastActivity: time.Now().Add(-time.Hour)}
+	if quiet, _ := r.powerSavingIdle(); quiet {
+		t.Fatal("power saving must be off by default")
+	}
+	cfg.Set("power_saving", "auto", false)
+	cfg.Set("power_saving_poll_minutes", 7, false)
+	quiet, poll := r.powerSavingIdle()
+	if !quiet || poll != 7*time.Minute {
+		t.Fatalf("quiet=%v poll=%v", quiet, poll)
+	}
+	r.touchActivity()
+	if quiet, _ := r.powerSavingIdle(); quiet {
+		t.Fatal("local activity must end the quiet period")
+	}
+	select {
+	case <-r.activity:
+	default:
+		t.Fatal("activity must wake a sleeping change feed")
 	}
 }

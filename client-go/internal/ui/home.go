@@ -205,6 +205,9 @@ func (c *clientApp) buildNASCard() fyne.CanvasObject {
 	c.homeDiskBar.TextFormatter = func() string { return "" }
 	c.homeDevicesLabel = widget.NewLabel("")
 	c.homeDevicesLabel.Importance = widget.LowImportance
+	c.homeTrashLabel = widget.NewLabel("")
+	c.homeTrashLabel.Importance = widget.LowImportance
+	c.homeTrashLabel.Hide()
 	open := widget.NewButtonWithIcon(tr("ui.home.nas_details", nil), theme.NavigateNextIcon(), func() {
 		c.navigate(sectionNAS, 0)
 	})
@@ -215,6 +218,7 @@ func (c *clientApp) buildNASCard() fyne.CanvasObject {
 		c.homeDiskBar,
 		c.homeDiskLabel,
 		c.homeDevicesLabel,
+		c.homeTrashLabel,
 	), "")
 }
 

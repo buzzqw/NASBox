@@ -63,6 +63,24 @@ type SyncResult struct {
 	// LocalDeleted counts files removed locally because another PC deleted
 	// them (moved to the local trash, always recoverable).
 	LocalDeleted int
+	// Local is the local snapshot of this pass (for the next incremental
+	// scan); nil when the scan failed.
+	Local *LocalSnapshot
+	// Timings records how long each phase took ("scan 1.62s"), logged as
+	// PERF events so slow passes can be diagnosed on real machines.
+	Timings []string
+}
+
+// phaseTimer appends "name 1.23s" to result.Timings for each phase.
+type phaseTimer struct {
+	result *SyncResult
+	last   time.Time
+}
+
+func (p *phaseTimer) mark(name string) {
+	now := time.Now()
+	p.result.Timings = append(p.result.Timings, fmt.Sprintf("%s %.2fs", name, now.Sub(p.last).Seconds()))
+	p.last = now
 }
 
 type localFile struct {
@@ -108,9 +126,7 @@ func SyncOnce(
 	return SyncOnceWithManifest(cfg, store, client, transfers, manifest)
 }
 
-// SyncOnceWithManifest runs a pass against an already-authoritative snapshot.
-// The Runner uses this to merge server deltas without exporting the full tree
-// on every filesystem event.
+// SyncOnceWithManifest runs a pass with a complete local scan.
 func SyncOnceWithManifest(
 	cfg *config.Config,
 	store *state.Store,
@@ -119,7 +135,24 @@ func SyncOnceWithManifest(
 	manifest map[string]classify.RemoteState,
 	stormTrackers ...*conflicts.StormTracker,
 ) (SyncResult, error) {
+	return SyncPass(cfg, store, client, transfers, manifest, nil, stormTrackers...)
+}
+
+// SyncOnceWithManifest runs a pass against an already-authoritative snapshot.
+// The Runner uses this to merge server deltas without exporting the full tree
+// on every filesystem event.
+// SyncPass runs one pass; scope (optional) allows an incremental local scan.
+func SyncPass(
+	cfg *config.Config,
+	store *state.Store,
+	client ConfigSource,
+	transfers Transferer,
+	manifest map[string]classify.RemoteState,
+	scope *ScanScope,
+	stormTrackers ...*conflicts.StormTracker,
+) (SyncResult, error) {
 	result := SyncResult{}
+	timer := &phaseTimer{result: &result, last: time.Now()}
 	storm := (*conflicts.StormTracker)(nil)
 	if len(stormTrackers) > 0 {
 		storm = stormTrackers[0]
@@ -133,6 +166,7 @@ func SyncOnceWithManifest(
 		}
 		return result, fmt.Errorf("journal NAS: %s", detail)
 	}
+	timer.mark("journal")
 	identities, err := store.IdentitySnapshot(cfg.LocalRepositoryID())
 	if err != nil {
 		return result, err
@@ -141,7 +175,9 @@ func SyncOnceWithManifest(
 	if err != nil {
 		return result, err
 	}
-	local, err := scanLocal(cfg, identities)
+	timer.mark("state")
+	local, snapshot, scanMode, err := localScan(cfg, identities, scope, entries, manifest)
+	result.Local = snapshot
 	if err != nil {
 		return result, err
 	}
@@ -182,8 +218,18 @@ func SyncOnceWithManifest(
 			observations[path] = state.Observation{Present: false}
 		}
 	}
+	timer.mark("scan " + scanMode)
 	localCausals := make(map[string]string, len(observations))
+	stored, err := store.ObservationSnapshot(cfg.LocalRepositoryID())
+	if err != nil {
+		return result, err
+	}
 	for path, observation := range observations {
+		record, known := stored[path]
+		if version, unchanged := state.UnchangedCausal(record, known, observation); unchanged {
+			localCausals[path] = version
+			continue
+		}
 		version, err := store.Observe(cfg.LocalRepositoryID(), path, device, observation)
 		if err != nil {
 			return result, fmt.Errorf("osservazione locale non salvata per %s: %w", path, err)
@@ -309,6 +355,7 @@ func SyncOnceWithManifest(
 		}
 	}
 
+	timer.mark("observe+plan")
 	ratio, minFiles := guardThresholds(cfg)
 	// state.Identity carries the lstat identity (including ctime) while
 	// classify.Identity is the compact digest/size view used for rename
@@ -582,9 +629,19 @@ func guardMessage(cfg *config.Config, report classify.Report) string {
 }
 
 func scanLocal(cfg *config.Config, identities map[string]state.Identity) (map[string]localFile, error) {
-	root := cfg.LocalRoot()
 	result := make(map[string]localFile)
-	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+	return result, scanTree(cfg, identities, "", result)
+}
+
+// scanTree walks the subtree at rel ("" = whole repository) into result,
+// with the same fail-closed rules as a full scan.
+func scanTree(cfg *config.Config, identities map[string]state.Identity, start string, result map[string]localFile) error {
+	root := cfg.LocalRoot()
+	base := root
+	if start != "" {
+		base = filepath.Join(root, filepath.FromSlash(start))
+	}
+	return filepath.WalkDir(base, func(path string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return fmt.Errorf("scan locale non riuscito per %s: %w", path, walkErr)
 		}
@@ -596,12 +653,7 @@ func scanLocal(cfg *config.Config, identities map[string]state.Identity) (map[st
 		if rel == "." {
 			return nil
 		}
-		if excluded(cfg, rel) || strings.HasPrefix(rel, ".git/") ||
-			strings.HasPrefix(rel, ".venv/") || strings.HasPrefix(rel, ".nasbox-client-update/") ||
-			strings.HasPrefix(rel, ".nasbox-client-update-go/") ||
-			strings.HasPrefix(rel, ".sync-partial/") || strings.HasPrefix(rel, ".sync-trash/") ||
-			strings.HasPrefix(rel, ".nasbox-staging/") || strings.HasPrefix(rel, "@eaDir/") ||
-			strings.HasSuffix(rel, ".pyc") {
+		if skipLocalPath(cfg, rel) {
 			if entry.IsDir() {
 				return filepath.SkipDir
 			}
@@ -617,30 +669,46 @@ func scanLocal(cfg *config.Config, identities map[string]state.Identity) (map[st
 		if err != nil {
 			return fmt.Errorf("stat locale non riuscito per %s: %w", rel, err)
 		}
-		before := statOf(info)
-		digest := ""
-		if known, ok := identities[rel]; ok && known.Size == before.size &&
-			known.MTimeNS == before.mtimeNS && known.CtimeNS == before.ctimeNS && known.Digest != "" {
-			digest = known.Digest
-		} else {
-			sum, err := hashFile(path)
-			if err != nil {
-				return fmt.Errorf("lettura locale non riuscita per %s: %w", rel, err)
-			}
-			digest = sum
-			afterInfo, err := os.Lstat(path)
-			if err != nil {
-				return fmt.Errorf("file cambiato durante la lettura: %s: %w", rel, err)
-			}
-			after := statOf(afterInfo)
-			if before != after {
-				return fmt.Errorf("file instabile durante la lettura, sync interrotto: %s", rel)
-			}
+		file, err := scanFile(path, rel, info, identities)
+		if err != nil {
+			return err
 		}
-		result[rel] = localFile{Digest: digest, Size: before.size, MTimeNS: before.mtimeNS}
+		result[rel] = file
 		return nil
 	})
-	return result, err
+}
+
+// skipLocalPath: internal folders, caches and excluded paths.
+func skipLocalPath(cfg *config.Config, rel string) bool {
+	return excluded(cfg, rel) || strings.HasPrefix(rel, ".git/") ||
+		strings.HasPrefix(rel, ".venv/") || strings.HasPrefix(rel, ".nasbox-client-update/") ||
+		strings.HasPrefix(rel, ".nasbox-client-update-go/") ||
+		strings.HasPrefix(rel, ".sync-partial/") || strings.HasPrefix(rel, ".sync-trash/") ||
+		strings.HasPrefix(rel, ".nasbox-staging/") || strings.HasPrefix(rel, "@eaDir/") ||
+		strings.HasSuffix(rel, ".pyc")
+}
+
+// scanFile fingerprints one regular file, reusing the stored digest when
+// size, mtime and ctime are unchanged and failing closed if the file changes
+// while it is being read.
+func scanFile(path, rel string, info os.FileInfo, identities map[string]state.Identity) (localFile, error) {
+	before := statOf(info)
+	if known, ok := identities[rel]; ok && known.Size == before.size &&
+		known.MTimeNS == before.mtimeNS && known.CtimeNS == before.ctimeNS && known.Digest != "" {
+		return localFile{Digest: known.Digest, Size: before.size, MTimeNS: before.mtimeNS}, nil
+	}
+	sum, err := hashFile(path)
+	if err != nil {
+		return localFile{}, fmt.Errorf("lettura locale non riuscita per %s: %w", rel, err)
+	}
+	afterInfo, err := os.Lstat(path)
+	if err != nil {
+		return localFile{}, fmt.Errorf("file cambiato durante la lettura: %s: %w", rel, err)
+	}
+	if after := statOf(afterInfo); before != after {
+		return localFile{}, fmt.Errorf("file instabile durante la lettura, sync interrotto: %s", rel)
+	}
+	return localFile{Digest: sum, Size: before.size, MTimeNS: before.mtimeNS}, nil
 }
 
 func hashFile(path string) (string, error) {

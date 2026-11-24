@@ -4,6 +4,51 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 1.1.0 - 2026-11-25
+
+Client Go, efficienza (misurata sul PC con 119.000 file e sul DS420j):
+
+- **Passata di sync da circa 10 s a circa 0,6 s.** Le regole di esclusione
+  venivano valutate con ~40 `path.Match` per file e per cartella, tre volte
+  per passata (5,2 s ogni 120.000 file): ora sono compilate una volta
+  (0,18 s, risultato identico, verificato contro l'implementazione precedente).
+- **Niente più passata completa ogni 5 minuti**: il timer dei mirror forzava
+  manifest completo e scansione di tutto l'albero anche senza mirror
+  configurati. Senza inotify il ripiego forzava una passata completa ogni
+  2 secondi: ora ogni 60.
+- **Scansione locale incrementale** con inotify: si riesaminano solo i
+  percorsi cambiati. Sicurezza: ogni file che risulterebbe sparito viene
+  verificato su disco (altrimenti scansione completa), scansione completa
+  comunque ogni 30 minuti (`full_scan_interval_seconds`) e quando inotify non
+  sorveglia tutte le cartelle.
+- Osservazioni locali lette con una sola query invece di una per file.
+- **Risparmio energetico NAS** (`power_saving`: off/auto, Impostazioni ›
+  Sincronizzazione): dopo 15 minuti senza attività il client smette di
+  interrogare il NAS di continuo (controllo ogni `power_saving_poll_minutes`,
+  default 10) e tiene aperta una sola connessione SSH, così i dischi possono
+  andare in standby. Una modifica locale riattiva subito la sync.
+- Il monitor NAS non interroga il NAS quando la finestra è chiusa nella tray.
+- Comandi pesanti sul NAS (`du`, storico, hash) a bassa priorità (`nice`).
+- Eventi `PERF` per fase della passata nel log, per diagnosticare i
+  rallentamenti sui PC reali.
+- Storico versioni del NAS (occupazione e limite) nella scheda "Il tuo NAS" e
+  in "Controlla il sistema", con verifica che il demone del server sia attivo.
+
+## 3.27.0 - 2026-11-25
+
+Server:
+
+- **Dischi a riposo**: i file di lock venivano aperti con troncamento
+  (`exec 9>file`), aggiornando la data di modifica a ogni comando anche di
+  sola lettura: i dischi non potevano andare in standby. Ora in append (21
+  aperture), nessuna scrittura senza modifiche.
+- **Quota dello storico** `TRASH_MAX_MB` (0 = nessun limite): oltre la soglia
+  si rimuovono prima le versioni più vecchie, mai quelle più recenti di
+  `TRASH_MIN_KEEP_DAYS` (default 7). L'occupazione viene registrata a ogni
+  manutenzione e pubblicata da `--print-config` (`TRASH_USED_BYTES`,
+  `TRASH_FILES`) senza ripercorrere l'albero.
+- La manutenzione gira a bassa priorità (`renice`).
+
 ## 1.0.0 - 2026-11-24
 
 NASBox Go diventa il client definitivo ("NASBox"):

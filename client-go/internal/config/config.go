@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"syscall"
 )
 
@@ -24,7 +25,13 @@ type Config struct {
 	Data  map[string]any
 	Path  string
 	dirty map[string]bool // keys changed since the last successful Save
+	// revision increases on every change, so derived data (e.g. the compiled
+	// exclusion rules) can be cached cheaply.
+	revision atomic.Uint64
 }
+
+// Revision changes whenever a value is set or the file is reloaded.
+func (c *Config) Revision() uint64 { return c.revision.Load() }
 
 // New returns a config with defaults, optionally backed by path.
 func New(path string) *Config {
@@ -177,11 +184,13 @@ func (c *Config) Set(key string, value any, persist bool) error {
 		c.Data[key] = value
 		c.dirty[key] = true
 		c.mu.Unlock()
+		c.revision.Add(1)
 		return c.saveLocked()
 	}
 	c.mu.Lock()
 	c.Data[key] = value
 	c.mu.Unlock()
+	c.revision.Add(1)
 	return nil
 }
 
@@ -262,6 +271,7 @@ func (c *Config) saveLocked() error {
 	c.Data = merged
 	c.dirty = map[string]bool{}
 	c.mu.Unlock()
+	c.revision.Add(1) // values written by other processes were merged in
 	return nil
 }
 
