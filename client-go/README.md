@@ -24,8 +24,9 @@ binario.
 
 | Fase | Contenuto | Stato |
 |---|---|---|
-| 0 | Struttura modulo, i18n embed, classificatore portato | **in corso** |
-| 1 | Motore sync, SQLite, manifest/journal, lock, guardia, undo | da fare |
+| 0 | Struttura modulo, i18n embed, classificatore portato | completata |
+| 1 | Config compatibile, SQLite condiviso, parser manifest, anteprima CLI, guardia e undo nel DB | **in corso** |
+| 1b | Trasferimenti reali (ssh/rsync), lock, journal, UI nativa | da fare |
 | 2 | UI nativa (tab, tray, notifiche) X11 + Wayland, parità con PyQt6 | da fare |
 | 3 | Canale di aggiornamento separato, rollout graduale | da fare |
 | 4 | Rimozione del client Python | da fare |

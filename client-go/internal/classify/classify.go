@@ -2,7 +2,11 @@
 // It runs entirely on the PC: the NAS never classifies anything.
 package classify
 
-import "sort"
+import (
+	"fmt"
+	"sort"
+	"strings"
+)
 
 type RemoteState struct {
 	Kind   string // "FILE" or "TOMBSTONE"
@@ -42,6 +46,33 @@ type Report struct {
 	MissingByDir map[string]int
 	RemoteByDir  map[string]int
 	Anomalies    []Anomaly
+}
+
+// Summary is a compact, human-readable description of the report.
+func (r Report) Summary() string {
+	parts := make([]string, 0, 3)
+	if len(r.Renames) > 0 {
+		parts = append(parts, fmt.Sprintf("%d rename", len(r.Renames)))
+	}
+	if len(r.Unexplained) > 0 {
+		parts = append(parts, fmt.Sprintf("%d cancellazioni sospette", len(r.Unexplained)))
+	}
+	if len(r.Anomalies) > 0 {
+		shown := r.Anomalies
+		if len(shown) > 4 {
+			shown = shown[:4]
+		}
+		details := make([]string, 0, len(shown))
+		for _, item := range shown {
+			details = append(details, fmt.Sprintf("%s %d/%d (%.0f%%)",
+				item.Dir, item.Missing, item.Remote, item.Ratio()*100))
+		}
+		parts = append(parts, "cartelle anomale: "+strings.Join(details, ", "))
+	}
+	if len(parts) == 0 {
+		return "nessuna differenza rilevante"
+	}
+	return strings.Join(parts, "; ")
 }
 
 func topDir(path string) string {
