@@ -33,7 +33,7 @@
 #
 set -uo pipefail
 
-VERSION="3.27.0"
+VERSION="3.27.1"
 SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -2668,7 +2668,11 @@ enforce_trash_quota() {
                 total=$(( total - size )); files=$(( files - 1 )); removed=$(( removed + 1 ))
             done < "$listing"
             flock -u 8
-            log INFO "Quota storico ${TRASH_MAX_MB} MB: rimosse $removed versioni, occupati $(( total / 1048576 )) MB."
+            if [[ "$DRY_RUN" == "true" ]]; then
+                log INFO "[dry-run] Quota storico ${TRASH_MAX_MB} MB: verrebbero rimosse $removed versioni, resterebbero $(( total / 1048576 )) MB."
+            else
+                log INFO "Quota storico ${TRASH_MAX_MB} MB: rimosse $removed versioni, occupati $(( total / 1048576 )) MB."
+            fi
         else
             log INFO "Quota storico rimandata: trasferimento NASBox in corso."
         fi

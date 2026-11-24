@@ -4,6 +4,11 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 3.27.1 - 2026-11-25
+
+- Server: con `--dry-run` il riepilogo della quota dello storico dice
+  "verrebbero rimosse" invece di "rimosse".
+
 ## 1.1.0 - 2026-11-25
 
 Client Go, efficienza (misurata sul PC con 119.000 file e sul DS420j):
