@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+	"time"
 
 	"nasbox-go/internal/config"
 	"nasbox-go/internal/paths"
@@ -101,3 +102,34 @@ func (t *Transfer) run(paths []string, upload bool) error {
 
 func (t *Transfer) Upload(paths []string) error   { return t.run(paths, true) }
 func (t *Transfer) Download(paths []string) error { return t.run(paths, false) }
+
+// UploadStaged copies files into a private NAS tree and publishes them in one
+// server transaction. The canonical path is never written by rsync directly.
+func (t *Transfer) UploadStaged(paths []string, device string, files []remote.StagedFile) error {
+	if len(paths) == 0 {
+		return nil
+	}
+	txID := "stage-" + time.Now().UTC().Format("20060102-150405-000000")
+	stagingDir, err := t.client.CreateRemoteStaging(txID)
+	if err != nil {
+		return err
+	}
+	defer t.client.CleanupRemoteStaging(stagingDir)
+	args, payload := t.BuildCommand(paths, true)
+	args[len(args)-1] = fmt.Sprintf("%s@%s:%s", t.client.User, t.client.Host, stagingDir)
+	cmd := exec.CommandContext(t.ctx, "rsync", args...)
+	cmd.Stdin = bytes.NewReader(payload)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("rsync staging: %w: %s", err, strings.TrimSpace(stderr.String()))
+	}
+	ok, err := t.client.StagingPublish(stagingDir, txID, device, files)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("publish staging non riuscito")
+	}
+	return nil
+}

@@ -18,6 +18,7 @@ import (
 	"nasbox-go/internal/conflicts"
 	"nasbox-go/internal/deletesafety"
 	"nasbox-go/internal/i18n"
+	"nasbox-go/internal/reconcile"
 	"nasbox-go/internal/remote"
 	"nasbox-go/internal/repository"
 	"nasbox-go/internal/state"
@@ -33,10 +34,12 @@ type ConfigSource interface {
 	RenameV2(src, dst, kind, digest string, size, mtimeNS int64, device string) (bool, error)
 }
 
-// Transferer uploads and downloads batches of paths.
+// Transferer uploads and downloads batches of paths. Uploads go through the
+// private staging tree so the canonical remote path is only written once, in
+// the same server transaction that records the journal.
 type Transferer interface {
-	Upload(paths []string) error
 	Download(paths []string) error
+	UploadStaged(paths []string, device string, files []remote.StagedFile) error
 	SetContext(ctx context.Context)
 }
 
@@ -120,60 +123,136 @@ func SyncOnce(
 	missing := make([]string, 0)
 	uploads := make([]string, 0)
 	downloads := make([]string, 0)
+	// Only paths for which reconcile explicitly authorised a remote deletion
+	// may reach CheckedDelete. classify may still turn them into renames, but
+	// it must never resurrect a stale local absence as a delete.
+	deleteApproved := make(map[string]bool)
+	uploadSeen := make(map[string]bool)
+	downloadSeen := make(map[string]bool)
 	device := store.DeviceID()
-	manualConflicts := cfg.String("conflict_policy") == "manual"
+	policy := cfg.String("conflict_policy")
+	manualConflicts := strings.EqualFold(policy, "manual")
+
+	// Observe every relevant local path once. Missing paths get a real causal
+	// deletion observation; read errors never reach this point because
+	// scanLocal fails closed.
+	observations := make(map[string]state.Observation, len(local)+len(manifest))
+	for path, current := range local {
+		observations[path] = state.Observation{
+			Digest: current.Digest, Size: current.Size,
+			MTimeNS: current.MTimeNS, Present: true,
+		}
+	}
 	for path, remoteState := range manifest {
 		if remoteState.Kind != "FILE" || excluded(cfg, path) {
 			continue
 		}
-		current, present := local[path]
-		if !present {
-			if allowDownload {
-				downloads = append(downloads, path)
-			} else if allowDelete {
+		if _, present := local[path]; !present {
+			observations[path] = state.Observation{Present: false}
+		}
+	}
+	localCausals := make(map[string]string, len(observations))
+	for path, observation := range observations {
+		version, err := store.Observe(cfg.LocalRepositoryID(), path, device, observation)
+		if err != nil {
+			return result, fmt.Errorf("osservazione locale non salvata per %s: %w", path, err)
+		}
+		localCausals[path] = version
+	}
+
+	plan := func(path string, remoteState reconcile.RemoteState) (reconcile.Decision, error) {
+		var baseline *reconcile.Fingerprint
+		if entry, ok := entries[path]; ok && entry.Digest != "" {
+			baseline = &reconcile.Fingerprint{
+				Digest: entry.Digest, Size: entry.Size,
+				MTimeNS: entry.MTimeNS, Causal: entry.Causal,
+			}
+		}
+		var localFP *reconcile.Fingerprint
+		if current, present := local[path]; present {
+			localFP = &reconcile.Fingerprint{
+				Digest: current.Digest, Size: current.Size,
+				MTimeNS: current.MTimeNS, Causal: localCausals[path],
+			}
+		}
+		return reconcile.Plan(baseline, localFP, remoteState, localCausals[path], allowDelete, policy), nil
+	}
+
+	for path, remoteState := range manifest {
+		if remoteState.Kind != "FILE" || excluded(cfg, path) {
+			continue
+		}
+		decision, err := plan(path, reconcile.RemoteState{
+			Kind: reconcile.File, Digest: remoteState.Digest, Size: remoteState.Size,
+			MTimeNS: remoteState.MTimeNS, Causal: remoteState.Causal,
+		})
+		if err != nil {
+			return result, err
+		}
+		switch decision.Action {
+		case reconcile.Nothing, reconcile.Adopt:
+			continue
+		case reconcile.Block:
+			return result, fmt.Errorf("sincronizzazione bloccata per %s: %s", path, decision.Detail)
+		case reconcile.DeleteRemote:
+			if allowDelete {
 				missing = append(missing, path)
+				deleteApproved[path] = true
 			}
-			continue
-		}
-		if current.Digest == remoteState.Digest {
-			continue
-		}
-		baseline := entries[path]
-		localClock, _ := causal.Parse(baseline.Causal)
-		remoteClock, _ := causal.Parse(remoteState.Causal)
-		preferUpload := false
-		switch {
-		case localClock != nil && localClock.Dominates(remoteClock):
-			preferUpload = true
-		case remoteClock != nil && remoteClock.Dominates(localClock):
-			preferUpload = false
-		case manualConflicts && allowUpload && allowDownload:
-			if _, err := conflicts.Create(cfg.LocalRoot(), path, remoteDevice(remoteState.Causal), remoteState.Digest); err != nil {
-				return result, err
+		case reconcile.Upload, reconcile.ConflictLocalWins:
+			if allowUpload && !uploadSeen[path] {
+				uploads = append(uploads, path)
+				uploadSeen[path] = true
 			}
-			result.Conflicts++
-			preferUpload = false
-		case current.MTimeNS >= remoteState.MTimeNS:
-			preferUpload = true
-		default:
-			preferUpload = false
-		}
-		if preferUpload && allowUpload {
-			uploads = append(uploads, path)
-		} else if !preferUpload && allowDownload {
-			downloads = append(downloads, path)
+		case reconcile.RemoteWins, reconcile.ConflictRemoteWins:
+			if !allowDownload {
+				continue
+			}
+			if decision.Action == reconcile.ConflictRemoteWins && manualConflicts {
+				if _, present := local[path]; present {
+					if _, err := conflicts.Create(cfg.LocalRoot(), path, remoteDevice(remoteState.Causal), local[path].Digest); err != nil {
+						return result, err
+					}
+					result.Conflicts++
+				}
+			}
+			if !downloadSeen[path] {
+				downloads = append(downloads, path)
+				downloadSeen[path] = true
+			}
 		}
 	}
 	if allowUpload {
 		for path := range local {
-			if _, known := manifest[path]; !known {
-				uploads = append(uploads, path)
+			if _, known := manifest[path]; known {
+				continue
+			}
+			decision, err := plan(path, reconcile.RemoteState{Kind: reconcile.Absent})
+			if err != nil {
+				return result, err
+			}
+			if decision.Action == reconcile.Upload || decision.Action == reconcile.ConflictLocalWins {
+				if !uploadSeen[path] {
+					uploads = append(uploads, path)
+					uploadSeen[path] = true
+				}
 			}
 		}
 	}
 
 	ratio, minFiles := guardThresholds(cfg)
-	report := classify.Classify(missing, manifest, toClassifyIdentities(identities), ratio, minFiles)
+	// state.Identity carries the lstat identity (including ctime) while
+	// classify.Identity is the compact digest/size view used for rename
+	// matching. Start from the former and refresh digest/size with the fresh
+	// scan so a rename is matched against the bytes actually on disk now.
+	currentIdentities := toClassifyIdentities(identities)
+	for path, current := range local {
+		identity := currentIdentities[path]
+		identity.Digest = current.Digest
+		identity.Size = current.Size
+		currentIdentities[path] = identity
+	}
+	report := classify.Classify(missing, manifest, currentIdentities, ratio, minFiles)
 	result.Missing = report.MissingTotal
 	result.Renames = len(report.Renames)
 	if message := guardMessage(cfg, report); message != "" {
@@ -185,10 +264,10 @@ func SyncOnce(
 	// falling back to delete+upload would risk losing the file if the upload
 	// then failed.
 	for _, rename := range report.Renames {
-		state := manifest[rename.Missing]
+		remoteState := manifest[rename.Missing]
 		ok, err := client.RenameV2(
 			rename.Missing, rename.Local, "FILE",
-			state.Digest, state.Size, state.MTimeNS, device,
+			remoteState.Digest, remoteState.Size, remoteState.MTimeNS, device,
 		)
 		if err != nil || !ok {
 			if err == nil {
@@ -197,61 +276,85 @@ func SyncOnce(
 			return result, err
 		}
 		delete(manifest, rename.Missing)
+		// The rename already moved the very file that was queued for upload.
+		// Re-uploading it would write a second version of the same bytes and
+		// bump the clock once more. Move the baseline instead: a tombstone at
+		// the source and the observed remote fingerprint at the destination.
+		renameCausal := localCausals[rename.Missing]
+		_ = store.RecordEntry(cfg.LocalRepositoryID(), rename.Missing, state.EntryState{Causal: renameCausal})
+		_ = store.RecordEntry(cfg.LocalRepositoryID(), rename.Local, state.EntryState{
+			Digest: remoteState.Digest, Size: remoteState.Size, MTimeNS: remoteState.MTimeNS,
+			Causal: renameCausal,
+		})
+		entries[rename.Missing] = state.EntryState{Causal: renameCausal}
+		entries[rename.Local] = state.EntryState{
+			Digest: remoteState.Digest, Size: remoteState.Size, MTimeNS: remoteState.MTimeNS,
+			Causal: renameCausal,
+		}
+		if uploadSeen[rename.Local] {
+			uploadSeen[rename.Local] = false
+			kept := uploads[:0]
+			for _, path := range uploads {
+				if path != rename.Local {
+					kept = append(kept, path)
+				}
+			}
+			uploads = kept
+		}
 	}
 
 	// Uploads first: a file that still exists locally must never be lost to a
-	// subsequent delete pass.
+	// subsequent delete pass. The clock was already advanced once by Observe;
+	// staging publishes that exact version, so no second increment is allowed.
 	if len(uploads) > 0 {
-		if err := transfers.Upload(uploads); err != nil {
+		files := make([]remote.StagedFile, 0, len(uploads))
+		for _, path := range uploads {
+			file := local[path]
+			files = append(files, remote.StagedFile{
+				Path: path, Digest: file.Digest, Size: file.Size,
+				MTimeNS: file.MTimeNS, Causal: localCausals[path],
+			})
+		}
+		if err := transfers.UploadStaged(uploads, device, files); err != nil {
 			return result, err
+		}
+		// Only now, after the server committed the publish, promote the local
+		// observations to baselines. A failed publish leaves them untouched so
+		// the next pass retries with the very same causal.
+		for _, file := range files {
+			if err := store.RecordEntry(cfg.LocalRepositoryID(), file.Path, state.EntryState{
+				Digest: file.Digest, Size: file.Size, MTimeNS: file.MTimeNS,
+				Causal: file.Causal,
+			}); err != nil {
+				return result, err
+			}
 		}
 		result.Uploaded = len(uploads)
-		puts := make([]remote.JournalPut, 0, len(uploads))
-		for _, path := range uploads {
-			clock, _ := causal.Parse(entries[path].Causal)
-			if clock == nil {
-				clock = &causal.Version{}
-			}
-			file := local[path]
-			next := clock.Increment(device).Encode()
-			_ = store.RecordEntry(cfg.LocalRepositoryID(), path, state.EntryState{
-				Digest: file.Digest, Size: file.Size, MTimeNS: file.MTimeNS,
-				Causal: next,
-			})
-			puts = append(puts, remote.JournalPut{
-				Path: path, Digest: file.Digest, Size: file.Size,
-				MTimeNS: file.MTimeNS, Causal: next,
-			})
-		}
-		if ok, err := client.JournalAppend(
-			cfg.RepositoryID(), "upload-"+newRunTS(), device, puts,
-		); err != nil || !ok {
-			if err == nil {
-				err = fmt.Errorf("journal NAS non aggiornato dopo upload")
-			}
-			return result, err
-		}
 	}
 	if len(downloads) > 0 {
 		if err := transfers.Download(downloads); err != nil {
 			return result, err
 		}
-		result.Downloads = len(downloads)
 		for _, path := range downloads {
 			remoteState := manifest[path]
-			clock, _ := causal.Parse(remoteState.Causal)
-			if clock == nil {
-				clock = &causal.Version{}
+			remoteCausal := remoteState.Causal
+			if _, ok := causal.Parse(remoteCausal); !ok {
+				remoteCausal = ""
 			}
-			_ = store.RecordEntry(cfg.LocalRepositoryID(), path, state.EntryState{
+			if err := store.RecordEntry(cfg.LocalRepositoryID(), path, state.EntryState{
 				Digest: remoteState.Digest, Size: remoteState.Size,
-				MTimeNS: remoteState.MTimeNS, Causal: clock.Encode(),
-			})
+				MTimeNS: remoteState.MTimeNS, Causal: remoteCausal,
+			}); err != nil {
+				return result, err
+			}
 		}
+		result.Downloads = len(downloads)
 	}
-	deletions := report.Unexplained
-	if !allowDelete {
-		deletions = nil
+	deletions := make([]string, 0, len(report.Unexplained))
+	for _, path := range report.Unexplained {
+		if allowDelete && deleteApproved[path] {
+			deletions = append(deletions, path)
+		}
 	}
 	if err := deletesafety.Shared().Check(cfg, len(deletions), "sync"); err != nil {
 		if blocked, ok := err.(*deletesafety.BlockedError); ok {
@@ -268,10 +371,10 @@ func SyncOnce(
 		device := store.DeviceID()
 		requests := make([]remote.CheckedRequest, 0, len(deletions))
 		for _, path := range deletions {
-			state := manifest[path]
+			remoteState := manifest[path]
 			requests = append(requests, remote.CheckedRequest{
-				Path: path, Digest: state.Digest,
-				MTimeSeconds: state.MTimeNS / 1_000_000_000,
+				Path: path, Digest: remoteState.Digest,
+				MTimeSeconds: remoteState.MTimeNS / 1_000_000_000,
 			})
 		}
 		statuses, err := client.CheckedDelete(requests, runTS, device)
@@ -286,6 +389,16 @@ func SyncOnce(
 		}
 		if err := store.RecordUndo(cfg.LocalRepositoryID(), done, runTS); err != nil {
 			return result, err
+		}
+		// Record the confirmed deletion as a tombstone carrying the local
+		// absence observation's causal, not a freshly bumped clock: the server
+		// already wrote the matching journal entry under that same version.
+		for _, path := range done {
+			if err := store.RecordEntry(cfg.LocalRepositoryID(), path, state.EntryState{
+				Causal: localCausals[path],
+			}); err != nil {
+				return result, err
+			}
 		}
 		result.Deleted = len(done)
 		if err := deletesafety.Shared().Record(cfg, len(done), "sync"); err != nil {

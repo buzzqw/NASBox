@@ -39,7 +39,7 @@ binario.
 | 7f | Fix layout verificato: righe impostazioni a due colonne (non più 1 carattere per riga), footer a larghezza piena, avvio diretto su sezione per diagnostica | completata (0.12.0) |
 | 7g | Impostazioni con dropdown per tutte le scelte, pulsanti `?` con spiegazione (es. Sentinelle), fascia pausa strutturata invece di JSON, nomi dispositivi gestiti dal tab NAS | completata (0.13.0) |
 | 8 | Hardening P0: policy sync/delete applicate, fail-closed su errori di lettura, validazione path, bootstrap repository/lock/capability, device ID persistente, lock istanza comune, lease con handshake, rsync force-transfer | completata (0.14.0) |
-| 9 | Transfer atomico staging+publish, backup versioni, reconciliation baseline-aware, updater firmato/rollback, restore server atomico | da fare |
+| 9 | Transfer atomico staging+publish, reconciliation baseline-aware, updater state machine/rollback, config atomica, restore server transazionale e journal durable | completata (0.15.0, server 3.26.0) |
 | 10 | Rollout graduale e rimozione del client Python | da fare |
 
 Il documento di design dell'interfaccia è in `internal/ui/DESIGN.md`.

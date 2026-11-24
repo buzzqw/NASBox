@@ -4,6 +4,15 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 3.26.0 - 2026-11-24
+
+- `restore-batch` transazionale con marker `STARTED`/`MOVED`, recovery idempotente
+  e rollback journal/revisione; restore ripetuto non duplica il PUT.
+- Ordine journal/revisione durable con `sync` esplicito e backup rollback.
+- `log_event()` ora escape correttamente newline, tab e caratteri di controllo
+  nei nomi file, mantenendo `events.jsonl` JSON valido.
+- Nuovi test di crash, bump failure, path con caratteri di controllo.
+
 ## 1.35.2 - 2026-11-24
 
 - Correzione critica di sicurezza: un file locale illeggibile, non regolare o

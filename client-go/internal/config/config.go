@@ -7,9 +7,12 @@ import (
 	_ "embed"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"sync"
+	"syscall"
 )
 
 //go:embed defaults.json
@@ -17,16 +20,23 @@ var rawDefaults []byte
 
 // Config is a thread-safe view of client.json.
 type Config struct {
-	mu   sync.RWMutex
-	Data map[string]any
-	Path string
+	mu    sync.RWMutex
+	Data  map[string]any
+	Path  string
+	dirty map[string]bool // keys changed since the last successful Save
 }
 
 // New returns a config with defaults, optionally backed by path.
 func New(path string) *Config {
+	return &Config{Data: defaultData(), Path: path, dirty: map[string]bool{}}
+}
+
+func defaultData() map[string]any {
 	data := map[string]any{}
+	// The embedded defaults are generated from Python's DEFAULTS and are known
+	// to be valid JSON; a malformed embed would be a build-time problem.
 	_ = json.Unmarshal(rawDefaults, &data)
-	return &Config{Data: data, Path: path}
+	return data
 }
 
 // DefaultPath mirrors the Python client's XDG path.
@@ -48,23 +58,80 @@ func Load() (*Config, error) {
 }
 
 // LoadFrom is Load with an explicit path (used by tests).
+//
+// The read is guarded by the same interprocess lock as Save, so a concurrent
+// writer in another process can never be observed half-way through a write.
 func LoadFrom(path string) (*Config, error) {
 	cfg := New(path)
-	content, err := os.ReadFile(path)
+	unlock, err := fileLock(path+".lock", false)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return cfg, nil
-		}
 		return cfg, err
 	}
-	fromFile := map[string]any{}
-	if err := json.Unmarshal(content, &fromFile); err != nil {
+	defer unlock()
+	data, err := readDisk(path)
+	if err != nil {
 		return cfg, err
 	}
-	for key, value := range fromFile {
+	for key, value := range data {
 		cfg.Data[key] = value
 	}
 	return cfg, nil
+}
+
+// readDisk reads the JSON object on disk. A missing file is not an error: the
+// caller keeps the embedded defaults. This helper must be called while the
+// config lock is held.
+func readDisk(path string) (map[string]any, error) {
+	data := map[string]any{}
+	if path == "" {
+		return data, nil
+	}
+	content, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return data, nil
+		}
+		return data, err
+	}
+	if err := json.Unmarshal(content, &data); err != nil {
+		return data, fmt.Errorf("client.json non valido: %w", err)
+	}
+	return data, nil
+}
+
+// fileLock takes a POSIX advisory lock on path+".lock". It works both across
+// processes and across goroutines that opened the lock file separately.
+func fileLock(path string, exclusive bool) (func(), error) {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return nil, err
+	}
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, err
+	}
+	how := syscall.LOCK_SH
+	if exclusive {
+		how = syscall.LOCK_EX
+	}
+	for {
+		err = syscall.Flock(int(file.Fd()), how)
+		if err != syscall.EINTR {
+			break
+		}
+	}
+	if err != nil {
+		_ = file.Close()
+		return nil, err
+	}
+	return func() {
+		for {
+			err := syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
+			if err != syscall.EINTR {
+				break
+			}
+		}
+		_ = file.Close()
+	}, nil
 }
 
 func (c *Config) Get(key string) any {
@@ -96,34 +163,106 @@ func (c *Config) Int(key string) int {
 	return 0
 }
 
-func (c *Config) Set(key string, value any, persist bool) {
+// Set updates a value in memory and, when persist is true, atomically writes
+// the config. It returns any save error: callers that change persistent keys
+// must check it instead of silently losing the change.
+func (c *Config) Set(key string, value any, persist bool) error {
+	if persist && c.Path != "" {
+		unlock, err := fileLock(c.Path+".lock", true)
+		if err != nil {
+			return err
+		}
+		defer unlock()
+		c.mu.Lock()
+		c.Data[key] = value
+		c.dirty[key] = true
+		c.mu.Unlock()
+		return c.saveLocked()
+	}
 	c.mu.Lock()
 	c.Data[key] = value
 	c.mu.Unlock()
-	if persist && c.Path != "" {
-		_ = c.Save()
-	}
+	return nil
 }
 
 // Save writes the config atomically so a crash cannot leave a half JSON file.
+// A short-lived lock file and a PID-qualified temporary file make concurrent
+// writers (including other processes) serialize and never clobber each other.
 func (c *Config) Save() error {
 	if c.Path == "" {
 		return os.ErrInvalid
 	}
-	if err := os.MkdirAll(filepath.Dir(c.Path), 0o700); err != nil {
-		return err
-	}
-	c.mu.RLock()
-	content, err := json.MarshalIndent(c.Data, "", "  ")
-	c.mu.RUnlock()
+	unlock, err := fileLock(c.Path+".lock", true)
 	if err != nil {
 		return err
 	}
-	tmp := c.Path + ".tmp"
-	if err := os.WriteFile(tmp, content, 0o600); err != nil {
+	defer unlock()
+	return c.saveLocked()
+}
+
+// saveLocked persists the dirty keys over a fresh snapshot of the file, so a
+// writer that only touched key A preserves key B written by another process.
+// The caller must hold the config lock.
+func (c *Config) saveLocked() error {
+	if c.Path == "" {
+		return os.ErrInvalid
+	}
+	disk, err := readDisk(c.Path)
+	if err != nil {
 		return err
 	}
-	return os.Rename(tmp, c.Path)
+	merged := defaultData()
+	for key, value := range disk {
+		merged[key] = value
+	}
+	c.mu.RLock()
+	for key := range c.dirty {
+		if value, ok := c.Data[key]; ok {
+			merged[key] = value
+		}
+	}
+	c.mu.RUnlock()
+
+	content, err := json.MarshalIndent(merged, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(c.Path), 0o700); err != nil {
+		return err
+	}
+	tmp := c.Path + ".tmp." + strconv.Itoa(os.Getpid())
+	file, err := os.OpenFile(tmp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err
+	}
+	if _, err := file.Write(content); err != nil {
+		_ = file.Close()
+		_ = os.Remove(tmp)
+		return err
+	}
+	if err := file.Sync(); err != nil {
+		_ = file.Close()
+		_ = os.Remove(tmp)
+		return err
+	}
+	if err := file.Close(); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	if err := os.Rename(tmp, c.Path); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	if dir, err := os.Open(filepath.Dir(c.Path)); err == nil {
+		_ = dir.Sync()
+		_ = dir.Close()
+	}
+
+	c.mu.Lock()
+	c.Data = merged
+	c.dirty = map[string]bool{}
+	c.mu.Unlock()
+	return nil
 }
 
 func (c *Config) LocalRoot() string    { return c.String("local_root") }

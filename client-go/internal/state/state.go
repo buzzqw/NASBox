@@ -14,6 +14,7 @@ import (
 
 	_ "modernc.org/sqlite"
 
+	"nasbox-go/internal/causal"
 	"nasbox-go/internal/config"
 )
 
@@ -207,6 +208,61 @@ func (s *Store) EntrySnapshot(repository string) (map[string]EntryState, error) 
 		result[path] = entry
 	}
 	return result, rows.Err()
+}
+
+type Observation struct {
+	Digest  string
+	Size    int64
+	MTimeNS int64
+	Present bool
+}
+
+// Observe records a live local state and returns its causal version. Identical
+// observations reuse the previous clock; real changes merge baseline+previous
+// and increment this device exactly once.
+func (s *Store) Observe(repository, path, device string, observation Observation) (string, error) {
+	var previousDigest sql.NullString
+	var previousSize, previousMTime sql.NullInt64
+	var previousCausal sql.NullString
+	err := s.db.QueryRow(`
+		SELECT digest, size, mtime_ns, causal FROM local_observation
+		WHERE repository = ? AND path = ?
+	`, repository, path).Scan(&previousDigest, &previousSize, &previousMTime, &previousCausal)
+	if err != nil && err != sql.ErrNoRows {
+		return "", err
+	}
+	same := false
+	if observation.Present {
+		same = previousDigest.Valid && previousDigest.String == observation.Digest &&
+			previousSize.Valid && previousSize.Int64 == observation.Size &&
+			previousMTime.Valid && previousMTime.Int64 == observation.MTimeNS
+	} else {
+		same = !previousDigest.Valid && !previousSize.Valid && !previousMTime.Valid
+	}
+	if same && previousCausal.Valid {
+		if _, ok := causal.Parse(previousCausal.String); ok {
+			return previousCausal.String, nil
+		}
+	}
+	var baselineCausal sql.NullString
+	_ = s.db.QueryRow(`SELECT causal FROM entry WHERE repository = ? AND path = ?`,
+		repository, path).Scan(&baselineCausal)
+	base, _ := causal.Parse(baselineCausal.String)
+	previous, _ := causal.Parse(previousCausal.String)
+	version := (&causal.Version{}).Merge(base).Merge(previous).Increment(device)
+	encoded := version.Encode()
+	var digest, size, mtime any
+	if observation.Present {
+		digest, size, mtime = observation.Digest, observation.Size, observation.MTimeNS
+	}
+	_, err = s.db.Exec(`
+		INSERT INTO local_observation(repository, path, digest, size, mtime_ns, causal, observed_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(repository, path) DO UPDATE SET
+			digest=excluded.digest, size=excluded.size, mtime_ns=excluded.mtime_ns,
+			causal=excluded.causal, observed_at=excluded.observed_at
+	`, repository, path, digest, size, mtime, encoded, float64(time.Now().UnixNano())/1e9)
+	return encoded, err
 }
 
 func (s *Store) RecordEntry(repository, path string, entry EntryState) error {

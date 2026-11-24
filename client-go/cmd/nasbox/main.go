@@ -4,6 +4,7 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -82,6 +83,38 @@ func bootstrapConfig(cfg *config.Config) error {
 	return repository.Bind(cfg.LocalRoot(), cfg.RepositoryID())
 }
 
+// serverInfoClient adds the server-version lookup required by the updater's
+// requires_server validation to the ordinary SSH client.
+type serverInfoClient struct{ *remote.Client }
+
+func (c serverInfoClient) ServerVersion() (string, error) {
+	_, current, err := c.ServerOutdated("0.0.0")
+	return current, err
+}
+
+// startupUpdateRecovery runs before gui/sync so an interrupted update is
+// repaired and a successfully started binary is confirmed. A rollback forces
+// a restart; a first failed health check is only reported.
+func startupUpdateRecovery() error {
+	binary, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	if err := update.RollbackIfNeeded(binary); err != nil {
+		fmt.Fprintln(os.Stderr, "recupero aggiornamento:", err)
+		if errors.Is(err, update.ErrRollbackPerformed) {
+			return err
+		}
+	}
+	if err := update.ConfirmStartedOK(binary); err != nil {
+		fmt.Fprintln(os.Stderr, "verifica aggiornamento:", err)
+		if errors.Is(err, update.ErrRollbackPerformed) {
+			return err
+		}
+	}
+	return nil
+}
+
 func loadConfig(args []string) (*config.Config, error) {
 	flags := flag.NewFlagSet("config", flag.ContinueOnError)
 	path := flags.String("config", "", "percorso di client.json")
@@ -119,7 +152,7 @@ func updateCheck(args []string) {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-	manifest, err := update.Newest(cfg, remote.New(cfg))
+	manifest, err := update.Newest(cfg, serverInfoClient{remote.New(cfg)})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
@@ -146,7 +179,7 @@ func updateInstall(args []string) {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-	applied, versionName, err := update.Apply(cfg, remote.New(cfg), binary)
+	applied, versionName, err := update.Apply(cfg, serverInfoClient{remote.New(cfg)}, binary)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
@@ -313,6 +346,10 @@ func gui(args []string) {
 		os.Exit(1)
 	}
 	defer release()
+	if err := startupUpdateRecovery(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
 	cfg, err := loadConfig(args)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -336,6 +373,10 @@ func gui(args []string) {
 }
 
 func syncOnce(args []string) {
+	if err := startupUpdateRecovery(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
 	cfg, err := loadConfig(args)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)

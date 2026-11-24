@@ -549,6 +549,24 @@ type StagedFile struct {
 	Size, MTimeNS        int64
 }
 
+// CreateRemoteStaging creates a private same-filesystem staging tree.
+func (c *Client) CreateRemoteStaging(transactionID string) (string, error) {
+	if !regexp.MustCompile(`^[A-Za-z0-9._:-]{1,128}$`).MatchString(transactionID) {
+		return "", fmt.Errorf("ID transazione non valido")
+	}
+	stagingDir := strings.TrimSuffix(c.cfg.RemotePrefix(), "/") + "/.nasbox-staging/" + transactionID
+	if _, err := c.Run([]string{"mkdir", "-p", stagingDir}, nil, 30*time.Second); err != nil {
+		return "", err
+	}
+	return stagingDir, nil
+}
+
+// CleanupRemoteStaging removes a staging tree after publish or failure.
+func (c *Client) CleanupRemoteStaging(stagingDir string) error {
+	_, err := c.Run([]string{"rm", "-rf", stagingDir}, nil, 30*time.Second)
+	return err
+}
+
 // StagingPublish publishes staged files atomically and bumps the manifest.
 func (c *Client) StagingPublish(
 	stagingDir, txID, device string, files []StagedFile,

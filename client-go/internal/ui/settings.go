@@ -60,11 +60,21 @@ func (c *clientApp) helpButton(key string) fyne.CanvasObject {
 func (c *clientApp) settingRow(label string, object fyne.CanvasObject, helpKey string) fyne.CanvasObject {
 	name := widget.NewLabel(label)
 	name.Wrapping = fyne.TextWrapWord
-	// Wrap the label itself, not the HBox: an HBox gives its children a 1px
-	// column and long labels wrap one character per line.
-	nameWrap := container.NewGridWrap(fyne.NewSize(270, 60), name)
-	head := container.NewHBox(nameWrap, c.helpButton(helpKey))
-	return container.NewBorder(nil, nil, head, nil, object)
+	left := container.NewVBox(name)
+	if info, ok := settingHelp[helpKey]; ok {
+		text := info.it
+		if strings.EqualFold(i18n.Language, "en") {
+			text = info.en
+		}
+		help := widget.NewLabel(text)
+		help.Wrapping = fyne.TextWrapWord
+		help.TextStyle = fyne.TextStyle{Italic: true}
+		left.Add(help)
+	}
+	// Fixed-width left column: the explanation lives under the label and never
+	// collapses to one character per line.
+	leftWrap := container.NewGridWrap(fyne.NewSize(320, 84), left)
+	return container.NewBorder(nil, nil, leftWrap, nil, object)
 }
 
 func (c *clientApp) stringSetting(label, key string) fyne.CanvasObject {

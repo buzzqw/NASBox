@@ -8,6 +8,33 @@ import (
 	"nasbox-go/internal/config"
 )
 
+func TestObservationClockIsStableThenIncrements(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	store, err := Open(config.New(""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	first, err := store.Observe("repo1", "a.txt", "pc1", Observation{
+		Digest: "one", Size: 3, MTimeNS: 10, Present: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	same, err := store.Observe("repo1", "a.txt", "pc1", Observation{
+		Digest: "one", Size: 3, MTimeNS: 10, Present: true,
+	})
+	if err != nil || same != first {
+		t.Fatalf("identical observation changed clock: %q -> %q (%v)", first, same, err)
+	}
+	second, err := store.Observe("repo1", "a.txt", "pc1", Observation{
+		Digest: "two", Size: 3, MTimeNS: 20, Present: true,
+	})
+	if err != nil || second == first {
+		t.Fatalf("changed observation did not increment: %q -> %q (%v)", first, second, err)
+	}
+}
+
 func TestDeviceIDIsPersistentAndUnique(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	cfg := config.New("")

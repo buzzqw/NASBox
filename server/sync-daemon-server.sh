@@ -33,7 +33,7 @@
 #
 set -uo pipefail
 
-VERSION="3.25.0"
+VERSION="3.26.0"
 SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -94,6 +94,12 @@ test_failpoint() {
     fi
 }
 
+# Non-fatal counterpart: isolated tests can force one operation (typically a
+# revision bump) to fail and verify that journal and revision roll back together.
+test_failpoint_return() {
+    [[ -n "${NASBOX_TEST_FAILPOINT:-}" && "${NASBOX_TEST_FAILPOINT}" == "$1" ]]
+}
+
 log() {
     local level="$1"; shift
     local msg="$*"
@@ -110,27 +116,43 @@ log() {
     printf '[%s] [%s] %s\n' "$ts" "$level" "$msg" | tee -a "$LOG_FILE" >&2
 }
 
+# JSON strings must escape every C0 control character and DEL, not just the few
+# with a short escape: a newline, TAB or ESC in a filename previously produced an
+# invalid events.jsonl line. Multi-byte UTF-8 bytes are copied unchanged.
+json_escape_string() {
+    local value="$1" out="" char code i
+    for ((i = 0; i < ${#value}; i++)); do
+        char="${value:i:1}"
+        case "$char" in
+            \\) out+='\\' ;;
+            '"') out+='\"' ;;
+            $'\n') out+='\n' ;;
+            $'\r') out+='\r' ;;
+            $'\t') out+='\t' ;;
+            $'\b') out+='\b' ;;
+            $'\f') out+='\f' ;;
+            *)
+                printf -v code '%d' "'$char"
+                if (( code < 32 || code == 127 )); then
+                    printf -v code '%04x' "$code"
+                    out+="\\u$code"
+                else
+                    out+="$char"
+                fi
+                ;;
+        esac
+    done
+    printf '%s' "$out"
+}
+
 log_event() {
     local action="$1" path_="$2" detail="${3:-}"
     mkdir -p "$STATE_DIR"
     local ts
     ts=$(date '+%s')
-    local escaped_path="${path_//\\/\\\\}"
-    escaped_path="${escaped_path//\"/\\\"}"
-    escaped_path="${escaped_path//$'\n'/\\n}"
-    escaped_path="${escaped_path//$'\r'/\\r}"
-    escaped_path="${escaped_path//$'\t'/\\t}"
-    escaped_path="${escaped_path//$'\b'/\\b}"
-    escaped_path="${escaped_path//$'\f'/\\f}"
-    local escaped_detail="${detail//\\/\\\\}"
-    escaped_detail="${escaped_detail//\"/\\\"}"
-    escaped_detail="${escaped_detail//$'\n'/\\n}"
-    escaped_detail="${escaped_detail//$'\r'/\\r}"
-    escaped_detail="${escaped_detail//$'\t'/\\t}"
-    escaped_detail="${escaped_detail//$'\b'/\\b}"
-    escaped_detail="${escaped_detail//$'\f'/\\f}"
     printf '{"ts": %s, "action": "%s", "path": "%s", "detail": "%s"}\n' \
-        "$ts" "$action" "$escaped_path" "$escaped_detail" >> "$EVENTS_FILE"
+        "$ts" "$(json_escape_string "$action")" "$(json_escape_string "$path_")" \
+        "$(json_escape_string "$detail")" >> "$EVENTS_FILE"
 }
 
 # --- config ---
@@ -280,6 +302,7 @@ advance_move_transaction() {
 recover_pending_transactions_unlocked() {
     mkdir -p "$TRANSACTION_DIR" || return 1
     local file kind txid stage device run_ts relative target backup paths_file protocol
+    local rec_path rec_digest rec_size rec_mtime
     shopt -s nullglob
     for file in "$TRANSACTION_DIR"/*.txn; do
         exec 3< "$file"
@@ -363,6 +386,51 @@ recover_pending_transactions_unlocked() {
                 fi
                 log ERROR "recovery transazione ambigua: $txid ($relative)"
                 ;;
+            RESTORE)
+                if [[ -z "$paths_file" || ! -f "$paths_file" ]]; then
+                    log ERROR "recovery restore senza payload: $txid ($relative)"
+                    continue
+                fi
+                if grep -Fq $'COMMIT\t'"$txid" "$JOURNAL_FILE" 2>/dev/null; then
+                    # The PUT is already durable; a crash may have skipped only
+                    # the revision bump or the marker cleanup.
+                    bump_manifest_revision_unlocked || return 1
+                    rm -f "$file" "$paths_file"
+                    continue
+                fi
+                rec_path="" rec_digest="" rec_size="" rec_mtime=""
+                {
+                    IFS= read -r -d '' rec_path || :
+                    IFS= read -r -d '' rec_digest || :
+                    IFS= read -r -d '' rec_size || :
+                    IFS= read -r -d '' rec_mtime || :
+                } < "$paths_file"
+                [[ "$rec_path" == "$relative" && "$rec_digest" =~ ^[0-9a-f]{64}$ && \
+                   "$rec_size" =~ ^[0-9]+$ && "$rec_mtime" =~ ^[0-9]+$ ]] || {
+                    log ERROR "recovery restore payload non valido: $txid ($relative)"
+                    continue
+                }
+                if [[ -e "$target" || -L "$target" ]]; then
+                    if publish_file_matches "$target" "$rec_digest" "$rec_size" "$rec_mtime"; then
+                        # The move completed (or a previous attempt had already
+                        # restored those bytes): finish the journal side with the
+                        # original txid so a repeated recovery stays idempotent.
+                        if append_put_journal_batch_unlocked "$paths_file" "$device" "$txid" "$protocol"; then
+                            rm -f "$file" "$paths_file"
+                        fi
+                        continue
+                    fi
+                    log ERROR "recovery restore target non verificabile: $txid ($relative)"
+                    continue
+                fi
+                if [[ -e "$backup" || -L "$backup" ]]; then
+                    # The version is still in the trash: no data changed yet, so
+                    # dropping the marker is safe and idempotent.
+                    rm -f "$file" "$paths_file"
+                    continue
+                fi
+                log ERROR "recovery restore transazione ambigua: $txid ($relative)"
+                ;;
             PUBLISH)
                 if [[ -z "$paths_file" || ! -f "$paths_file" ]]; then
                     log ERROR "recovery publish senza metadati: $txid"
@@ -389,13 +457,35 @@ recover_pending_transactions_unlocked() {
     shopt -u nullglob
 }
 
+# A journal record must be durable before the revision that advertises it, and
+# the revision's atomic rename must itself be durable (directory entry included)
+# before callers report success. `sync FILE` is absent on some NAS firmwares, so
+# a targeted flush falls back to a full sync there.
+durable_sync_file() {
+    local file="$1"
+    if ! sync "$file" 2>/dev/null; then
+        sync || return 1
+    fi
+    sync "${file%/*}" 2>/dev/null || true
+}
+
+# Restore a journal snapshot and flush it, so a rolled-back transaction can
+# never become visible again after a power loss.
+rollback_journal_backup() {
+    cp "$1" "$JOURNAL_FILE" 2>/dev/null || return 1
+    durable_sync_file "$JOURNAL_FILE" || true
+}
+
 bump_manifest_revision_unlocked() {
     local revision tmp
+    test_failpoint_return "bump_revision_failure" && return 1
     revision=$(cat "$MANIFEST_REVISION_FILE" 2>/dev/null || echo 0)
     [[ "$revision" =~ ^[0-9]+$ ]] || revision=0
     revision=$((revision + 1))
     tmp="${MANIFEST_REVISION_FILE}.tmp.$$"
-    printf '%s\n' "$revision" > "$tmp" && mv -f "$tmp" "$MANIFEST_REVISION_FILE"
+    printf '%s\n' "$revision" > "$tmp" || { rm -f "$tmp"; return 1; }
+    mv -f "$tmp" "$MANIFEST_REVISION_FILE" || { rm -f "$tmp"; return 1; }
+    durable_sync_file "$MANIFEST_REVISION_FILE"
 }
 
 # Encode the only characters that can break the line-oriented journal format.
@@ -591,19 +681,44 @@ cmd_journal_append() {
         echo "Journal già aggiornato: transazione $txid già committata."
         return 0
     fi
-    cat "$tmp" >> "$JOURNAL_FILE"
-    local append_status=$?
+    # Snapshot both files before appending: a failed revision bump must not
+    # leave a journal entry that no revision advertises.
+    local journal_backup="${JOURNAL_FILE}.rollback.$$.$RANDOM"
+    local revision_backup="${MANIFEST_REVISION_FILE}.rollback.$$.$RANDOM"
+    local old_revision
+    old_revision=$(cat "$MANIFEST_REVISION_FILE" 2>/dev/null || echo 0)
+    cp "$JOURNAL_FILE" "$journal_backup" || {
+        rm -f "$tmp" "$journal_backup"; flock -u 9; exec 9>&-; return 1;
+    }
+    local append_status=0
+    cat "$tmp" >> "$JOURNAL_FILE" || append_status=1
     rm -f "$tmp"
     if (( append_status != 0 )); then
+        rollback_journal_backup "$journal_backup" || true
+        rm -f "$journal_backup"
+        flock -u 9
+        exec 9>&-
+        return 1
+    fi
+    # Flush the journal before publishing the revision that advertises it.
+    if ! durable_sync_file "$JOURNAL_FILE"; then
+        rollback_journal_backup "$journal_backup" || true
+        rm -f "$journal_backup"
         flock -u 9
         exec 9>&-
         return 1
     fi
     if ! bump_manifest_revision_unlocked; then
+        rollback_journal_backup "$journal_backup" || true
+        printf '%s\n' "$old_revision" > "$revision_backup" && \
+            mv -f "$revision_backup" "$MANIFEST_REVISION_FILE"
+        durable_sync_file "$MANIFEST_REVISION_FILE" || true
+        rm -f "$journal_backup" "$revision_backup"
         flock -u 9
         exec 9>&-
         return 1
     fi
+    rm -f "$journal_backup"
     local journal_size
     journal_size=$(wc -c < "$JOURNAL_FILE" 2>/dev/null || echo 0)
     if (( journal_size > JOURNAL_MAX_BYTES )); then
@@ -1105,7 +1220,13 @@ append_delete_journal_unlocked() {
         printf 'COMMIT\t%s\n' "$txid"
     } > "$tmp" || { rm -f "$tmp" "$journal_backup"; return 1; }
     if ! cat "$tmp" >> "$JOURNAL_FILE"; then
-        cp "$journal_backup" "$JOURNAL_FILE" 2>/dev/null || true
+        rollback_journal_backup "$journal_backup" || true
+        rm -f "$tmp" "$journal_backup"
+        return 1
+    fi
+    # The journal record must be durable before the revision is published.
+    if ! durable_sync_file "$JOURNAL_FILE"; then
+        rollback_journal_backup "$journal_backup" || true
         rm -f "$tmp" "$journal_backup"
         return 1
     fi
@@ -1115,8 +1236,9 @@ append_delete_journal_unlocked() {
         rm -f "$journal_backup"
         return 0
     fi
-    cp "$journal_backup" "$JOURNAL_FILE" 2>/dev/null || true
+    rollback_journal_backup "$journal_backup" || true
     printf '%s\n' "$old_revision" > "$revision_tmp" && mv -f "$revision_tmp" "$MANIFEST_REVISION_FILE"
+    durable_sync_file "$MANIFEST_REVISION_FILE" || true
     rm -f "$journal_backup" "$revision_tmp"
     return 1
 }
@@ -1144,7 +1266,13 @@ append_delete_journal_batch_unlocked() {
     (( count == 0 )) && { rm -f "$tmp" "$journal_backup"; return 0; }
     printf 'COMMIT\t%s\n' "$txid" >> "$tmp" || { rm -f "$tmp" "$journal_backup"; return 1; }
     if ! cat "$tmp" >> "$JOURNAL_FILE"; then
-        cp "$journal_backup" "$JOURNAL_FILE" 2>/dev/null || true
+        rollback_journal_backup "$journal_backup" || true
+        rm -f "$tmp" "$journal_backup"
+        return 1
+    fi
+    # The journal record must be durable before the revision is published.
+    if ! durable_sync_file "$JOURNAL_FILE"; then
+        rollback_journal_backup "$journal_backup" || true
         rm -f "$tmp" "$journal_backup"
         return 1
     fi
@@ -1153,8 +1281,9 @@ append_delete_journal_batch_unlocked() {
         rm -f "$journal_backup"
         return 0
     fi
-    cp "$journal_backup" "$JOURNAL_FILE" 2>/dev/null || true
+    rollback_journal_backup "$journal_backup" || true
     printf '%s\n' "$old_revision" > "$revision_tmp" && mv -f "$revision_tmp" "$MANIFEST_REVISION_FILE"
+    durable_sync_file "$MANIFEST_REVISION_FILE" || true
     rm -f "$journal_backup" "$revision_tmp"
     return 1
 }
@@ -1188,7 +1317,13 @@ append_rename_journal_batch_unlocked() {
     done < "$paths_file"
     printf 'COMMIT\t%s\n' "$txid" >> "$tmp" || { rm -f "$tmp" "$journal_backup"; return 1; }
     if ! cat "$tmp" >> "$JOURNAL_FILE"; then
-        cp "$journal_backup" "$JOURNAL_FILE" 2>/dev/null || true
+        rollback_journal_backup "$journal_backup" || true
+        rm -f "$tmp" "$journal_backup"
+        return 1
+    fi
+    # The journal record must be durable before the revision is published.
+    if ! durable_sync_file "$JOURNAL_FILE"; then
+        rollback_journal_backup "$journal_backup" || true
         rm -f "$tmp" "$journal_backup"
         return 1
     fi
@@ -1197,8 +1332,9 @@ append_rename_journal_batch_unlocked() {
         rm -f "$journal_backup"
         return 0
     fi
-    cp "$journal_backup" "$JOURNAL_FILE" 2>/dev/null || true
+    rollback_journal_backup "$journal_backup" || true
     printf '%s\n' "$old_revision" > "$revision_tmp" && mv -f "$revision_tmp" "$MANIFEST_REVISION_FILE"
+    durable_sync_file "$MANIFEST_REVISION_FILE" || true
     rm -f "$journal_backup" "$revision_tmp"
     return 1
 }
@@ -1268,35 +1404,55 @@ publish_file_matches() {
 append_put_journal_batch_unlocked() {
     local paths_file="$1" device="$2" txid="$3" protocol="${4:-STAGING_PUBLISH_V1}"
     local path digest size mtime causal server_timestamp tmp count=0
+    local journal_backup old_revision revision_tmp
     [[ -f "$paths_file" ]] || return 1
     tmp="${JOURNAL_FILE}.put-batch.$$.$RANDOM"
+    journal_backup="${JOURNAL_FILE}.rollback.$$.$RANDOM"
+    revision_tmp="${MANIFEST_REVISION_FILE}.rollback.$$.$RANDOM"
+    old_revision=$(cat "$MANIFEST_REVISION_FILE" 2>/dev/null || echo 0)
+    cp "$JOURNAL_FILE" "$journal_backup" || return 1
     server_timestamp=$(date '+%s')
-    : > "$tmp" || return 1
-    printf 'BEGIN\t%s\t%s\t%s\n' "$txid" "$server_timestamp" "$device" >> "$tmp" || { rm -f "$tmp"; return 1; }
+    : > "$tmp" || { rm -f "$tmp" "$journal_backup"; return 1; }
+    printf 'BEGIN\t%s\t%s\t%s\n' "$txid" "$server_timestamp" "$device" >> "$tmp" || { rm -f "$tmp" "$journal_backup"; return 1; }
     while IFS= read -r -d '' path && IFS= read -r -d '' digest && IFS= read -r -d '' size && IFS= read -r -d '' mtime; do
         causal=""
         if [[ "$protocol" == "STAGING_PUBLISH_V2" ]]; then
-            IFS= read -r -d '' causal || { rm -f "$tmp"; return 1; }
-            [[ -z "$causal" || "$causal" =~ ^[A-Za-z0-9._:-]+:[1-9][0-9]*(,[A-Za-z0-9._:-]+:[1-9][0-9]*)*$ ]] || { rm -f "$tmp"; return 1; }
+            IFS= read -r -d '' causal || { rm -f "$tmp" "$journal_backup"; return 1; }
+            [[ -z "$causal" || "$causal" =~ ^[A-Za-z0-9._:-]+:[1-9][0-9]*(,[A-Za-z0-9._:-]+:[1-9][0-9]*)*$ ]] || { rm -f "$tmp" "$journal_backup"; return 1; }
             printf 'PUT\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
                 "$(encode_journal_field "$path")" "$digest" "$size" "$mtime" \
-                "$(encode_journal_field "$device")" "$server_timestamp" "$causal" >> "$tmp" || { rm -f "$tmp"; return 1; }
+                "$(encode_journal_field "$device")" "$server_timestamp" "$causal" >> "$tmp" || { rm -f "$tmp" "$journal_backup"; return 1; }
         else
             printf 'PUT\t%s\t%s\t%s\t%s\t%s\t%s\n' \
                 "$(encode_journal_field "$path")" "$digest" "$size" "$mtime" \
-                "$(encode_journal_field "$device")" "$server_timestamp" >> "$tmp" || { rm -f "$tmp"; return 1; }
+                "$(encode_journal_field "$device")" "$server_timestamp" >> "$tmp" || { rm -f "$tmp" "$journal_backup"; return 1; }
         fi
         (( count++ ))
     done < "$paths_file"
-    (( count > 0 )) || { rm -f "$tmp"; return 1; }
-    printf 'COMMIT\t%s\n' "$txid" >> "$tmp" || { rm -f "$tmp"; return 1; }
-    # sync makes the completed journal visible to recovery before the marker is removed.
-    sync
-    cat "$tmp" >> "$JOURNAL_FILE" || { rm -f "$tmp"; return 1; }
-    sync
-    test_failpoint "publish_after_journal_append"
+    (( count > 0 )) || { rm -f "$tmp" "$journal_backup"; return 1; }
+    printf 'COMMIT\t%s\n' "$txid" >> "$tmp" || { rm -f "$tmp" "$journal_backup"; return 1; }
+    # One append, one durable flush, then the revision that advertises it.
+    if ! cat "$tmp" >> "$JOURNAL_FILE"; then
+        rollback_journal_backup "$journal_backup" || true
+        rm -f "$tmp" "$journal_backup"
+        return 1
+    fi
     rm -f "$tmp"
-    bump_manifest_revision_unlocked
+    if ! durable_sync_file "$JOURNAL_FILE"; then
+        rollback_journal_backup "$journal_backup" || true
+        rm -f "$journal_backup"
+        return 1
+    fi
+    test_failpoint "publish_after_journal_append"
+    if bump_manifest_revision_unlocked; then
+        rm -f "$journal_backup"
+        return 0
+    fi
+    rollback_journal_backup "$journal_backup" || true
+    printf '%s\n' "$old_revision" > "$revision_tmp" && mv -f "$revision_tmp" "$MANIFEST_REVISION_FILE"
+    durable_sync_file "$MANIFEST_REVISION_FILE" || true
+    rm -f "$journal_backup" "$revision_tmp"
+    return 1
 }
 
 recover_publish_transaction_unlocked() {
@@ -1527,13 +1683,45 @@ cmd_checked_delete() {
     exec 9>&-
 }
 
+# True when the rendered manifest already describes exactly these bytes. Restore
+# uses it to recognise a previously completed attempt and stay idempotent instead
+# of appending a second PUT for the same path.
+manifest_path_matches() {
+    local snapshot="$1" path="$2" digest="$3" size="$4" mtime_ns="$5" encoded
+    encoded="$(encode_journal_field "$path")"
+    awk -F '\t' -v wanted="$encoded" -v d="$digest" -v s="$size" -v m="$mtime_ns" '
+        $1 == wanted && $2 == d && $3 == s && $4 == m { found = 1; exit }
+        END { exit(found ? 0 : 1) }
+    ' "$snapshot"
+}
+
+# Emit "<digest>\t<size>\t<mtime_ns>" for a live manifest entry, or fail for a
+# missing/tombstoned one. Lets a repeated restore recognise its own target even
+# after the trash version has been moved away.
+manifest_path_fields() {
+    local snapshot="$1" path="$2" encoded
+    encoded="$(encode_journal_field "$path")"
+    awk -F '\t' -v wanted="$encoded" '
+        $1 == wanted && length($2) == 64 && $2 ~ /^[0-9a-f]+$/ {
+            print $2 "\t" $3 "\t" $4; found = 1; exit
+        }
+        END { exit(found ? 0 : 1) }
+    ' "$snapshot"
+}
+
 # Restore previously deleted files from .sync-trash. The client sends a small
 # NUL-delimited batch; this verb only streams results and appends a PUT entry to
 # the journal per restored file. No graph, no daemon, no in-memory index: the
 # same streaming shape as --checked-delete, suitable for the 1 GB ARM NAS.
+#
+# Each file is a transaction like checked-delete: a STARTED marker is flushed to
+# disk before the mv, the marker advances to MOVED afterwards, and the PUT is
+# only appended once the move is durable. A crash at any point is completed (or
+# discarded, when nothing moved) by recover_pending_transactions_unlocked at the
+# start of the next mutating command.
 cmd_restore_batch() {
     local magic device count index path version search_dir prefix candidate newest
-    local target backup digest size mtime tmp_payload txid
+    local target backup digest size mtime mtime_ns version_fields txid txfile paths_file moved_here manifest_snapshot
     local -a paths versions
     IFS= read -r -d '' magic || return 1
     IFS= read -r -d '' device || return 1
@@ -1555,6 +1743,13 @@ cmd_restore_batch() {
     flock -x 9 || { exec 9>&-; return 1; }
     ensure_journal_files
     recover_pending_transactions_unlocked || { flock -u 9; exec 9>&-; return 1; }
+    manifest_snapshot="${STATE_DIR}/restore-manifest.$$"
+    if ! render_manifest_unlocked > "$manifest_snapshot"; then
+        rm -f "$manifest_snapshot"
+        flock -u 9
+        exec 9>&-
+        return 1
+    fi
     printf 'RESTORE_BATCH_V1\0%s\0' "$count"
     local trash="$SHARE_ROOT/$TRASH_DIRNAME"
     for ((index = 0; index < count; index++)); do
@@ -1578,43 +1773,106 @@ cmd_restore_batch() {
                 fi
             done < <(find "$search_dir" -maxdepth 1 -type f -print0 2>/dev/null)
         fi
-        if [[ -z "$newest" ]]; then
-            printf '%s\0NO_VERSION\0' "$path"
-            continue
-        fi
         target="$SHARE_ROOT/$path"
-        if [[ -e "$target" || -L "$target" ]]; then
-            printf '%s\0EXISTS\0' "$path"
+        if [[ -z "$newest" ]]; then
+            # No trash version left: a repeated restore can still succeed when
+            # the manifest already describes the bytes present at the target.
+            if version_fields=$(manifest_path_fields "$manifest_snapshot" "$path") && \
+               IFS=$'\t' read -r digest size mtime <<< "$version_fields" && \
+               [[ "$digest" =~ ^[0-9a-f]{64}$ && "$size" =~ ^[0-9]+$ && "$mtime" =~ ^[0-9]+$ ]] && \
+               publish_file_matches "$target" "$digest" "$size" "$mtime"; then
+                printf '%s\0RESTORED\0' "$path"
+            else
+                printf '%s\0NO_VERSION\0' "$path"
+            fi
             continue
         fi
-        mkdir -p "${target%/*}" || { printf '%s\0ERROR\0' "$path"; continue; }
-        if ! mv "$newest" "$target"; then
+        # Fingerprint the trash version before any move. Those bytes also
+        # identify an already-completed restore of the same version.
+        digest=$(portable_sha256 "$newest" || true)
+        size=$(portable_file_size "$newest" || true)
+        mtime=$(portable_file_mtime "$newest" || true)
+        if [[ ! "$digest" =~ ^[0-9a-f]{64}$ || ! "$size" =~ ^[0-9]+$ || ! "$mtime" =~ ^[0-9]+$ ]]; then
             printf '%s\0ERROR\0' "$path"
             continue
         fi
-        digest=$(portable_sha256 "$target" || true)
-        size=$(portable_file_size "$target" || true)
-        mtime=$(portable_file_mtime "$target" || true)
-        [[ "$digest" =~ ^[0-9a-f]{64}$ && "$size" =~ ^[0-9]+$ && "$mtime" =~ ^[0-9]+$ ]] || {
-            mv "$target" "$newest" 2>/dev/null || true
-            printf '%s\0ERROR\0' "$path"
-            continue
-        }
-        tmp_payload="${TRANSACTION_DIR}/restore-${RANDOM}.paths"
-        if ! printf '%s\0%s\0%s\0%s\0' "$path" "$digest" "$size" "$((mtime * 1000000000))" > "$tmp_payload"; then
-            mv "$target" "$newest" 2>/dev/null || true
-            printf '%s\0ERROR\0' "$path"
+        mtime_ns=$((mtime * 1000000000))
+        if manifest_path_matches "$manifest_snapshot" "$path" "$digest" "$size" "$mtime_ns" && \
+           publish_file_matches "$target" "$digest" "$size" "$mtime_ns"; then
+            # Already restored and already journaled: no second PUT, no marker.
+            printf '%s\0RESTORED\0' "$path"
             continue
         fi
         txid="restore-$(date +%s)-${index}-${RANDOM}"
-        if append_put_journal_batch_unlocked "$tmp_payload" "$device" "$txid" "STAGING_PUBLISH_V1"; then
+        txfile="$TRANSACTION_DIR/$txid.txn"
+        paths_file="$TRANSACTION_DIR/$txid.paths"
+        if [[ -e "$txfile" || -e "$paths_file" ]]; then
+            printf '%s\0ERROR\0' "$path"
+            continue
+        fi
+        if ! printf '%s\0%s\0%s\0%s\0' "$path" "$digest" "$size" "$mtime_ns" > "$paths_file"; then
+            printf '%s\0ERROR\0' "$path"
+            continue
+        fi
+        moved_here="false"
+        backup="$newest"
+        if [[ -e "$target" || -L "$target" ]]; then
+            if ! publish_file_matches "$target" "$digest" "$size" "$mtime_ns"; then
+                rm -f "$paths_file"
+                printf '%s\0EXISTS\0' "$path"
+                continue
+            fi
+            # Same bytes already in place (a previous attempt moved them but did
+            # not journal): finish the journal side, keep the trash version.
+        else
+            mkdir -p "${target%/*}" || { rm -f "$paths_file"; printf '%s\0ERROR\0' "$path"; continue; }
+        fi
+        begin_move_transaction RESTORE "$txid" "$device" "$(date '+%s')" \
+            "$path" "$target" "$backup" "$paths_file" "STAGING_PUBLISH_V1" || {
+            rm -f "$paths_file"
+            printf '%s\0ERROR\0' "$path"
+            continue
+        }
+        sync
+        if [[ ! -e "$target" && ! -L "$target" ]]; then
+            test_failpoint "restore_after_marker"
+            if ! mv "$newest" "$target"; then
+                rm -f "$txfile" "$paths_file"
+                printf '%s\0ERROR\0' "$path"
+                continue
+            fi
+            moved_here="true"
+            test_failpoint "restore_after_move"
+            if ! publish_file_matches "$target" "$digest" "$size" "$mtime_ns"; then
+                mv "$target" "$newest" 2>/dev/null || true
+                rm -f "$txfile" "$paths_file"
+                printf '%s\0ERROR\0' "$path"
+                continue
+            fi
+        fi
+        if ! advance_move_transaction "$txfile" MOVED; then
+            if [[ "$moved_here" == "true" ]]; then
+                mv "$target" "$newest" 2>/dev/null || true
+            fi
+            rm -f "$txfile" "$paths_file"
+            printf '%s\0ERROR\0' "$path"
+            continue
+        fi
+        sync
+        if append_put_journal_batch_unlocked "$paths_file" "$device" "$txid" "STAGING_PUBLISH_V1"; then
+            test_failpoint "restore_after_journal"
+            rm -f "$txfile" "$paths_file"
             printf '%s\0RESTORED\0' "$path"
         else
-            mv "$target" "$newest" 2>/dev/null || true
+            # The append rolled back journal and revision. Undo our move only
+            # when this call made it; never delete an already-existing target.
+            if [[ "$moved_here" == "true" && -e "$target" && ! -e "$newest" && ! -L "$newest" ]]; then
+                mv "$target" "$newest" 2>/dev/null || true
+            fi
             printf '%s\0ERROR\0' "$path"
         fi
-        rm -f "$tmp_payload"
     done
+    rm -f "$manifest_snapshot"
     flock -u 9
     exec 9>&-
 }
