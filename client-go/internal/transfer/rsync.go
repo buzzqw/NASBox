@@ -36,6 +36,9 @@ func (t *Transfer) BuildCommand(paths []string, upload bool) ([]string, []byte) 
 	if t.cfg.String("compression_mode") == "on" {
 		args = append(args, "--compress")
 	}
+	if limit := t.cfg.Int("bandwidth_kbps"); limit > 0 {
+		args = append(args, "--bwlimit", fmt.Sprint(limit))
+	}
 	source, destination := remoteSpec, root
 	if upload {
 		source, destination = root, remoteSpec

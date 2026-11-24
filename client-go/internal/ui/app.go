@@ -12,6 +12,7 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/widget"
 
 	"nasbox-go/internal/config"
@@ -20,9 +21,12 @@ import (
 	"nasbox-go/internal/history"
 	"nasbox-go/internal/i18n"
 	"nasbox-go/internal/integrity"
+	"nasbox-go/internal/mirror"
 	"nasbox-go/internal/remote"
+	"nasbox-go/internal/selective"
 	"nasbox-go/internal/state"
 	"nasbox-go/internal/transfer"
+	"nasbox-go/internal/update"
 	"nasbox-go/internal/version"
 )
 
@@ -47,10 +51,20 @@ type clientApp struct {
 	nasLabel   *widget.Label
 	pauseBtn   *widget.Button
 
+	browsePath    string
+	browseEntries []remote.BrowseEntry
+	browseList    *widget.List
+	mirrorLabel   *widget.Label
+	selectiveList *widget.List
+	selectiveDirs []string
+	metricsLabel  *widget.Label
+	devicesLabel  *widget.Label
+
 	fyneApp          fyne.App
 	window           fyne.Window
 	selectedConflict string
 	selectedVersion  string
+	selectedBrowse   string
 }
 
 // Run starts the native client. It blocks until the window/tray exits.
@@ -104,6 +118,52 @@ func Run(cfg *config.Config, store *state.Store) {
 		}
 	}
 	c.nasLabel = widget.NewLabel("Stato NAS: sconosciuto")
+	c.metricsLabel = widget.NewLabel("Metriche: in attesa…")
+	c.devicesLabel = widget.NewLabel("Dispositivi: in attesa…")
+	c.mirrorLabel = widget.NewLabel("Cartelle esterne: nessuna")
+	c.browseList = widget.NewList(
+		func() int { return len(c.browseEntries) },
+		func() fyne.CanvasObject { return widget.NewLabel("") },
+		func(id widget.ListItemID, object fyne.CanvasObject) {
+			entry := c.browseEntries[id]
+			object.(*widget.Label).SetText(fmt.Sprintf("%s   %s   %d byte", entry.Name, entry.Kind, entry.Size))
+		},
+	)
+	c.browseList.OnSelected = func(id widget.ListItemID) {
+		if id < len(c.browseEntries) {
+			c.selectedBrowse = c.browseEntries[id].Name
+		}
+	}
+	c.selectiveList = widget.NewList(
+		func() int { return len(c.selectiveDirs) },
+		func() fyne.CanvasObject { return widget.NewLabel("") },
+		func(id widget.ListItemID, object fyne.CanvasObject) {
+			dir := c.selectiveDirs[id]
+			prefix := "☑ "
+			if selective.Excluded(c.cfg, dir) {
+				prefix = "☐ "
+			}
+			object.(*widget.Label).SetText(prefix + dir)
+		},
+	)
+	c.selectiveList.OnSelected = func(id widget.ListItemID) {
+		if id >= len(c.selectiveDirs) {
+			return
+		}
+		dir := c.selectiveDirs[id]
+		excluded := []string{}
+		for _, text := range selective.ExcludedPaths(c.cfg) {
+			if text != dir {
+				excluded = append(excluded, text)
+			}
+		}
+		if !selective.Excluded(c.cfg, dir) {
+			excluded = append(excluded, dir)
+		}
+		selective.SetExcluded(c.cfg, excluded)
+		c.selectiveList.Refresh()
+		c.appendLog("Selezione sincronizzazione aggiornata")
+	}
 
 	c.pauseBtn = widget.NewButton("Pausa", c.onPause)
 	statusTab := container.NewVBox(
@@ -127,13 +187,35 @@ func Run(cfg *config.Config, store *state.Store) {
 		widget.NewButton("Ripristina versione selezionata", c.onRestoreVersion),
 		nil, nil, c.histList,
 	)
-	monitorTab := container.NewVBox(c.nasLabel)
+	monitorTab := container.NewVBox(c.nasLabel, c.metricsLabel, c.devicesLabel)
+	browseTab := container.NewBorder(
+		container.NewVBox(
+			widget.NewButton("↑ Su", c.onBrowseUp),
+			widget.NewButton("Elimina selezionato", c.onBrowseDelete),
+			widget.NewButton("Rinomina selezionato", c.onBrowseRename),
+		),
+		nil, nil, nil, c.browseList,
+	)
+	mirrorTab := container.NewVBox(
+		c.mirrorLabel,
+		widget.NewButton("Sincronizza cartelle esterne", c.onMirrorSync),
+	)
+	selectiveTab := container.NewBorder(
+		widget.NewLabel("Seleziona le cartelle da sincronizzare (clic per escludere/includere)"),
+		nil, nil, nil, c.selectiveList,
+	)
 	settingsTab := container.NewVBox(
 		widget.NewLabel(fmt.Sprintf("Configurazione: %s", cfg.Path)),
 		widget.NewLabel(fmt.Sprintf("Cartella locale: %s", cfg.LocalRoot())),
 		widget.NewLabel(fmt.Sprintf("Backend display: %s", displayBackend(cfg))),
-		widget.NewLabel(fmt.Sprintf("Lingua stringhe: %s", i18n.Language)),
+		widget.NewLabel(fmt.Sprintf("Lingua: %s (il cambio richiede il riavvio)", i18n.Language)),
+		container.NewHBox(
+			widget.NewButton("Italiano", func() { c.setLanguage("it") }),
+			widget.NewButton("English", func() { c.setLanguage("en") }),
+		),
 		widget.NewLabel(fmt.Sprintf("Versione Go: %s", version.AppVersion)),
+		widget.NewLabel(fmt.Sprintf("Banda: %d kbps", cfg.Int("bandwidth_kbps"))),
+		widget.NewButton("Controlla aggiornamenti Go", c.onCheckUpdate),
 	)
 
 	tabs := container.NewAppTabs(
@@ -142,6 +224,9 @@ func Run(cfg *config.Config, store *state.Store) {
 		container.NewTabItem("Log", container.NewBorder(widget.NewLabel("Log eventi"), nil, nil, nil, c.logList)),
 		container.NewTabItem("Conflitti", conflictsTab),
 		container.NewTabItem("Storico", historyTab),
+		container.NewTabItem("Sfoglia NAS", browseTab),
+		container.NewTabItem("Cartelle esterne", mirrorTab),
+		container.NewTabItem("Selettivo", selectiveTab),
 		container.NewTabItem("Monitor NAS", monitorTab),
 		container.NewTabItem("Impostazioni", settingsTab),
 	)
@@ -174,6 +259,10 @@ func Run(cfg *config.Config, store *state.Store) {
 	}()
 	c.refreshConflicts()
 	c.refreshHistory()
+	c.refreshBrowse()
+	c.refreshSelective()
+	c.refreshMirrorLabel()
+	go c.refreshMonitor()
 	c.appendLog("Client Go avviato (" + version.AppVersion + ")")
 	window.ShowAndRun()
 	c.cancel()
@@ -360,6 +449,155 @@ func (c *clientApp) onResolveConflict() {
 				}
 				return
 			}
+		}
+	}()
+}
+
+func (c *clientApp) refreshBrowse() {
+	entries, err := c.client.BrowseList(c.browsePath)
+	if err != nil {
+		c.appendLog("Errore sfoglia NAS: " + err.Error())
+		return
+	}
+	fyne.Do(func() {
+		c.browseEntries = entries
+		c.browseList.Refresh()
+	})
+}
+
+func (c *clientApp) onBrowseUp() {
+	parts := strings.Split(c.browsePath, "/")
+	if len(parts) > 0 {
+		c.browsePath = strings.Join(parts[:len(parts)-1], "/")
+	}
+	c.refreshBrowse()
+}
+
+func (c *clientApp) onBrowseDelete() {
+	if c.selectedBrowse == "" {
+		c.appendLog("Seleziona prima un elemento")
+		return
+	}
+	path := c.selectedBrowse
+	if c.browsePath != "" {
+		path = c.browsePath + "/" + path
+	}
+	go func() {
+		status, err := c.client.BrowseDelete(path, remote.RunTimestamp(), c.store.DeviceID())
+		if err != nil {
+			c.appendLog("Errore eliminazione remota: " + err.Error())
+			return
+		}
+		c.appendLog("Eliminazione remota: " + status)
+		c.refreshBrowse()
+	}()
+}
+
+func (c *clientApp) onBrowseRename() {
+	if c.selectedBrowse == "" {
+		c.appendLog("Seleziona prima un elemento")
+		return
+	}
+	current := c.selectedBrowse
+	dialog.ShowEntryDialog("Rinomina", "Nuovo nome:", func(name string) {
+		if name == "" {
+			return
+		}
+		src, dst := current, name
+		if c.browsePath != "" {
+			src = c.browsePath + "/" + src
+			dst = c.browsePath + "/" + dst
+		}
+		go func() {
+			status, err := c.client.BrowseRename(src, dst, remote.RunTimestamp(), c.store.DeviceID())
+			if err != nil {
+				c.appendLog("Errore rinomina remota: " + err.Error())
+				return
+			}
+			c.appendLog("Rinomina remota: " + status)
+			c.refreshBrowse()
+		}()
+	}, c.window)
+}
+
+func (c *clientApp) refreshSelective() {
+	dirs := selective.ListDirectories(c.cfg.LocalRoot(), 1000)
+	fyne.Do(func() {
+		c.selectiveDirs = dirs
+		c.selectiveList.Refresh()
+	})
+}
+
+func (c *clientApp) refreshMirrorLabel() {
+	mirrors := mirror.Configured(c.cfg)
+	lines := []string{}
+	for _, item := range mirrors {
+		state := "disabilitata"
+		if item.Enabled {
+			state = "attiva"
+		}
+		lines = append(lines, fmt.Sprintf("%s → %s (%s)", item.Source, item.Dest, state))
+	}
+	text := "Cartelle esterne: nessuna"
+	if len(lines) > 0 {
+		text = "Cartelle esterne:\n" + strings.Join(lines, "\n")
+	}
+	fyne.Do(func() { c.mirrorLabel.SetText(text) })
+}
+
+func (c *clientApp) onMirrorSync() {
+	go func() {
+		count, err := mirror.SyncOnce(c.cfg, c.client)
+		if err != nil {
+			c.appendLog("Errore mirror: " + err.Error())
+			return
+		}
+		c.appendLog(fmt.Sprintf("Mirror sincronizzati: %d", count))
+		c.refreshMirrorLabel()
+	}()
+}
+
+func (c *clientApp) refreshMonitor() {
+	for {
+		values, err := c.client.Metrics()
+		if err == nil {
+			text := fmt.Sprintf("NAS %s — server %s\n",
+				c.cfg.String("nas_lan"), values["VERSION"])
+			text += fmt.Sprintf("Disco: %s%% usato, disponibili %s byte\n",
+				values["DISK_USAGE_PERCENT"], values["DISK_AVAILABLE_BYTES"])
+			text += fmt.Sprintf("Carico: %s / %s / %s · RAM disponibile %s byte\n",
+				values["LOAD_1"], values["LOAD_5"], values["LOAD_15"], values["MEM_AVAILABLE_BYTES"])
+			text += fmt.Sprintf("Lock: %s (%s) · coda %s",
+				values["NASBOX_LOCK_HELD"], values["NASBOX_LOCK_PHASE"], values["NASBOX_QUEUE_COUNT"])
+			fyne.Do(func() { c.nasLabel.SetText(text) })
+		}
+		devices, err := c.client.Devices()
+		if err == nil {
+			fyne.Do(func() {
+				c.devicesLabel.SetText("Dispositivi:\n" + strings.Join(devices, "\n"))
+			})
+		}
+		time.Sleep(30 * time.Second)
+	}
+}
+
+func (c *clientApp) setLanguage(language string) {
+	i18n.Language = language
+	c.cfg.Set("language", language, true)
+	c.appendLog("Lingua impostata a " + language + " (riavvio richiesto per tutti i testi)")
+}
+
+func (c *clientApp) onCheckUpdate() {
+	go func() {
+		manifest, err := update.Newest(c.cfg, c.client)
+		if err != nil {
+			c.appendLog("Errore controllo aggiornamenti: " + err.Error())
+			return
+		}
+		if update.Available(manifest) {
+			c.appendLog("Aggiornamento Go disponibile: " + manifest.Version)
+		} else {
+			c.appendLog("Nessun aggiornamento Go disponibile")
 		}
 	}()
 }

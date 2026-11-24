@@ -145,7 +145,7 @@ func (r *Runner) Run(ctx context.Context) error {
 		paused, next := r.paused, r.nextTry
 		pending := len(r.dirty) > 0
 		r.mu.Unlock()
-		if paused || !pending || time.Now().Before(next) {
+		if paused || scheduledPause(r.cfg) || !pending || time.Now().Before(next) {
 			continue
 		}
 		paths := r.takeDirty()
@@ -173,6 +173,46 @@ func (r *Runner) Run(ctx context.Context) error {
 			result.Uploaded, result.Downloads, result.Deleted, result.Conflicts,
 		))
 	}
+}
+
+func scheduledPause(cfg *config.Config) bool {
+	if !cfg.Bool("pause_schedule_enabled") {
+		return false
+	}
+	values, ok := cfg.Get("pause_schedule").([]any)
+	if !ok {
+		return false
+	}
+	now := time.Now()
+	current := now.Hour()*60 + now.Minute()
+	for _, raw := range values {
+		entry, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		start, end := fmt.Sprint(entry["start"]), fmt.Sprint(entry["end"])
+		startMinutes, err1 := parseHHMM(start)
+		endMinutes, err2 := parseHHMM(end)
+		if err1 != nil || err2 != nil {
+			continue
+		}
+		if endMinutes >= startMinutes {
+			if current >= startMinutes && current < endMinutes {
+				return true
+			}
+		} else if current >= startMinutes || current < endMinutes {
+			return true
+		}
+	}
+	return false
+}
+
+func parseHHMM(value string) (int, error) {
+	var hour, minute int
+	if _, err := fmt.Sscanf(value, "%d:%d", &hour, &minute); err != nil {
+		return 0, err
+	}
+	return hour*60 + minute, nil
 }
 
 func (r *Runner) handleFailure(err error) {

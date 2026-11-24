@@ -26,9 +26,10 @@ binario.
 |---|---|---|
 | 0 | Struttura modulo, i18n embed, classificatore portato | completata |
 | 1 | Config compatibile, SQLite condiviso, parser manifest, anteprima CLI, guardia, undo, ssh/rsync, lock | completata |
-| 2 | UI nativa Fyne (7 tab: Stato, Trasferimenti, Log, Conflitti, Storico, Monitor, Impostazioni) con backend X11 + Wayland, tray e motore continuo | completata (Tier A) |
+| 2 | UI nativa Fyne (10 tab: Stato, Trasferimenti, Log, Conflitti, Storico, Sfoglia NAS, Cartelle esterne, Selettivo, Monitor NAS, Impostazioni) con backend X11 + Wayland, tray e motore continuo | completata (Tier A) |
 | 3 | Canale di aggiornamento separato `manifest-go.json`, download/verifica/install con backup | completata |
-| 4 | Rollout graduale, Tier B (Browse NAS, mirrors, selective sync, metriche), rimozione del client Python | da fare |
+| 4 | Tier B: Browse NAS (list/delete/rename), mirror, selective sync, metriche/dispositivi, bandwidth/schedule, lock istanza, setup repository, cambio lingua | completata |
+| 5 | Rollout graduale e rimozione del client Python | da fare |
 
 ## Canale di aggiornamento Go
 

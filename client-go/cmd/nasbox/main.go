@@ -10,7 +10,9 @@ import (
 
 	"nasbox-go/internal/config"
 	"nasbox-go/internal/engine"
+	"nasbox-go/internal/instance"
 	"nasbox-go/internal/remote"
+	"nasbox-go/internal/repository"
 	"nasbox-go/internal/state"
 	"nasbox-go/internal/transfer"
 	"nasbox-go/internal/ui"
@@ -129,6 +131,12 @@ func updateInstall(args []string) {
 }
 
 func gui(args []string) {
+	release, err := instance.Acquire()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	defer release()
 	cfg, err := loadConfig(args)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -140,6 +148,16 @@ func gui(args []string) {
 		os.Exit(1)
 	}
 	defer store.Close()
+	if cfg.LocalRoot() == "" {
+		fmt.Fprintln(os.Stderr, "cartella locale non configurata: imposta local_root in client.json")
+		os.Exit(1)
+	}
+	if values, err := remote.New(cfg).PrintConfig(); err == nil {
+		if id := values["REPOSITORY_ID"]; id != "" {
+			cfg.Set("repository_id", id, false)
+			_ = repository.Initialize(cfg.LocalRoot(), id)
+		}
+	}
 	ui.Run(cfg, store)
 }
 

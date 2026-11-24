@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -93,6 +94,36 @@ func (c *Client) ReadRemoteFile(path string) ([]byte, error) {
 	return c.Run([]string{"cat", path}, nil, 30*time.Second)
 }
 
+// AcquireLease holds the NAS global lock for up to one hour via a long-running
+// SSH command. The returned function releases it. This is used by operations
+// (mirrors, browse) that span several local commands.
+func (c *Client) AcquireLease(device string) (func(), error) {
+	lock := c.cfg.String("server_lock_file_remote")
+	owner := c.cfg.String("server_lock_owner_file_remote")
+	if lock == "" || owner == "" {
+		return nil, fmt.Errorf("lock NAS non configurato")
+	}
+	ownerLine := fmt.Sprintf("%s|go-client|0|maintenance|0|0", device)
+	inner := fmt.Sprintf(
+		"printf '%%s\\n' %s > %s; trap 'rm -f %s' EXIT; sleep 3600",
+		shellQuote(ownerLine), shellQuote(owner), shellQuote(owner),
+	)
+	command := append(c.sshBase(), "flock", "-x", shellQuote(lock), "-c", shellQuote(inner))
+	ctx, cancel := context.WithCancel(context.Background())
+	cmd := exec.CommandContext(ctx, "ssh", command...)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Start(); err != nil {
+		cancel()
+		return nil, err
+	}
+	time.Sleep(400 * time.Millisecond)
+	if ctx.Err() != nil {
+		return nil, fmt.Errorf("lease NAS non acquisito: %s", stderr.String())
+	}
+	return func() { cancel(); _ = cmd.Wait() }, nil
+}
+
 func (c *Client) script() string { return c.cfg.RemoteScript() }
 
 // PrintConfig returns the server's authoritative KEY=VALUE configuration.
@@ -173,6 +204,99 @@ func (c *Client) RestoreBatch(requests []RestoreRequest, device string) (map[str
 		return nil, err
 	}
 	return parsePairedStatus(output, "RESTORE_BATCH_V1")
+}
+
+// RunTimestamp returns the NASBox run timestamp used by mutating protocols.
+func RunTimestamp() string {
+	now := time.Now().UTC()
+	return now.Format("2006-01-02") + "--" +
+		strings.Replace(now.Format("15-04-05.000000"), ".", "-", 1) + "Z"
+}
+
+type BrowseEntry struct {
+	Name, Kind  string
+	Size, MTime int64
+}
+
+func (c *Client) BrowseList(relative string) ([]BrowseEntry, error) {
+	output, err := c.Run([]string{c.script(), "--browse-list", relative}, nil, 60*time.Second)
+	if err != nil {
+		return nil, err
+	}
+	parts := bytes.Split(output, []byte{0})
+	if len(parts) > 0 && len(parts[len(parts)-1]) == 0 {
+		parts = parts[:len(parts)-1]
+	}
+	if len(parts) < 2 || string(parts[0]) != "BROWSE_LIST_V1" {
+		return nil, fmt.Errorf("risposta browse non valida")
+	}
+	count := 0
+	if _, err := fmt.Sscan(string(parts[1]), &count); err != nil || len(parts) != 2+count*4 {
+		return nil, fmt.Errorf("risposta browse incompleta")
+	}
+	entries := make([]BrowseEntry, 0, count)
+	for i := 0; i < count; i++ {
+		entry := BrowseEntry{Name: string(parts[2+i*4]), Kind: string(parts[3+i*4])}
+		entry.Size, _ = strconv.ParseInt(string(parts[4+i*4]), 10, 64)
+		entry.MTime, _ = strconv.ParseInt(string(parts[5+i*4]), 10, 64)
+		entries = append(entries, entry)
+	}
+	return entries, nil
+}
+
+func (c *Client) BrowseDelete(relative, runTS, device string) (string, error) {
+	payload := nulJoin([][]byte{
+		[]byte("BROWSE_DELETE_V1"), []byte(runTS), []byte(device), []byte(relative),
+	})
+	output, err := c.RunLocked([]string{c.script(), "--browse-delete"}, payload, device, 3*time.Minute)
+	if err != nil {
+		return "", err
+	}
+	parts := bytes.Split(output, []byte{0})
+	if len(parts) >= 2 && string(parts[0]) == "BROWSE_DELETE_V1" {
+		return string(parts[1]), nil
+	}
+	return "", fmt.Errorf("risposta browse-delete non valida")
+}
+
+func (c *Client) BrowseRename(src, dst, runTS, device string) (string, error) {
+	payload := nulJoin([][]byte{
+		[]byte("BROWSE_RENAME_V1"), []byte(runTS), []byte(device),
+		[]byte(src), []byte(dst),
+	})
+	output, err := c.RunLocked([]string{c.script(), "--browse-rename"}, payload, device, 3*time.Minute)
+	if err != nil {
+		return "", err
+	}
+	parts := bytes.Split(output, []byte{0})
+	if len(parts) >= 2 {
+		return string(parts[1]), nil
+	}
+	return "", fmt.Errorf("risposta browse-rename non valida")
+}
+
+func (c *Client) Metrics() (map[string]string, error) {
+	output, err := c.Run([]string{c.script(), "--metrics"}, nil, 30*time.Second)
+	if err != nil {
+		return nil, err
+	}
+	return ParseConfig(output), nil
+}
+
+func (c *Client) Devices() ([]string, error) {
+	output, err := c.Run([]string{c.script(), "--devices"}, nil, 30*time.Second)
+	if err != nil {
+		return nil, err
+	}
+	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
+	result := make([]string, 0, len(lines))
+	for _, line := range lines {
+		if line == "" || strings.HasPrefix(line, "NASBOX_DEVICES_") {
+			continue
+		}
+		result = append(result, line)
+	}
+	return result, nil
 }
 
 // RetryPendingJournal replays a journal payload that was saved locally before

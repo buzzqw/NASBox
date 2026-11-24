@@ -29,6 +29,41 @@ func markerPath() (string, error) {
 	return filepath.Join(base, "sync-daemon", "repository-marker.json"), nil
 }
 
+// Initialize creates/updates the local marker after an explicit setup.
+func Initialize(localRoot, repositoryID string) error {
+	root, err := filepath.Abs(localRoot)
+	if err != nil {
+		return err
+	}
+	info, err := os.Stat(root)
+	if err != nil || !info.IsDir() {
+		return fmt.Errorf("cartella locale non accessibile: %s", root)
+	}
+	path, err := markerPath()
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	raw, ok := info.Sys().(*syscall.Stat_t)
+	if !ok {
+		return fmt.Errorf("informazioni filesystem non disponibili")
+	}
+	value := marker{
+		Version: 1, LocalRoot: root, Dev: raw.Dev, RepositoryID: repositoryID,
+	}
+	content, err := json.MarshalIndent(value, "", "  ")
+	if err != nil {
+		return err
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, append(content, '\n'), 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
+}
+
 // Validate checks path, filesystem device and repository identity.
 func Validate(localRoot, repositoryID string, destructive bool) error {
 	root, err := filepath.Abs(localRoot)
