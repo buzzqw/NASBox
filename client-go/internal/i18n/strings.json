@@ -6037,5 +6037,133 @@
   "ui.notify.conflicts_title": {
     "en": "NASBox: conflicts to review",
     "it": "NASBox: conflitti da rivedere"
+  },
+  "guard.blocked_local_deletes": {
+    "en": "Sync blocked: other PCs deleted {count} files that exist here (limit {limit}). Check the NAS before confirming: no local file was touched.",
+    "it": "Sincronizzazione bloccata: altri PC hanno cancellato {count} file presenti qui (limite {limit}). Controlla il NAS prima di confermare: nessun file locale è stato toccato."
+  },
+  "ui.status.nas_busy": {
+    "en": "The NAS is busy with another PC: retrying shortly.",
+    "it": "Il NAS è occupato da un altro PC: riprovo tra poco."
+  },
+  "ui.health.title": {
+    "en": "Check the system",
+    "it": "Controlla il sistema"
+  },
+  "ui.health.subtitle": {
+    "en": "Checks folder, NAS, rsync and logs; for every problem it says what to do.",
+    "it": "Verifica cartella, NAS, rsync e log; per ogni problema indica cosa fare."
+  },
+  "ui.health.intro": {
+    "en": "Run the check for a complete diagnosis.",
+    "it": "Avvia il controllo per una diagnosi completa."
+  },
+  "ui.health.run": {
+    "en": "Check now",
+    "it": "Controlla ora"
+  },
+  "ui.health.running": {
+    "en": "Checking…",
+    "it": "Controllo in corso…"
+  },
+  "ui.health.all_ok": {
+    "en": "All good: no problems found.",
+    "it": "Tutto a posto: nessun problema trovato."
+  },
+  "ui.health.problems": {
+    "en": "Found {count} items to review.",
+    "it": "Trovati {count} punti da verificare."
+  },
+  "ui.health.free": {
+    "en": "free",
+    "it": "liberi"
+  },
+  "ui.health.local_root": {
+    "en": "Local folder",
+    "it": "Cartella locale"
+  },
+  "ui.health.local_root_hint": {
+    "en": "Check that the NASBox folder exists and is writable (Settings › General).",
+    "it": "Controlla che la cartella NASBox esista e sia scrivibile (Impostazioni › Generale)."
+  },
+  "ui.health.local_space": {
+    "en": "Local disk space",
+    "it": "Spazio su disco locale"
+  },
+  "ui.health.local_space_hint": {
+    "en": "Less than 2 GB free: downloads may fail. Free some space or prune the local history.",
+    "it": "Meno di 2 GB liberi: i download potrebbero fallire. Libera spazio o svuota lo storico locale."
+  },
+  "ui.health.repository": {
+    "en": "Repository binding",
+    "it": "Associazione al repository"
+  },
+  "ui.health.repository_hint": {
+    "en": "The local folder is not bound to this NAS: do not delete anything and review the configuration.",
+    "it": "La cartella locale non è associata a questo NAS: non cancellare nulla e ricontrolla la configurazione."
+  },
+  "ui.health.server": {
+    "en": "NAS server",
+    "it": "Server NAS"
+  },
+  "ui.health.server_hint": {
+    "en": "NAS unreachable: check network, NAS address and SSH key.",
+    "it": "NAS non raggiungibile: verifica rete, indirizzo NAS e chiave SSH."
+  },
+  "ui.health.server_old_hint": {
+    "en": "The NAS server is too old: version {min} or newer is required.",
+    "it": "Il server sul NAS è troppo vecchio: serve almeno la versione {min}."
+  },
+  "ui.health.journal": {
+    "en": "NAS journal",
+    "it": "Journal NAS"
+  },
+  "ui.health.journal_hint": {
+    "en": "The NAS journal is not ready: restart the NASBox daemon on the NAS.",
+    "it": "Il journal del NAS non è pronto: riavvia il demone NASBox sul NAS."
+  },
+  "ui.health.rsync_local": {
+    "en": "rsync on this PC",
+    "it": "rsync su questo PC"
+  },
+  "ui.health.rsync_local_hint": {
+    "en": "rsync not found: install it with your package manager.",
+    "it": "rsync non trovato: installalo con il gestore pacchetti."
+  },
+  "ui.health.rsync_progress_hint": {
+    "en": "rsync older than 3.1: sync works but without live progress.",
+    "it": "rsync più vecchio della 3.1: la sync funziona ma senza avanzamento in tempo reale."
+  },
+  "ui.health.rsync_nas": {
+    "en": "rsync on the NAS",
+    "it": "rsync sul NAS"
+  },
+  "ui.health.inotify": {
+    "en": "Change detection",
+    "it": "Rilevamento modifiche"
+  },
+  "ui.health.inotify_missing": {
+    "en": "inotifywait not installed",
+    "it": "inotifywait non installato"
+  },
+  "ui.health.inotify_hint": {
+    "en": "Install inotify-tools: without it, changes are found by slower, heavier periodic scans.",
+    "it": "Installa inotify-tools: senza, le modifiche vengono cercate con scansioni periodiche più lente e pesanti."
+  },
+  "ui.health.errors": {
+    "en": "Errors in the last 24 hours",
+    "it": "Errori nelle ultime 24 ore"
+  },
+  "ui.health.errors_count": {
+    "en": "{count} errors logged",
+    "it": "{count} errori registrati"
+  },
+  "ui.health.errors_none": {
+    "en": "none",
+    "it": "nessuno"
+  },
+  "ui.health.client": {
+    "en": "Client version",
+    "it": "Versione client"
   }
 }

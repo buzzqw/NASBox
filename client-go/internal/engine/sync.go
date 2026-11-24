@@ -17,6 +17,7 @@ import (
 	"nasbox-go/internal/config"
 	"nasbox-go/internal/conflicts"
 	"nasbox-go/internal/deletesafety"
+	"nasbox-go/internal/history"
 	"nasbox-go/internal/i18n"
 	"nasbox-go/internal/reconcile"
 	"nasbox-go/internal/remote"
@@ -59,6 +60,9 @@ type SyncResult struct {
 	Downloads int
 	// Stale counts overwrites skipped because the NAS changed after planning.
 	Stale int
+	// LocalDeleted counts files removed locally because another PC deleted
+	// them (moved to the local trash, always recoverable).
+	LocalDeleted int
 }
 
 type localFile struct {
@@ -205,6 +209,36 @@ func SyncOnceWithManifest(
 		return reconcile.Plan(baseline, localFP, remoteState, localCausals[path], allowDelete, policy), nil
 	}
 
+	// Deletions made on other PCs arrive as manifest tombstones. Before
+	// 0.20.0 they were filtered out here and never reached the planner, so a
+	// file deleted on one PC stayed on every other PC forever.
+	localDeletes := make([]string, 0)
+	for path, remoteState := range manifest {
+		if remoteState.Kind != "TOMBSTONE" || excluded(cfg, path) {
+			continue
+		}
+		if _, present := local[path]; !present {
+			continue
+		}
+		decision, err := plan(path, reconcile.RemoteState{
+			Kind: reconcile.Tombstone, MTimeNS: remoteState.MTimeNS, Causal: remoteState.Causal,
+		})
+		if err != nil {
+			return result, err
+		}
+		switch decision.Action {
+		case reconcile.RemoteWins, reconcile.ConflictRemoteWins:
+			if allowDownload && allowDelete {
+				localDeletes = append(localDeletes, path)
+			}
+		case reconcile.Upload, reconcile.ConflictLocalWins:
+			if allowUpload && !uploadSeen[path] {
+				uploads = append(uploads, path)
+				uploadSeen[path] = true
+			}
+		}
+	}
+
 	for path, remoteState := range manifest {
 		if remoteState.Kind != "FILE" || excluded(cfg, path) {
 			continue
@@ -291,6 +325,10 @@ func SyncOnceWithManifest(
 	result.Missing = report.MissingTotal
 	result.Renames = len(report.Renames)
 	if message := guardMessage(cfg, report); message != "" {
+		result.Blocked = message
+		return result, nil
+	}
+	if message := localDeleteGuard(cfg, len(localDeletes)); message != "" {
 		result.Blocked = message
 		return result, nil
 	}
@@ -418,6 +456,13 @@ func SyncOnceWithManifest(
 			}
 		}
 		result.Downloads = len(downloads)
+	}
+	if len(localDeletes) > 0 {
+		deleted, err := applyRemoteDeletions(cfg, store, local, manifest, localDeletes)
+		result.LocalDeleted = deleted
+		if err != nil {
+			return result, err
+		}
 	}
 	deletions := make([]string, 0, len(report.Unexplained))
 	for _, path := range report.Unexplained {
@@ -619,4 +664,49 @@ func statOf(info os.FileInfo) fileStat {
 		stat.ctimeNS = raw.Ctim.Sec*1e9 + int64(raw.Ctim.Nsec)
 	}
 	return stat
+}
+
+// localDeleteGuard blocks a pass that would remove more local files than the
+// configured batch limit because of NAS deletions (for example a NAS folder
+// deleted by mistake from another PC). Nothing is touched while blocked.
+func localDeleteGuard(cfg *config.Config, count int) string {
+	limit := cfg.Int("max_delete_files")
+	if limit <= 0 {
+		limit = 1000
+	}
+	if count <= limit {
+		return ""
+	}
+	return i18n.T("guard.blocked_local_deletes", map[string]any{"count": count, "limit": limit})
+}
+
+// applyRemoteDeletions moves locally present files deleted on the NAS into
+// the local trash. A file that changed since the scan is left alone: the next
+// pass re-plans it (it may be a newer local edit that must be uploaded).
+func applyRemoteDeletions(
+	cfg *config.Config, store *state.Store, local map[string]localFile,
+	manifest map[string]classify.RemoteState, paths []string,
+) (int, error) {
+	root := cfg.LocalRoot()
+	deleted := 0
+	for _, path := range paths {
+		planned := local[path]
+		info, err := os.Lstat(filepath.Join(root, filepath.FromSlash(path)))
+		if err != nil || !info.Mode().IsRegular() || info.Size() != planned.Size ||
+			info.ModTime().UnixNano() != planned.MTimeNS {
+			continue
+		}
+		if err := history.MoveToTrash(root, path); err != nil {
+			return deleted, fmt.Errorf("cancellazione locale di %s: %w", path, err)
+		}
+		remoteCausal := manifest[path].Causal
+		if _, ok := causal.Parse(remoteCausal); !ok {
+			remoteCausal = ""
+		}
+		if err := store.RecordEntry(cfg.LocalRepositoryID(), path, state.EntryState{Causal: remoteCausal}); err != nil {
+			return deleted, err
+		}
+		deleted++
+	}
+	return deleted, nil
 }

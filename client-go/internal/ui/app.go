@@ -809,7 +809,7 @@ func (c *clientApp) settingsView() fyne.CanvasObject {
 		container.NewTabItem(tr("ui.settings.integrity_tab", nil), container.NewVScroll(c.settingsIntegrity())),
 		container.NewTabItem(tr("ui.group.folders", nil), container.NewVScroll(folders)),
 		container.NewTabItem(tr("ui.settings.advanced_tab", nil), container.NewVScroll(c.settingsAdvanced())),
-		container.NewTabItem(tr("ui.group.about", nil), container.NewVScroll(about)),
+		container.NewTabItem(tr("ui.group.about", nil), container.NewVScroll(container.NewVBox(c.buildHealthPane(), about))),
 	)
 	if index, err := strconv.Atoi(os.Getenv("NASBOX_SETTINGS_TAB")); err == nil &&
 		index >= 0 && index < len(c.settingsTabs.Items) {
@@ -1104,6 +1104,9 @@ func (c *clientApp) consumeEvents() {
 			})
 			c.appendTransfer(message)
 			c.appendLog(message)
+		case "busy":
+			c.applyStatus(statusProgress, tr("ui.status.nas_busy", nil))
+			c.appendLog(event.Message)
 		case "blocked":
 			c.applyStatus(statusBlocked, event.Message)
 			c.appendAction(event.Message)

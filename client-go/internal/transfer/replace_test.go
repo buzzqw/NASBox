@@ -9,13 +9,14 @@ import (
 )
 
 type fakeReplaceNAS struct {
-	calls   []string
-	before  map[string]remote.FileState
-	after   map[string]remote.FileState
-	reads   int
-	puts    []remote.JournalPut
-	txid    string
-	release int
+	calls    []string
+	before   map[string]remote.FileState
+	after    map[string]remote.FileState
+	reads    int
+	puts     []remote.JournalPut
+	txid     string
+	release  int
+	manifest map[string]string
 }
 
 func (f *fakeReplaceNAS) AcquireLease(string) (func(), error) {
@@ -29,6 +30,12 @@ func (f *fakeReplaceNAS) FileStatesCurrent([]string) (map[string]remote.FileStat
 		return f.before, nil
 	}
 	return f.after, nil
+}
+func (f *fakeReplaceNAS) ManifestDigest(path string) (string, bool, error) {
+	if digest, ok := f.manifest[path]; ok {
+		return digest, true, nil
+	}
+	return "", false, nil
 }
 func (f *fakeReplaceNAS) JournalAppendOwned(_, txid, _ string, puts []remote.JournalPut) error {
 	f.calls = append(f.calls, "journal")
@@ -45,6 +52,7 @@ func TestUploadReplaceChecksPreconditionKeepsHistoryAndJournals(t *testing.T) {
 			"a.txt": {Kind: "FILE", Digest: "old-a", Size: 5},
 			"b.txt": {Kind: "FILE", Digest: "changed-by-other-pc", Size: 9},
 		},
+		manifest: map[string]string{"b.txt": "changed-by-other-pc"},
 		after: map[string]remote.FileState{
 			"a.txt": {Kind: "FILE", Digest: "new-a", Size: 7, MTimeNS: 1700000000000000000},
 		},
@@ -102,5 +110,27 @@ func TestUploadReplaceAllStaleTransfersNothing(t *testing.T) {
 	}}, "pc", "repo1", "ts")
 	if err != nil || len(result.Stale) != 1 || nas.release != 1 {
 		t.Fatalf("result %+v err %v release %d", result, err, nas.release)
+	}
+}
+
+func TestUploadReplaceAdoptsOutOfBandNASEdit(t *testing.T) {
+	cfg := baseConfig()
+	tr := New(cfg, remote.New(cfg))
+	nas := &fakeReplaceNAS{
+		before:   map[string]remote.FileState{"a.txt": {Kind: "FILE", Digest: "edited-via-smb", Size: 3, MTimeNS: 5}},
+		manifest: map[string]string{"a.txt": "old"},
+	}
+	tr.replaceClient = nas
+	result, err := tr.UploadReplace([]remote.ReplaceFile{{
+		StagedFile: remote.StagedFile{Path: "a.txt", Digest: "local"}, ExpectedDigest: "old", ExpectedSize: 3,
+	}}, "pc", "repo1", "ts")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Adopted) != 1 || len(nas.puts) != 1 || nas.puts[0].Digest != "edited-via-smb" || nas.puts[0].Causal != "" {
+		t.Fatalf("out-of-band NAS edit must be journaled as found: %+v puts %+v", result, nas.puts)
+	}
+	if !strings.HasPrefix(nas.txid, "adopt-") {
+		t.Fatalf("txid %q", nas.txid)
 	}
 }

@@ -146,6 +146,8 @@ type doctorReport struct {
 	ServerReachable  bool                `json:"server_reachable"`
 	ServerError      string              `json:"server_error,omitempty"`
 	Lock             doctorLockReport    `json:"lock"`
+	RsyncLocal       string              `json:"rsync_local,omitempty"`
+	RsyncNAS         string              `json:"rsync_nas,omitempty"`
 	Error            string              `json:"error,omitempty"`
 	DiagnosticsError string              `json:"diagnostics_error,omitempty"`
 }
@@ -170,6 +172,7 @@ type remoteLockReport struct {
 }
 
 type serverProbe struct {
+	RsyncNAS   string
 	Version    string
 	Reachable  bool
 	Error      string
@@ -258,6 +261,8 @@ func doctor(args []string) int {
 	report.ServerReachable = probe.Reachable
 	report.ServerError = probe.Error
 	report.Lock.Remote = probe.RemoteLock
+	report.RsyncNAS = probe.RsyncNAS
+	report.RsyncLocal = transfer.LocalRsyncVersion()
 	if !probe.Reachable && probe.Error != "" {
 		report.Lock.Remote.Error = probe.Error
 	}
@@ -361,6 +366,9 @@ func probeServer(cfg *config.Config) serverProbe {
 		probe.Error = "versione server sconosciuta"
 	}
 	probe.RemoteLock = remoteLockFromValues(values)
+	if output, err := client.Run([]string{"rsync", "--version"}, nil, 20*time.Second); err == nil {
+		probe.RsyncNAS = transfer.ParseRsyncVersion(string(output))
+	}
 	return probe
 }
 
@@ -429,6 +437,7 @@ func writeDoctorReport(report doctorReport, asJSON bool) error {
 	}
 	fmt.Println()
 	fmt.Printf("lock NAS:    %s\n", formatRemoteLock(report.Lock.Remote))
+	fmt.Printf("rsync:       locale %s · NAS %s\n", valueOr(report.RsyncLocal, "?"), valueOr(report.RsyncNAS, "?"))
 	if report.Error != "" {
 		fmt.Println("errore:", report.Error)
 	}
@@ -808,7 +817,17 @@ func syncOnce(args []string) {
 	}
 	defer store.Close()
 	client := remote.New(cfg)
-	result, err := engine.SyncOnce(cfg, store, client, transfer.New(cfg, client))
+	transfers := transfer.New(cfg, client)
+	// Print every transferred file, as the GUI's activity list does; this
+	// also exercises the same rsync progress stream from the command line.
+	transfers.SetObservers(nil, func(event transfer.FileEvent) {
+		arrow := "↓"
+		if event.Upload {
+			arrow = "↑"
+		}
+		fmt.Println(arrow, event.Path)
+	})
+	result, err := engine.SyncOnce(cfg, store, client, transfers)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
@@ -817,8 +836,8 @@ func syncOnce(args []string) {
 		fmt.Println("BLOCCATO:", result.Blocked)
 		return
 	}
-	fmt.Printf("caricati %d, cancellati %d, spostamenti rilevati %d\n",
-		result.Uploaded, result.Deleted, result.Renames)
+	fmt.Printf("caricati %d, scaricati %d, cancellati sul NAS %d, cancellati in locale %d, spostamenti rilevati %d, conflitti %d, saltati %d\n",
+		result.Uploaded, result.Downloads, result.Deleted, result.LocalDeleted, result.Renames, result.Conflicts, result.Stale)
 }
 
 func undoDeletions(args []string) {
@@ -919,4 +938,11 @@ func preview(args []string) {
 	for _, rename := range report.Renames {
 		fmt.Printf("RENAME %s -> %s\n", rename.Missing, rename.Local)
 	}
+}
+
+func valueOr(value, fallback string) string {
+	if strings.TrimSpace(value) == "" {
+		return fallback
+	}
+	return value
 }

@@ -174,8 +174,11 @@ func (r *Runner) emit(kind, message string) {
 	}
 	if r.logger != nil {
 		action := strings.ToUpper(kind)
-		if kind == "status" {
+		switch kind {
+		case "status":
 			action = "INFO"
+		case "busy":
+			action = "LOCK_DEFERRED" // WARN, same name as the Python client
 		}
 		r.logger.Log(action, "-", message)
 	}
@@ -503,5 +506,11 @@ func (r *Runner) handleFailure(err error) {
 		r.nextTry = time.Now().Add(30 * time.Second)
 	}
 	r.mu.Unlock()
+	if busy {
+		// Another PC holds the NAS: normal multi-client contention, not a
+		// fault. The pass is retried after the backoff above.
+		r.emit("busy", message)
+		return
+	}
 	r.emit("error", message)
 }

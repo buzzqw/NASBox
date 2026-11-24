@@ -4,6 +4,41 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 0.20.0 - 2026-11-24
+
+Client Go, affidabilità:
+
+- **Test end-to-end con lo script server vero.** Il binario `nasbox`, rsync e
+  `sync-daemon-server.sh` girano contro una share temporanea con due PC
+  simulati (ssh finto locale): creazione, modifica, download, cancellazioni,
+  conflitti concorrenti, cancellazioni di massa e modifiche fatte direttamente
+  sul NAS. Girano con `go test ./...`.
+- **Le cancellazioni arrivano agli altri PC.** Le tombstone del manifest
+  venivano scartate prima della pianificazione: un file cancellato su un PC
+  restava per sempre sugli altri. Ora il file locale viene spostato nel
+  cestino locale (sempre recuperabile); oltre `max_delete_files` la sync si
+  blocca senza toccare nulla.
+- **Nessuna perdita della versione locale nei conflitti.** Quando vince la
+  versione del NAS, il download conserva prima la copia locale nello storico
+  locale (`rsync --backup`, come il client Python).
+- **Modifiche fatte direttamente sul NAS** (SMB, File Station): se la
+  sostituzione di un file viene saltata perché il NAS contiene una versione
+  sconosciuta al manifest, quella versione viene registrata nel journal e il
+  passaggio successivo applica la regola dei conflitti, invece di saltare il
+  file all'infinito.
+- Storico locale: `MoveToTrash` ripeteva la cartella nel percorso
+  (`trash/a/a/b.txt-…`), quindi lo storico mostrava l'originale sbagliato.
+- "NAS occupato" non è più un errore: evento `LOCK_DEFERRED` (avviso), stato
+  "Il NAS è occupato da un altro PC: riprovo tra poco".
+- `RunLocked` lasciava il file owner del lock con fase "checking" (la `trap`
+  non scattava per via di `exec`): diagnostica fuorviante.
+- **Controlla il sistema** (Impostazioni › Informazioni): cartella locale e
+  spazio, associazione al repository, server e journal NAS, rsync locale e
+  del NAS, rilevamento modifiche (inotify), errori delle ultime 24 ore; per
+  ogni problema indica cosa fare. `doctor` mostra le versioni di rsync.
+- Con rsync locale < 3.1 il client rinuncia al progresso in tempo reale invece
+  di fallire. La CLI `nasbox sync` elenca i file trasferiti.
+
 ## 0.19.0 - 2026-11-24
 
 Client Go, nuova interfaccia e feedback in tempo reale:

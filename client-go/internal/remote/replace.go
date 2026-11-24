@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -21,6 +22,9 @@ type ReplaceFile struct {
 type ReplaceResult struct {
 	Replaced []JournalPut
 	Stale    []string
+	// Adopted lists files changed directly on the NAS (outside NASBox): their
+	// NAS version was journaled so the next pass resolves them as conflicts.
+	Adopted []string
 }
 
 // FileState is the live state of one path on the NAS disk, as reported by
@@ -113,4 +117,26 @@ func (c *Client) JournalAppendOwned(repositoryID, txid, device string, puts []Jo
 	_, err := c.Run([]string{c.script(), "--journal-append"},
 		c.journalPayload(repositoryID, txid, device, puts), 5*time.Minute)
 	return err
+}
+
+// ManifestDigest returns the digest the NAS manifest records for path ("" and
+// false when the manifest has no entry or records a tombstone).
+func (c *Client) ManifestDigest(path string) (string, bool, error) {
+	output, err := c.Run([]string{c.script(), "--manifest-get", path}, nil, 2*time.Minute)
+	if err != nil {
+		return "", false, err
+	}
+	return parseManifestHit(output)
+}
+
+func parseManifestHit(output []byte) (string, bool, error) {
+	line := strings.TrimSpace(string(output))
+	if line == "MANIFEST_MISS" {
+		return "", false, nil
+	}
+	fields := strings.Split(line, "\t")
+	if len(fields) < 4 || fields[0] != "MANIFEST_HIT" {
+		return "", false, fmt.Errorf("manifest-get: risposta non valida")
+	}
+	return fields[2], fields[2] != "", nil
 }

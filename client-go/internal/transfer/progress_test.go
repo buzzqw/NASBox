@@ -103,3 +103,15 @@ func TestProgressParserRealRsync352Output(t *testing.T) {
 		t.Fatalf("final %+v files %v", last, files)
 	}
 }
+
+func TestParseRsyncVersion(t *testing.T) {
+	for input, want := range map[string]string{
+		"rsync  version 3.1.2  protocol version 31\n":           "3.1.2",
+		"rsync  version 3.5.2-g41bbd895  protocol version 33\n": "3.5.2",
+		"garbage": "",
+	} {
+		if got := ParseRsyncVersion(input); got != want {
+			t.Fatalf("%q -> %q, want %q", input, got, want)
+		}
+	}
+}

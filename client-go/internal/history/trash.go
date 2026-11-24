@@ -33,6 +33,9 @@ type Version struct {
 	Size      int64
 }
 
+// TrashDir is the local history directory (shared with the Python client).
+func TrashDir() (string, error) { return trashDir() }
+
 func trashDir() (string, error) {
 	base := os.Getenv("XDG_STATE_HOME")
 	if base == "" {
@@ -145,7 +148,10 @@ func MoveToTrash(localRoot, relative string) error {
 	}
 	stamp := time.Now().UTC().Format("2006-01-02--15-04-05.000000")
 	stamp = strings.Replace(stamp, ".", "-", 1) + "Z"
-	destination := filepath.Join(dir, filepath.Dir(clean), clean+"-"+stamp)
+	// Same layout as rsync --backup-dir and the Python client:
+	// trash/<folder>/<name>-<timestamp>. (Before 0.20.0 the folder was
+	// repeated, so List reported a wrong original path.)
+	destination := filepath.Join(dir, clean+"-"+stamp)
 	if err := os.MkdirAll(filepath.Dir(destination), 0o700); err != nil {
 		return err
 	}

@@ -396,7 +396,9 @@ func (c *Client) RunLocked(args []string, stdin []byte, device string, timeout t
 	}
 	ownerLine := fmt.Sprintf("%s|go-client|0|checking|0|0", device)
 	inner := fmt.Sprintf(
-		"printf '%%s\\n' %s > %s; trap 'rm -f %s' EXIT; exec %s",
+		// No "exec": it would replace the shell and the EXIT trap that
+		// removes the owner file would never run (stale "checking" owner).
+		"printf '%%s\\n' %s > %s; trap 'rm -f %s' EXIT; %s",
 		shellQuote(ownerLine), shellQuote(owner), shellQuote(owner),
 		strings.Join(func() []string {
 			out := make([]string, 0, len(args))

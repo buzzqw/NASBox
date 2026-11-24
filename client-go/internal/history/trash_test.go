@@ -30,3 +30,26 @@ func TestListAndRestoreVersion(t *testing.T) {
 		t.Fatalf("restore failed: %q %v", content, err)
 	}
 }
+
+// MoveToTrash and rsync --backup-dir must share one layout, so List reports
+// the right original path for files in subfolders.
+func TestMoveToTrashKeepsOriginalPathForSubfolders(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "Documenti", "Progetti"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "Documenti", "Progetti", "a.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := MoveToTrash(root, "Documenti/Progetti/a.txt"); err != nil {
+		t.Fatal(err)
+	}
+	versions, err := List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(versions) != 1 || versions[0].Original != "Documenti/Progetti/a.txt" {
+		t.Fatalf("original path = %+v", versions)
+	}
+}

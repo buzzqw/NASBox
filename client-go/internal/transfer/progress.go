@@ -222,7 +222,7 @@ func compactETA(value string) string {
 // runObserved runs rsync, streaming progress when observers are installed.
 func (t *Transfer) runObserved(ctx context.Context, payload []byte, upload bool, total int, args []string) ([]byte, error) {
 	onProgress, onFile := t.observers()
-	if onProgress == nil && onFile == nil {
+	if (onProgress == nil && onFile == nil) || !localRsyncSupportsProgress() {
 		return runRsync(ctx, payload, args...)
 	}
 	parser := newProgressParser(upload, total, onProgress, onFile)
@@ -233,4 +233,52 @@ func (t *Transfer) runObserved(ctx context.Context, payload []byte, upload bool,
 	stderr, err := runRsyncStreaming(ctx, payload, parser.line, full...)
 	parser.finish(err)
 	return stderr, err
+}
+
+var (
+	progressOnce      sync.Once
+	progressSupported = true
+)
+
+// LocalRsyncVersion returns the client's rsync version ("" when unknown).
+func LocalRsyncVersion() string {
+	output, err := exec.Command("rsync", "--version").Output()
+	if err != nil {
+		return ""
+	}
+	return ParseRsyncVersion(string(output))
+}
+
+// ParseRsyncVersion extracts "3.1.2" from "rsync  version 3.1.2  protocol...".
+func ParseRsyncVersion(output string) string {
+	fields := strings.Fields(output)
+	for index, field := range fields {
+		if field == "version" && index+1 < len(fields) {
+			value := fields[index+1]
+			if dash := strings.IndexAny(value, "-+"); dash > 0 {
+				value = value[:dash]
+			}
+			return value
+		}
+	}
+	return ""
+}
+
+// localRsyncSupportsProgress: --info=progress2 needs rsync >= 3.1 on the
+// client. Older clients keep the silent transfer instead of failing.
+func localRsyncSupportsProgress() bool {
+	progressOnce.Do(func() {
+		version := LocalRsyncVersion()
+		if version == "" {
+			return
+		}
+		parts := strings.Split(version, ".")
+		major, _ := strconv.Atoi(parts[0])
+		minor := 0
+		if len(parts) > 1 {
+			minor, _ = strconv.Atoi(parts[1])
+		}
+		progressSupported = major > 3 || (major == 3 && minor >= 1)
+	})
+	return progressSupported
 }

@@ -13,6 +13,7 @@ type replaceRemote interface {
 	AcquireLease(device string) (func(), error)
 	FileStatesCurrent(paths []string) (map[string]remote.FileState, error)
 	JournalAppendOwned(repositoryID, txid, device string, puts []remote.JournalPut) error
+	ManifestDigest(path string) (string, bool, error)
 }
 
 // trashDirName is the NAS history directory shared with the Python client
@@ -60,6 +61,9 @@ func (t *Transfer) UploadReplace(files []remote.ReplaceFile, device, repositoryI
 			continue
 		}
 		ready = append(ready, file)
+	}
+	if err := t.adoptOutOfBand(nas, files, before, &result, device, repositoryID, runTS); err != nil {
+		return result, err
 	}
 	if len(ready) == 0 {
 		return result, nil
@@ -112,4 +116,41 @@ func (t *Transfer) replaceRemote() replaceRemote {
 		return t.replaceClient
 	}
 	return t.client
+}
+
+// adoptOutOfBand journals NAS files that were changed outside NASBox (the
+// manifest does not know their content). Without this a local edit of such a
+// file would be skipped as "stale" on every pass, forever. After adoption the
+// next pass sees a normal remote change and applies the conflict policy; the
+// losing version is kept (NAS history or conflict copy).
+func (t *Transfer) adoptOutOfBand(
+	nas replaceRemote, files []remote.ReplaceFile, before map[string]remote.FileState,
+	result *remote.ReplaceResult, device, repositoryID, runTS string,
+) error {
+	stale := make(map[string]bool, len(result.Stale))
+	for _, path := range result.Stale {
+		stale[path] = true
+	}
+	puts := make([]remote.JournalPut, 0)
+	for _, file := range files {
+		current, ok := before[file.Path]
+		if !stale[file.Path] || !ok || current.Kind != "FILE" {
+			continue
+		}
+		digest, known, err := nas.ManifestDigest(file.Path)
+		if err != nil {
+			return fmt.Errorf("manifest NAS non leggibile per %s: %w", file.Path, err)
+		}
+		if known && digest == current.Digest {
+			continue // another PC already journaled this version: a normal race
+		}
+		puts = append(puts, remote.JournalPut{
+			Path: file.Path, Digest: current.Digest, Size: current.Size, MTimeNS: current.MTimeNS,
+		})
+		result.Adopted = append(result.Adopted, file.Path)
+	}
+	if len(puts) == 0 {
+		return nil
+	}
+	return nas.JournalAppendOwned(repositoryID, "adopt-"+runTS, device, puts)
 }

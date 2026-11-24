@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"nasbox-go/internal/config"
+	"nasbox-go/internal/history"
 	"nasbox-go/internal/paths"
 	"nasbox-go/internal/remote"
 )
@@ -164,8 +165,41 @@ func (t *Transfer) run(paths []string, upload bool) error {
 	return err
 }
 
-func (t *Transfer) Upload(paths []string) error   { return t.run(paths, true) }
-func (t *Transfer) Download(paths []string) error { return t.run(paths, false) }
+func (t *Transfer) Upload(paths []string) error { return t.run(paths, true) }
+
+// Download replaces local files with the NAS version. Every local file it
+// overwrites is first kept in the local history (rsync --backup into the
+// trash, same layout as the Python client): when a conflict is resolved in
+// favour of the NAS, the local edit stays recoverable instead of being lost.
+func (t *Transfer) Download(paths []string) error {
+	if len(paths) == 0 {
+		return nil
+	}
+	if err := t.client.ValidateHostKeyPin(context.Background()); err != nil {
+		return err
+	}
+	args, payload := t.BuildCommand(paths, false)
+	backup, err := localBackupArgs()
+	if err != nil {
+		return err
+	}
+	args = append(args[:len(args)-2:len(args)-2], append(backup, args[len(args)-2:]...)...)
+	_, err = t.runObserved(t.ctx, payload, false, len(paths), args)
+	return err
+}
+
+func localBackupArgs() ([]string, error) {
+	dir, err := history.TrashDir()
+	if err != nil {
+		return nil, err
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return nil, err
+	}
+	now := time.Now().UTC()
+	stamp := now.Format("2006-01-02") + "--" + strings.Replace(now.Format("15-04-05.000000"), ".", "-", 1) + "Z"
+	return []string{"--backup", "--backup-dir=" + dir, "--suffix=-" + stamp}, nil
+}
 
 // UploadStaged copies files into a private NAS tree and publishes them in one
 // server transaction. The canonical path is never written by rsync directly.
