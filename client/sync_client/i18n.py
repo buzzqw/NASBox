@@ -279,6 +279,10 @@ STRINGS: dict[str, dict[str, str]] = {
         "it": "Controlla che il NAS sia acceso e raggiungibile, poi verifica la configurazione di connessione.",
         "en": "Check that the NAS is on and reachable, then review the connection settings.",
     },
+    "assurance.guidance_safety_detail": {
+        "it": "Dettaglio: {detail}",
+        "en": "Detail: {detail}",
+    },
     "assurance.guidance_action_log": {"it": "Apri Log", "en": "Open Log"},
     "assurance.guidance_action_conflicts": {"it": "Apri Conflitti", "en": "Open Conflicts"},
     "assurance.offline": {"it": "NAS non raggiungibile: impossibile garantire la sincronizzazione.", "en": "NAS unreachable: cannot verify sync state."},
@@ -643,6 +647,19 @@ STRINGS: dict[str, dict[str, str]] = {
     "safety.blocked_cumulative": {
         "it": "Operazione bloccata: {count} cancellazioni nell'ultima ora, limite cumulativo {limit}. Nessun file è stato modificato. Controlla il Log per capire quali file verrebbero rimossi; se l'eliminazione è intenzionale, premi «Conferma cancellazioni di massa» nella scheda Stato prima di riprovare.",
         "en": "Operation blocked: {count} deletions in the last hour, cumulative limit {limit}. Nothing was changed. Check the Log to see which files would be removed; if the deletion is intentional, press 'Confirm mass deletion' in the Status tab before retrying.",
+    },
+    "guard.preview": {"it": "Anteprima: {summary}", "en": "Preview: {summary}"},
+    "guard.renames": {
+        "it": "{count} percorsi sono spiegati da rename e non verranno cancellati.",
+        "en": "{count} paths are explained by renames and will not be deleted.",
+    },
+    "guard.blocked_directory": {
+        "it": "Cancellazione bloccata: la cartella «{directory}» perderebbe {missing} di {remote} file ({ratio:.0%}). Nessun file è stato modificato. Se la cartella è stata spostata o l'unità non è montata, ripristinala; se vuoi davvero cancellarla, controlla il Log e conferma solo dopo.",
+        "en": "Deletion blocked: folder '{directory}' would lose {missing} of {remote} files ({ratio:.0%}). Nothing was changed. If the folder was moved or the drive is unmounted, restore it; if you really want to delete it, check the Log and confirm afterwards.",
+    },
+    "guard.blocked_sentinel": {
+        "it": "Cancellazione bloccata: manca il file sentinella «{path}» nella cartella locale: il NASBox sembra essere quello sbagliato. Nessun file è stato modificato.",
+        "en": "Deletion blocked: sentinel file '{path}' is missing from the local folder: this looks like the wrong NASBox tree. Nothing was changed.",
     },
     "status.problem_category_journal_block": {"it": "journal", "en": "journal"},
     "status.problem_category_generic": {"it": "errore {action}", "en": "{action} error"},

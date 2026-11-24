@@ -151,6 +151,73 @@ class SyncStateStore:
                 )
             }
 
+    def record_identities(
+        self, local_root: str, paths, digests: Mapping[str, str] | None = None,
+    ) -> None:
+        """Store cheap filesystem identity for local files.
+
+        This never hashes a file: it only takes ``lstat`` metadata. When a
+        digest is already known (from the fingerprint pass or the in-memory
+        stat cache) it is stored too, so a later classification can recognise
+        a rename by content without re-reading the file.
+        """
+        root = Path(local_root)
+        repository = self._repository()
+        observed_at = time.time()
+        rows = []
+        for relative_path in paths:
+            try:
+                info = (root / relative_path).lstat()
+            except OSError:
+                continue
+            if not stat.S_ISREG(info.st_mode):
+                continue
+            digest = (digests or {}).get(relative_path)
+            if not digest:
+                stat_key = (
+                    info.st_dev, info.st_ino, info.st_size,
+                    info.st_mtime_ns, info.st_ctime_ns,
+                )
+                with _stat_digest_cache_lock:
+                    digest = _stat_digest_cache.get(stat_key)
+            rows.append((
+                repository, relative_path, info.st_dev, info.st_ino,
+                info.st_ctime_ns, info.st_size, info.st_mtime_ns, digest, observed_at,
+            ))
+        if not rows:
+            return
+        with self._lock, self._connection() as conn:
+            conn.executemany(
+                """
+                INSERT INTO file_identity(
+                    repository, path, dev, ino, ctime_ns, size, mtime_ns, digest, observed_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(repository, path) DO UPDATE SET
+                    dev=excluded.dev, ino=excluded.ino, ctime_ns=excluded.ctime_ns,
+                    size=excluded.size, mtime_ns=excluded.mtime_ns,
+                    digest=COALESCE(excluded.digest, file_identity.digest),
+                    observed_at=excluded.observed_at
+                """,
+                rows,
+            )
+
+    def identity_snapshot(self) -> dict[str, dict]:
+        """Return ``path -> identity`` for the current repository."""
+        with self._lock, self._connection() as conn:
+            return {
+                row[0]: {
+                    "dev": row[1], "ino": row[2], "ctime_ns": row[3],
+                    "size": row[4], "mtime_ns": row[5], "digest": row[6],
+                }
+                for row in conn.execute(
+                    """
+                    SELECT path, dev, ino, ctime_ns, size, mtime_ns, digest
+                    FROM file_identity WHERE repository = ?
+                    """,
+                    (self._repository(),),
+                )
+            }
+
     def entry_count(self) -> int:
         """Number of tracked files in the authoritative local baseline."""
         with self._lock, self._connection() as conn:
@@ -236,6 +303,20 @@ class SyncStateStore:
                     observed_at REAL NOT NULL,
                     PRIMARY KEY (repository, path)
                 );
+                CREATE TABLE IF NOT EXISTS file_identity (
+                    repository TEXT NOT NULL,
+                    path TEXT NOT NULL,
+                    dev INTEGER,
+                    ino INTEGER,
+                    ctime_ns INTEGER,
+                    size INTEGER,
+                    mtime_ns INTEGER,
+                    digest TEXT,
+                    observed_at REAL NOT NULL,
+                    PRIMARY KEY (repository, path)
+                );
+                CREATE INDEX IF NOT EXISTS idx_file_identity_digest
+                    ON file_identity(repository, digest);
                 CREATE TABLE IF NOT EXISTS pending (
                     repository TEXT NOT NULL,
                     path TEXT NOT NULL,

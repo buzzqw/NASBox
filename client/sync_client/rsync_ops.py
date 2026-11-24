@@ -2113,7 +2113,7 @@ def scan(
 
 def validate_transfer_safety(
     cfg: Config, conn: NasConnection, destructive: bool = False,
-    direction: str | None = None,
+    direction: str | None = None, sync_state=None,
 ) -> None:
     """Validate that planning, rsync and journal all target the same repository.
 
@@ -2172,36 +2172,85 @@ def validate_transfer_safety(
         )
     if remote_values.get("SYNC_LOCK_AVAILABLE", "").lower() != "true":
         raise RepositorySafetyError("lock multi-client non disponibile sul NAS")
-    if destructive and direction == "download":
-        # The pull already holds the authoritative manifest in cache. Counting
+    if destructive and direction in ("download", "upload"):
+        # Both workers hold the authoritative manifest in cache. Counting
         # deletions from it (one stat per candidate path) is far cheaper than a
         # full-tree rsync --dry-run over ~100k files. Fall back to rsync only
         # when the cache is cold or unavailable.
+        from . import delete_safety
+        from .change_classifier import classify
+
+        root = Path(cfg.local_root())
         cached = cached_manifest(cfg, max_age_seconds=300)
         if cached is not None:
-            root = Path(cfg.local_root())
-            deletions = [
+            missing_paths = [
                 path for path, state in cached.items()
                 if state.kind == RemoteKind.FILE
                 and not path_is_excluded(cfg, path)
                 and not (root / path).exists()
             ]
+            remote_entries = cached
         else:
             candidates = _dry_run(cfg, conn, direction, strict=True)
-            deletions = [item for item in candidates if item.direction.startswith("delete_")]
+            missing_paths = [
+                item.path for item in candidates
+                if item.direction.startswith("delete_")
+            ]
+            remote_entries = {}
+
+        # A sentinel is a tiny file that must still be present locally. If it is
+        # gone, we are probably looking at an unmounted/wrong volume: refuse all
+        # destructive work before any classification or transfer.
+        sentinels = [
+            value.strip() for value in str(cfg.get("delete_sentinels") or "").split(",")
+            if value.strip()
+        ]
+        for sentinel in sentinels:
+            if not (root / sentinel).exists():
+                raise RepositorySafetyError(t("guard.blocked_sentinel", path=sentinel))
+
+        # Classify on the PC: renames are not deletions, and a whole directory
+        # disappearing is a different event from a handful of scattered files.
+        report = None
+        effective = missing_paths
+        if cfg.get("delete_guard_classify") and remote_entries and sync_state is not None:
+            try:
+                identity = sync_state.identity_snapshot()
+                ratio = float(cfg.get("delete_dir_guard_ratio") or 0.5)
+                min_files = int(cfg.get("delete_dir_guard_min_files") or 20)
+                report = classify(
+                    missing_paths, remote_entries, identity,
+                    dir_ratio=ratio, min_files=min_files,
+                )
+                effective = report.unexplained
+            except (OSError, ValueError, RuntimeError, TypeError):
+                report = None  # classification is an enhancement, never a hard dependency
+
+        if report is not None and report.anomalies:
+            anomaly = report.anomalies[0]
+            raise RepositorySafetyError(t(
+                "guard.blocked_directory",
+                directory=anomaly.directory, missing=anomaly.missing,
+                remote=anomaly.remote, ratio=anomaly.ratio,
+            ))
+
         try:
             max_deletes = int(cfg.get("max_delete_files") or 1000)
         except (TypeError, ValueError):
             max_deletes = 1000
-        if len(deletions) > max_deletes:
-            raise RepositorySafetyError(t(
-                "safety.blocked_proposed", count=len(deletions), limit=max_deletes,
-            ))
+        if len(effective) > max_deletes:
+            message = t(
+                "safety.blocked_proposed", count=len(effective), limit=max_deletes,
+            )
+            if report is not None:
+                message = f"{message} {t('guard.preview', summary=report.summary())}"
+                if report.renames:
+                    message = f"{message} {t('guard.renames', count=len(report.renames))}"
+            raise RepositorySafetyError(message)
+
         # A sequence of smaller batches can stay under the per-batch limit and
         # still delete the whole tree. Check the rolling window as well.
-        from . import delete_safety
-
-        delete_safety.shared().check(cfg, len(deletions), direction)
+        delete_safety.shared().check(cfg, len(effective), direction)
 
 
 def host_key_fingerprints(host: str, port: int) -> list[str]:

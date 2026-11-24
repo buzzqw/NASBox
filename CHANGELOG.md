@@ -4,6 +4,23 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 1.33.0 - 2026-11-24
+
+- Intelligenza lato client nella guardia alle cancellazioni: i percorsi spiegati
+  da un rename non vengono più contati come eliminazioni e una cartella che
+  perde più della metà dei propri file viene bloccata con una spiegazione
+  dedicata, invece del solo conteggio globale.
+- Identità filesystem (`dev`, `ino`, `ctime`, dimensione, digest) salvata nel DB
+  locale senza hashing aggiuntivo, usata per riconoscere spostamenti di cartelle
+  e unità non montate.
+- Sentinelle opzionali: se un file segnaposto manca nella cartella locale, la
+  sincronizzazione distruttiva viene rifiutata perché l'albero non è quello
+  atteso.
+- Anteprima delle modifiche nel messaggio di blocco: categorie, conteggi per
+  cartella e rename esclusi, con il dettaglio mostrato anche nella guida "Cosa
+  fare ora".
+- Nessun nuovo processo o database sul NAS: tutta la classificazione gira sui PC.
+
 ## 1.32.0 - 2026-11-24
 
 - Messaggi di stato guidati: il banner dice il motivo specifico (blocco di

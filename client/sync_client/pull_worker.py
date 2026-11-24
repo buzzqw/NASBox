@@ -309,6 +309,7 @@ class PullWorker(TransferWorker):
                             self.cfg, self._conn,
                             destructive=self.cfg.allows_remote_deletions(),
                             direction="download",
+                            sync_state=self.sync_state,
                         )
                     except RepositorySafetyError as exc:
                         self._log("SAFETY_BLOCK", "-", str(exc))

@@ -196,6 +196,15 @@ DEFAULTS: dict[str, Any] = {
     "max_delete_files_per_window": 1000,  # cumulative stop across batches inside one window
     "delete_safety_window_seconds": 3600,
     "delete_confirmation_seconds": 600,
+    # Client-side intelligence: a single directory losing more than this share
+    # of its remote files is almost always a mistake (unmounted drive, rm -rf),
+    # not a legitimate batch of deletions. Costs nothing on the NAS.
+    "delete_dir_guard_ratio": 0.5,
+    "delete_dir_guard_min_files": 20,
+    # Optional relative paths that must still exist locally before a destructive
+    # sync is accepted (wrong-volume / wrong-folder sentinel).
+    "delete_sentinels": "",
+    "delete_guard_classify": True,
     "integrity_check_interval_seconds": 86400,  # automatic checksum audit (0 disables)
     "integrity_startup_delay_seconds": 1800,  # never checksum the whole tree right after startup
     "integrity_check_sample_size": 500,  # 0 = full tree (expensive); default = bounded sample

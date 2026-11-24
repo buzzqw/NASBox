@@ -679,11 +679,11 @@ class StatusTab(QWidget):
         """Return (short reason, what to do next, button destination)."""
         safety = self._recent_safety()
         if safety is not None:
-            return (
-                t("assurance.reason_safety"),
-                t("assurance.guidance_safety", count=_safety_count(safety[1])),
-                "log",
-            )
+            guidance = t("assurance.guidance_safety", count=_safety_count(safety[1]))
+            detail = self._compact_detail(safety[1])
+            if detail:
+                guidance = f"{guidance} {t('assurance.guidance_safety_detail', detail=detail)}"
+            return (t("assurance.reason_safety"), guidance, "log")
         if self._conflict_count:
             return (
                 t("assurance.reason_conflicts"),

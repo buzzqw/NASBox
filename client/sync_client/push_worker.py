@@ -354,6 +354,7 @@ class PushWorker(TransferWorker):
                             self.cfg, self._conn,
                             destructive=self.cfg.allows_remote_deletions(),
                             direction="upload",
+                            sync_state=self.sync_state,
                         )
                     except RepositorySafetyError as exc:
                         if watcher is not None:
@@ -1036,6 +1037,9 @@ class PushWorker(TransferWorker):
     ]:
         if not relative_paths:
             return set(), [], set(), set(), {}, []
+        # Cheap filesystem identity for local files. No hashing happens here:
+        # the digest comes from the fingerprint we already computed below.
+        local_digests: dict[str, str] = {}
         remote_progress = None
         if remote_progress_total:
             self._on_hash_progress(remote_progress_offset, remote_progress_total)
@@ -1066,6 +1070,8 @@ class PushWorker(TransferWorker):
         remote_adoptions: dict[str, Fingerprint] = {}
         for relative_path in sorted(relative_paths - rename_paths):
             local_fp = self.sync_state.local_fingerprint(self.cfg.local_root(), relative_path)
+            if local_fp is not None and local_fp.digest:
+                local_digests[relative_path] = local_fp.digest
             baseline = self.sync_state.get(relative_path)
             remote = remote_states[relative_path]
             decision = plan_path(
@@ -1205,6 +1211,13 @@ class PushWorker(TransferWorker):
                     self._causal_journal_versions[relative_path] = remote.causal
             elif decision.action == Action.BLOCK:
                 raise rsync_ops.RemoteLockError(f"{relative_path}: {decision.detail}")
+        if local_digests:
+            try:
+                self.sync_state.record_identities(
+                    self.cfg.local_root(), local_digests.keys(), local_digests,
+                )
+            except (OSError, RuntimeError, TypeError):
+                pass  # identity is an enhancement; planning must not fail because of it
         return uploads, deletes, adopted, remote_wins, remote_adoptions, rename_plans
 
     def _find_rename_plans(
