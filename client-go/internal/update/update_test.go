@@ -252,6 +252,29 @@ func TestApplyInstallsAndKeepsBackup(t *testing.T) {
 	}
 }
 
+func TestApplyPromotesRunningNewInstalled(t *testing.T) {
+	cfg, reader, _ := makeSetup(t, "9.9.9", []byte("new-binary"), "")
+	binaryPath := filepath.Join(t.TempDir(), "nasbox")
+	if err := os.WriteFile(binaryPath, []byte("old"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Simulate the first start after an update: the binary already runs the
+	// new version, but only one start has been recorded so far.
+	if err := writeState(binaryPath, &UpdateState{
+		State: StateNewInstalled, Version: version.AppVersion,
+		Binary: binaryPath, Backup: binaryPath + ".bak", ConfirmedStarts: 1,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	applied, versionName, err := Apply(cfg, reader, binaryPath)
+	if err != nil {
+		t.Fatalf("a running new binary must not block the next update: %v", err)
+	}
+	if !applied || versionName != "9.9.9" {
+		t.Fatalf("update not applied: %v %q", applied, versionName)
+	}
+}
+
 func TestStateWrittenBeforeFirstRename(t *testing.T) {
 	cfg, reader, _ := makeSetup(t, "9.9.9", []byte("new-binary"), "")
 	binaryPath := filepath.Join(t.TempDir(), "nasbox")

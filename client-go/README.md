@@ -44,7 +44,8 @@ binario.
 | 11 | Evoluzione: manifest delta, conflict storm, diagnostica persistente, banda separata, pull completo reale, UI moderna verificata | completata (0.17.0) |
 | 12 | Fix updater: manifest Go include target e requires_server | completata (0.17.1) |
 | 13 | Sync immediato all'avvio | completata (0.17.2) |
-| 14 | Rollout graduale e rimozione del client Python | da fare |
+| 14 | Updater: nessun blocco dopo il primo riavvio | completata (0.17.3) |
+| 15 | Rollout graduale e rimozione del client Python | da fare |
 
 Il documento di design dell'interfaccia è in `internal/ui/DESIGN.md`.
 

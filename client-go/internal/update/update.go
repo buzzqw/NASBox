@@ -430,6 +430,17 @@ func Apply(cfg *config.Config, client FileReader, binaryPath string) (bool, stri
 	if err != nil {
 		return false, "", err
 	}
+	if pending != nil && pending.State == StateNewInstalled && pending.Version == version.AppVersion {
+		// The process asking for this update is the freshly installed binary:
+		// it started and is healthy enough to check the channel, so waiting for
+		// a second start must not block the next release.
+		pending.State = StateConfirmed
+		pending.ConfirmedStarts = 2
+		pending.UpdatedAt = time.Now().Unix()
+		if err := writeState(binaryPath, pending); err != nil {
+			return false, "", err
+		}
+	}
 	if pending != nil && pending.State != StateConfirmed && pending.State != StateFailed {
 		return false, "", fmt.Errorf("aggiornamento in sospeso (%s): riavvia il client", pending.State)
 	}
