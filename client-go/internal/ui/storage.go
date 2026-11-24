@@ -365,11 +365,13 @@ func selectedPathList(selected map[string]bool) []string {
 
 func (c *clientApp) runDuplicateCleanup(groups []storage.DuplicateGroup, paths []string) {
 	result := storage.RemoveDuplicates(c.cfg.LocalRoot(), groups, paths)
-	for _, problem := range result.Errors {
-		c.appendLog(tr("dupclean.error_move", map[string]any{"path": problem}))
+	if len(result.Errors) > 0 {
+		c.appendLog(tr("dupclean.error_body", map[string]any{
+			"error": strings.Join(result.Errors, "; "),
+		}))
 	}
 	fyne.Do(func() {
-		if result.Moved != nil {
+		if len(result.Moved) > 0 {
 			c.appendAction(tr("dupclean.result_body", map[string]any{
 				"moved": len(result.Moved), "errors": len(result.Errors),
 			}))

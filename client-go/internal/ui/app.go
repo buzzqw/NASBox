@@ -604,7 +604,7 @@ func (c *clientApp) buildSections() {
 }
 
 func (c *clientApp) statusView() fyne.CanvasObject {
-	c.pauseBtnStatus = newHintButton(labelPause(c.runner.IsPaused()), theme.MediaPauseIcon(),
+	c.pauseBtnStatus = newHintButton(labelPause(c.runner.Paused()), theme.MediaPauseIcon(),
 		tr("status.pause_tooltip", nil), widget.MediumImportance, c.onPause, c.setHint).Button
 	c.detailsBtn = newHintButton(tr("ui.action.details", nil), theme.NavigateNextIcon(),
 		tr("ui.action.details_hint", nil), widget.MediumImportance, func() {
