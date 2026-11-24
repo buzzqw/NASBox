@@ -1026,7 +1026,7 @@ func (c *clientApp) consumeEvents() {
 			c.appendLog(message)
 		case "blocked":
 			c.applyStatus(statusBlocked, event.Message)
-			c.appendAction(fmt.Sprintf("%s: %s", tr("safety.blocked_proposed", nil), event.Message))
+			c.appendAction(event.Message)
 		case "error":
 			level := statusAttention
 			if looksOffline(event.Message) {

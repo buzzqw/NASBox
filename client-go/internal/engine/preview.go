@@ -5,6 +5,7 @@ package engine
 
 import (
 	"os"
+	pathpkg "path"
 	"path/filepath"
 	"strings"
 
@@ -50,49 +51,63 @@ func Preview(
 	return classify.Classify(missing, manifest, converted, ratio, minFiles), nil
 }
 
+// internalDirNames are never user content: caches, VCS metadata and the two
+// client-update channels live inside the NASBox tree but must never be synced
+// or counted as deleted when absent locally.
+var internalDirNames = map[string]bool{
+	".sync-trash": true, ".sync-partial": true, ".nasbox-staging": true,
+	".nasbox-root": true, ".nasbox-client-update": true,
+	".nasbox-client-update-go": true, "@eaDir": true, ".git": true,
+	".venv": true, ".hg": true, ".svn": true, "__pycache__": true,
+	"node_modules": true,
+}
+
+// systemExcludes mirrors the Python client's DEFAULT_SYSTEM_EXCLUDES, so both
+// implementations ignore the same generated files (tool caches, LaTeX
+// intermediates, editor backups).
+var systemExcludes = []string{
+	".DS_Store", "Thumbs.db", "desktop.ini", ".~lock.*", "~$*", "*.tmp.*",
+	"*.part", "*.crdownload", "__pycache__", "*.pyc", "*.pyo", ".venv",
+	"venv", "node_modules", "*.swp", "*.swo", "*~", ".pytest_cache",
+	".mypy_cache", ".ruff_cache", ".tox", ".coverage", "htmlcov", "*.egg-info",
+	"*.aux", "*.fls", "*.fdb_latexmk", "*.synctex.gz", "*.toc", "*.lof",
+	"*.lot", "*.bbl", "*.blg", "*.idx", "*.ind", "*.ilg", "*.xdv", "*.nav",
+	"*.snm", "*.vrb", "*.bcf", "*.run.xml",
+}
+
 func excluded(cfg *config.Config, path string) bool {
 	normalized := filepath.ToSlash(path)
 	parts := strings.Split(normalized, "/")
-	// Internal directories are excluded at any depth, not only at the root.
 	for _, part := range parts {
-		switch part {
-		case ".sync-trash", ".sync-partial", ".nasbox-staging", ".nasbox-root",
-			"@eaDir", ".git", ".venv", ".hg", ".svn", "__pycache__", "node_modules":
+		if internalDirNames[part] {
 			return true
 		}
 	}
-	if len(parts) > 0 && strings.HasSuffix(parts[len(parts)-1], ".pyc") {
-		return true
-	}
+	patterns := append([]string{}, systemExcludes...)
 	for _, key := range []string{"exclude_patterns", "selective_sync_excludes"} {
-		patterns, ok := cfg.Get(key).([]any)
+		values, ok := cfg.Get(key).([]any)
 		if !ok {
 			continue
 		}
-		for _, pattern := range patterns {
-			text, ok := pattern.(string)
-			if !ok {
-				continue
+		for _, value := range values {
+			if text, ok := value.(string); ok {
+				patterns = append(patterns, text)
 			}
-			text = strings.TrimSuffix(text, "/")
-			if text == "" {
-				continue
-			}
-			if path == text || strings.HasPrefix(normalized, text+"/") {
-				return true
-			}
-			// A configured directory name excludes that component at any depth
-			// (e.g. "build/" excludes "a/build/x").
-			if !strings.Contains(text, "/") {
-				for _, part := range parts {
-					if part == text {
-						return true
-					}
-				}
-			}
-			// Simple basename globs such as "*.pyc".
-			if strings.HasPrefix(text, "*.") && len(parts) > 0 {
-				if strings.HasSuffix(parts[len(parts)-1], text[1:]) {
+		}
+	}
+	for _, raw := range patterns {
+		pattern := strings.TrimSuffix(strings.TrimSpace(strings.ReplaceAll(raw, `\`, "/")), "/")
+		if pattern == "" {
+			continue
+		}
+		if matched, _ := pathpkg.Match(pattern, normalized); matched {
+			return true
+		}
+		// Slash-free patterns also match any single path component, so
+		// "venv", "build" and "*.pyc" apply at any depth like the Python client.
+		if !strings.Contains(pattern, "/") {
+			for _, part := range parts {
+				if matched, _ := pathpkg.Match(pattern, part); matched {
 					return true
 				}
 			}

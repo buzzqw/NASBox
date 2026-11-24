@@ -9,10 +9,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"testing"
 
 	"nasbox-go/internal/causal"
+	"nasbox-go/internal/classify"
 	"nasbox-go/internal/config"
 	"nasbox-go/internal/remote"
 	"nasbox-go/internal/state"
@@ -132,11 +134,18 @@ func nasConfig() map[string]string {
 
 func TestExclusionMatchesNestedInternalDirectories(t *testing.T) {
 	cfg, _, _ := setupTest(t)
+	cfg.Set("exclude_patterns", []any{"build", ".gradle", "target"}, false)
 	for _, path := range []string{
 		"LoreKeep/.venv/bin/python",
 		"a/node_modules/x.js",
 		"sub/.git/config",
 		"x/y.pyc",
+		".nasbox-client-update/manifest.json",
+		".nasbox-client-update-go/nasbox-go-0.17.3",
+		"progetto/build/out.bin",
+		"progetto/.gradle/cache",
+		"tesi/capitolo.aux",
+		"tesi/capitolo.synctex.gz",
 	} {
 		if !excluded(cfg, path) {
 			t.Fatalf("expected %q to be excluded", path)
@@ -144,6 +153,24 @@ func TestExclusionMatchesNestedInternalDirectories(t *testing.T) {
 	}
 	if excluded(cfg, "LoreKeep/docs/readme.md") {
 		t.Fatal("normal file must not be excluded")
+	}
+}
+
+func TestPreviewIgnoresUpdateChannels(t *testing.T) {
+	cfg, store, _ := setupTest(t)
+	manifest := map[string]classify.RemoteState{}
+	for i := 0; i < 40; i++ {
+		path := fmt.Sprintf(".nasbox-client-update/artifact-%d", i)
+		manifest[path] = classify.RemoteState{
+			Kind: "FILE", Digest: strings.Repeat("a", 64), Size: 1, Causal: "7bbd9d21",
+		}
+	}
+	report, err := Preview(cfg, store, manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.MissingTotal != 0 || len(report.Anomalies) != 0 {
+		t.Fatalf("update channel counted as a mass deletion: %+v", report)
 	}
 }
 

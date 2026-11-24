@@ -1395,6 +1395,18 @@
     "en": "Move to trash",
     "it": "Sposta nel cestino"
   },
+  "guard.blocked_directory": {
+    "en": "Deletion blocked: folder '{directory}' would lose {missing} of {remote} files ({ratio:.0%}). Nothing was changed. If the folder was moved or the drive is unmounted, restore it; if you really want to delete it, check the Log and confirm afterwards.",
+    "it": "Cancellazione bloccata: la cartella «{directory}» perderebbe {missing} di {remote} file ({ratio:.0%}). Nessun file è stato modificato. Se la cartella è stata spostata o l'unità non è montata, ripristinala; se vuoi davvero cancellarla, controlla il Log e conferma solo dopo."
+  },
+  "guard.blocked_sentinel": {
+    "en": "Deletion blocked: sentinel file '{path}' is missing from the local folder: this looks like the wrong NASBox tree. Nothing was changed.",
+    "it": "Cancellazione bloccata: manca il file sentinella «{path}» nella cartella locale: il NASBox sembra essere quello sbagliato. Nessun file è stato modificato."
+  },
+  "guard.preview": {
+    "en": "Preview: {summary}",
+    "it": "Anteprima: {summary}"
+  },
   "history.col_age": {
     "en": "Age (days)",
     "it": "Età (giorni)"
