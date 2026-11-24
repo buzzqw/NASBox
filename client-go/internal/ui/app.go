@@ -589,8 +589,6 @@ func (c *clientApp) filesView() fyne.CanvasObject {
 		tr("browse.confirm_delete_title", nil), widget.DangerImportance, c.onBrowseDelete, c.setHint).Button
 	c.renameBtn = newHintButton(tr("browse.rename_btn", nil), theme.DocumentCreateIcon(),
 		"", widget.LowImportance, c.onBrowseRename, c.setHint).Button
-	c.deleteBtn.Disable()
-	c.renameBtn.Disable()
 
 	browsePane := container.NewBorder(
 		container.NewVBox(
@@ -609,7 +607,6 @@ func (c *clientApp) filesView() fyne.CanvasObject {
 	)
 	c.resolveBtn = newHintButton(tr("ui.action.resolve", nil), theme.ConfirmIcon(),
 		tr("conflicts.confirm_title", nil), widget.HighImportance, c.onResolveConflict, c.setHint).Button
-	c.resolveBtn.Disable()
 	conflictPane := container.NewBorder(
 		container.NewVBox(
 			c.sectionTitle(tr("conflicts.list_title", nil), tr("settings.maint_conflict_note", nil)),
@@ -623,7 +620,6 @@ func (c *clientApp) filesView() fyne.CanvasObject {
 	)
 	c.restoreBtn = newHintButton(tr("ui.action.restore", nil), theme.ContentRedoIcon(),
 		tr("history.restore_tooltip", nil), widget.HighImportance, c.onRestoreVersion, c.setHint).Button
-	c.restoreBtn.Disable()
 	historyPane := container.NewBorder(
 		container.NewVBox(
 			c.sectionTitle(tr("main_window.tab_history", nil), tr("settings.maint_delete_tooltip", nil)),
@@ -1143,11 +1139,6 @@ func (c *clientApp) onResolveConflict() {
 						} else {
 							c.appendLog(tr("conflicts.resolve_done_title", nil) + ": " + group.Original)
 							c.selectedConflict = ""
-							fyne.Do(func() {
-								if c.resolveBtn != nil {
-									c.resolveBtn.Disable()
-								}
-							})
 							c.refreshConflicts()
 						}
 						return
@@ -1190,14 +1181,6 @@ func (c *clientApp) onBrowseDelete() {
 				}
 				c.appendLog(tr("log.action.browse_delete", nil) + ": " + status)
 				c.selectedBrowse = ""
-				fyne.Do(func() {
-					if c.deleteBtn != nil {
-						c.deleteBtn.Disable()
-					}
-					if c.renameBtn != nil {
-						c.renameBtn.Disable()
-					}
-				})
 				c.refreshBrowse()
 			}()
 		}, c.window)
@@ -1304,11 +1287,6 @@ func (c *clientApp) onRestoreVersion() {
 				} else {
 					c.appendLog(tr("history.restore_done_body", map[string]any{"path": target.Original}))
 					c.selectedVersion = ""
-					fyne.Do(func() {
-						if c.restoreBtn != nil {
-							c.restoreBtn.Disable()
-						}
-					})
 					c.refreshHistory()
 				}
 			}()

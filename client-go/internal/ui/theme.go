@@ -63,10 +63,12 @@ func (t *nasTheme) loadLight() {
 		theme.ColorNameShadow:              color.NRGBA{R: 0x0f, G: 0x17, B: 0x2a, A: 0x2e},
 		theme.ColorNameSuccess:             nr(0x05, 0x96, 0x69),
 		theme.ColorNameWarning:             nr(0xd9, 0x77, 0x06),
-		theme.ColorNamePrimary:             nr(0x25, 0x63, 0xeb),
-		theme.ColorNameHyperlink:           nr(0x25, 0x63, 0xeb),
-		theme.ColorNameFocus:               color.NRGBA{R: 0x25, G: 0x63, B: 0xeb, A: 0x45},
-		theme.ColorNameSelection:           color.NRGBA{R: 0x25, G: 0x63, B: 0xeb, A: 0x33},
+		// Primary is a calm slate, not a saturated blue: blue stays reserved for
+		// hyperlinks and semantic information, so the UI does not look "all blue".
+		theme.ColorNamePrimary:   nr(0x33, 0x41, 0x55),
+		theme.ColorNameHyperlink: nr(0x25, 0x63, 0xeb),
+		theme.ColorNameFocus:     color.NRGBA{R: 0x33, G: 0x41, B: 0x55, A: 0x45},
+		theme.ColorNameSelection: nr(0xe2, 0xe8, 0xf0),
 	})
 }
 
@@ -79,7 +81,7 @@ func (t *nasTheme) loadDark() {
 		theme.ColorNameError:               nr(0xf8, 0x71, 0x71),
 		theme.ColorNameForeground:          nr(0xe2, 0xe8, 0xf0),
 		theme.ColorNameForegroundOnError:   nr(0x0f, 0x17, 0x2a),
-		theme.ColorNameForegroundOnPrimary: nr(0x0f, 0x17, 0x2a),
+		theme.ColorNameForegroundOnPrimary: nr(0xe2, 0xe8, 0xf0),
 		theme.ColorNameForegroundOnSuccess: nr(0x0f, 0x17, 0x2a),
 		theme.ColorNameForegroundOnWarning: nr(0x0f, 0x17, 0x2a),
 		theme.ColorNameHeaderBackground:    nr(0x1e, 0x29, 0x3b),
@@ -96,10 +98,10 @@ func (t *nasTheme) loadDark() {
 		theme.ColorNameShadow:              color.NRGBA{R: 0x00, G: 0x00, B: 0x00, A: 0x80},
 		theme.ColorNameSuccess:             nr(0x34, 0xd3, 0x99),
 		theme.ColorNameWarning:             nr(0xfb, 0xbf, 0x24),
-		theme.ColorNamePrimary:             nr(0x60, 0xa5, 0xfa),
+		theme.ColorNamePrimary:             nr(0x47, 0x55, 0x69),
 		theme.ColorNameHyperlink:           nr(0x60, 0xa5, 0xfa),
-		theme.ColorNameFocus:               color.NRGBA{R: 0x60, G: 0xa5, B: 0xfa, A: 0x4d},
-		theme.ColorNameSelection:           color.NRGBA{R: 0x60, G: 0xa5, B: 0xfa, A: 0x39},
+		theme.ColorNameFocus:               color.NRGBA{R: 0x71, G: 0x85, B: 0x9c, A: 0x5c},
+		theme.ColorNameSelection:           nr(0x33, 0x41, 0x55),
 	})
 }
 
