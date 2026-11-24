@@ -8,6 +8,23 @@ import (
 	"nasbox-go/internal/config"
 )
 
+func TestDeviceIDIsPersistentAndUnique(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	cfg := config.New("")
+	store, err := Open(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	first := store.DeviceID()
+	if first == "" || first == "go-client" {
+		t.Fatalf("invalid device ID %q", first)
+	}
+	if second := store.DeviceID(); second != first {
+		t.Fatalf("device ID changed: %q -> %q", first, second)
+	}
+}
+
 func TestBackfillRecordsWholeTree(t *testing.T) {
 	base := t.TempDir()
 	t.Setenv("XDG_STATE_HOME", base)

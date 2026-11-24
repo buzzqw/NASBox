@@ -56,6 +56,8 @@ func main() {
 		runAudit(args)
 	case "server-check":
 		serverCheck(args)
+	case "bootstrap-check":
+		bootstrapCheck(args)
 	case "gui":
 		gui(args)
 	case "update-check":
@@ -69,7 +71,15 @@ func main() {
 }
 
 func usage() {
-	fmt.Println("uso: nasbox <version|doctor|preview|sync|undo|confirm-delete|browse-download|remote-history|remote-restore|prune-trash|audit|server-check|gui|update-check|update-install> [opzioni]")
+	fmt.Println("uso: nasbox <version|doctor|preview|sync|undo|confirm-delete|browse-download|remote-history|remote-restore|prune-trash|audit|server-check|bootstrap-check|gui|update-check|update-install> [opzioni]")
+}
+
+func bootstrapConfig(cfg *config.Config) error {
+	client := remote.New(cfg)
+	if err := client.Bootstrap(); err != nil {
+		return err
+	}
+	return repository.Bind(cfg.LocalRoot(), cfg.RepositoryID())
 }
 
 func loadConfig(args []string) (*config.Config, error) {
@@ -233,6 +243,19 @@ func runAudit(args []string) {
 	fmt.Printf("%s: %d file, %d differenze\n", report.Status, report.FilesChecked, len(report.Differences))
 }
 
+func bootstrapCheck(args []string) {
+	cfg, err := loadConfig(args)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	if err := bootstrapConfig(cfg); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	fmt.Println("bootstrap NAS ok")
+}
+
 func serverCheck(args []string) {
 	cfg, err := loadConfig(args)
 	if err != nil {
@@ -295,22 +318,20 @@ func gui(args []string) {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
+	if cfg.LocalRoot() == "" {
+		fmt.Fprintln(os.Stderr, "cartella locale non configurata: imposta local_root in client.json")
+		os.Exit(1)
+	}
+	if err := bootstrapConfig(cfg); err != nil {
+		fmt.Fprintln(os.Stderr, "bootstrap NAS fallito:", err)
+		os.Exit(1)
+	}
 	store, err := state.Open(cfg)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 	defer store.Close()
-	if cfg.LocalRoot() == "" {
-		fmt.Fprintln(os.Stderr, "cartella locale non configurata: imposta local_root in client.json")
-		os.Exit(1)
-	}
-	if values, err := remote.New(cfg).PrintConfig(); err == nil {
-		if id := values["REPOSITORY_ID"]; id != "" {
-			cfg.Set("repository_id", id, false)
-			_ = repository.Initialize(cfg.LocalRoot(), id)
-		}
-	}
 	ui.Run(cfg, store)
 }
 
@@ -318,6 +339,10 @@ func syncOnce(args []string) {
 	cfg, err := loadConfig(args)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	if err := bootstrapConfig(cfg); err != nil {
+		fmt.Fprintln(os.Stderr, "bootstrap NAS fallito:", err)
 		os.Exit(1)
 	}
 	store, err := state.Open(cfg)

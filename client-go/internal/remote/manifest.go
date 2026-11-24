@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"nasbox-go/internal/classify"
+	"nasbox-go/internal/paths"
 )
 
 const manifestHeader = "NASBOX_MANIFEST_V1"
@@ -37,6 +38,9 @@ func ParseManifest(data []byte) (map[string]classify.RemoteState, error) {
 			return nil, errors.New("manifest: campi insufficienti")
 		}
 		path := decodeField(fields[0])
+		if err := paths.ValidateRelative(path); err != nil {
+			return nil, err
+		}
 		digest := string(fields[1])
 		size, err := strconv.ParseInt(string(fields[2]), 10, 64)
 		if err != nil {

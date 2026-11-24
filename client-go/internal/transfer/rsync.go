@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"nasbox-go/internal/config"
+	"nasbox-go/internal/paths"
 	"nasbox-go/internal/remote"
 )
 
@@ -36,9 +37,12 @@ func (t *Transfer) DownloadPath(relative string) error {
 		return fmt.Errorf("percorso remoto vuoto")
 	}
 	root := t.cfg.LocalRoot()
+	local, err := paths.SafeDestination(root, relative)
+	if err != nil {
+		return err
+	}
 	remoteSpec := fmt.Sprintf("%s@%s:%s/%s", t.client.User, t.client.Host, t.cfg.RemotePrefix(), relative)
-	local := root + "/" + relative
-	args := []string{"-a", "--partial", "--mkpath", "-e", "ssh -o BatchMode=yes", remoteSpec, local}
+	args := []string{"-a", "--partial", "--partial-dir=.sync-partial", "--mkpath", "--ignore-times", "--protect-args", "-e", "ssh -o BatchMode=yes", remoteSpec, local}
 	if limit := t.cfg.Int("bandwidth_kbps"); limit > 0 {
 		args = append(args[:1], append([]string{"--bwlimit", fmt.Sprint(limit)}, args[1:]...)...)
 	}
@@ -57,7 +61,8 @@ func (t *Transfer) BuildCommand(paths []string, upload bool) ([]string, []byte) 
 		sshArgs += fmt.Sprintf(" -p %d", port)
 	}
 	args := []string{
-		"-a", "--partial", "--fuzzy", "--delay-updates", "--mkpath",
+		"-a", "--partial", "--partial-dir=.sync-partial", "--fuzzy",
+		"--delay-updates", "--mkpath", "--ignore-times", "--protect-args",
 		"--files-from=-", "--from0", "-e", "ssh " + sshArgs,
 	}
 	if t.cfg.String("compression_mode") == "on" {

@@ -110,6 +110,15 @@ class CausalVersion:
         )
 
 
+class FingerprintUnavailable(RuntimeError):
+    """A path exists but cannot be safely observed.
+
+    This is deliberately different from ``None`` (a genuinely missing path):
+    treating unreadable, special or unstable files as missing can authorise a
+    destructive remote delete.
+    """
+
+
 @dataclass(frozen=True)
 class Fingerprint:
     digest: str
@@ -679,9 +688,15 @@ class SyncStateStore:
                             _stat_digest_cache.clear()
                         _stat_digest_cache[stat_key] = digest
                     return Fingerprint(digest, after.st_size, after.st_mtime_ns)
-            except OSError:
+            except FileNotFoundError:
                 return None
-        return None
+            except OSError as exc:
+                raise FingerprintUnavailable(
+                    f"impossibile leggere il fingerprint di {path}: {exc}"
+                ) from exc
+        raise FingerprintUnavailable(
+            f"file instabile durante la lettura, sincronizzazione interrotta: {path}"
+        )
 
     @staticmethod
     def stable_paths(local_root: str, relative_paths: set[str], interval: float) -> tuple[set[str], set[str]]:
@@ -848,8 +863,27 @@ class SyncStateStore:
                     )
 
     def local_fingerprint(self, local_root: str, relative_path: str) -> Fingerprint | None:
-        """Return a local fingerprint carrying a stable causal version."""
-        fingerprint = self.fingerprint(Path(local_root, relative_path))
+        """Return a local fingerprint carrying a stable causal version.
+
+        A path that exists but is not a readable regular file is an error, not
+        a deletion. This prevents permissions/symlink/I/O failures from being
+        propagated as remote deletes.
+        """
+        path = Path(local_root, relative_path)
+        try:
+            info = path.lstat()
+        except FileNotFoundError:
+            pass
+        except OSError as exc:
+            raise FingerprintUnavailable(
+                f"impossibile osservare {relative_path}: {exc}"
+            ) from exc
+        else:
+            if not stat.S_ISREG(info.st_mode):
+                raise FingerprintUnavailable(
+                    f"percorso locale non regolare, sincronizzazione interrotta: {relative_path}"
+                )
+        fingerprint = self.fingerprint(path)
         repository = self._repository()
         device_id = self.device_id()
         key = (repository, relative_path)

@@ -4,6 +4,14 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 1.35.2 - 2026-11-24
+
+- Correzione critica di sicurezza: un file locale illeggibile, non regolare o
+  instabile durante l'hash non viene più interpretato come assente. La
+  sincronizzazione si interrompe in modo sicuro invece di propagare una
+  cancellazione remota.
+- Aggiunti test per permessi negati e symlink nel percorso di un file tracciato.
+
 ## 1.35.1 - 2026-11-24
 
 - Backfill dell'identità filesystem dell'intero albero locale (solo `stat`,

@@ -66,6 +66,36 @@ func (c *Client) Run(args []string, stdin []byte, timeout time.Duration) ([]byte
 	return stdout.Bytes(), nil
 }
 
+func parseVersion(value string) []int {
+	parts := strings.Split(value, ".")
+	out := make([]int, 0, len(parts))
+	for _, part := range parts {
+		n, _ := strconv.Atoi(part)
+		out = append(out, n)
+	}
+	return out
+}
+
+func versionLess(left, right string) bool {
+	a, b := parseVersion(left), parseVersion(right)
+	for index := 0; index < len(a) || index < len(b); index++ {
+		x, y := 0, 0
+		if index < len(a) {
+			x = a[index]
+		}
+		if index < len(b) {
+			y = b[index]
+		}
+		if x < y {
+			return true
+		}
+		if x > y {
+			return false
+		}
+	}
+	return false
+}
+
 // ServerOutdated compares the NAS script version with the minimum required.
 func (c *Client) ServerOutdated(minimum string) (bool, string, error) {
 	values, err := c.PrintConfig()
@@ -76,32 +106,48 @@ func (c *Client) ServerOutdated(minimum string) (bool, string, error) {
 	if current == "" {
 		return true, "", fmt.Errorf("versione server sconosciuta")
 	}
-	parse := func(value string) []int {
-		parts := strings.Split(value, ".")
-		out := make([]int, 0, len(parts))
-		for _, part := range parts {
-			n, _ := strconv.Atoi(part)
-			out = append(out, n)
-		}
-		return out
+	return versionLess(current, minimum), current, nil
+}
+
+// Bootstrap validates the NAS contract and persists the authoritative paths,
+// repository ID and capabilities before any destructive operation.
+func (c *Client) Bootstrap() error {
+	values, err := c.PrintConfig()
+	if err != nil {
+		return err
 	}
-	a, b := parse(current), parse(minimum)
-	for index := 0; index < len(a) || index < len(b); index++ {
-		left, right := 0, 0
-		if index < len(a) {
-			left = a[index]
-		}
-		if index < len(b) {
-			right = b[index]
-		}
-		if left < right {
-			return true, current, nil
-		}
-		if left > right {
-			return false, current, nil
-		}
+	minimum := c.cfg.String("min_server_version")
+	if minimum == "" || versionLess(minimum, "3.25.0") {
+		minimum = "3.25.0"
 	}
-	return false, current, nil
+	c.cfg.Set("min_server_version", minimum, true)
+	if values["VERSION"] == "" || versionLess(values["VERSION"], minimum) {
+		return fmt.Errorf("server NAS non aggiornato: trovato %s, richiesto %s", values["VERSION"], minimum)
+	}
+	if strings.ToLower(values["REPOSITORY_READY"]) != "true" ||
+		strings.ToLower(values["JOURNAL_READY"]) != "true" ||
+		strings.ToLower(values["PATH_RECONCILIATION_AVAILABLE"]) != "true" {
+		return fmt.Errorf("repository NAS non pronto")
+	}
+	if values["REPOSITORY_ID"] == "" {
+		return fmt.Errorf("ID repository NAS assente")
+	}
+	remoteRoot := strings.TrimSuffix(c.cfg.RemotePrefix(), "/")
+	if serverRoot := strings.TrimSuffix(values["SHARE_ROOT"], "/"); serverRoot != remoteRoot {
+		return fmt.Errorf("percorso NAS incoerente: client %s, server %s", remoteRoot, serverRoot)
+	}
+	c.cfg.Set("repository_id", values["REPOSITORY_ID"], true)
+	if values["SYNC_LOCK_FILE"] != "" {
+		c.cfg.Set("server_lock_file_remote", values["SYNC_LOCK_FILE"], true)
+	}
+	if values["SYNC_LOCK_OWNER_FILE"] != "" {
+		c.cfg.Set("server_lock_owner_file_remote", values["SYNC_LOCK_OWNER_FILE"], true)
+	}
+	c.cfg.Set("remote_causal_versions_available",
+		strings.ToLower(values["CAUSAL_VERSIONS_AVAILABLE"]) == "true", true)
+	c.cfg.Set("remote_change_feed_available",
+		strings.ToLower(values["CHANGE_FEED_AVAILABLE"]) == "true", true)
+	return nil
 }
 
 // RunLocked runs a mutating command while holding the global NAS lease and
@@ -156,11 +202,24 @@ func (c *Client) AcquireLease(device string) (func(), error) {
 		cancel()
 		return nil, err
 	}
-	time.Sleep(400 * time.Millisecond)
-	if ctx.Err() != nil {
-		return nil, fmt.Errorf("lease NAS non acquisito: %s", stderr.String())
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		select {
+		case err := <-done:
+			cancel()
+			return nil, fmt.Errorf("lease NAS non acquisito: %w: %s", err, stderr.String())
+		default:
+		}
+		output, err := c.Run([]string{"cat", owner}, nil, 3*time.Second)
+		if err == nil && strings.HasPrefix(strings.TrimSpace(string(output)), device+"|") {
+			return func() { cancel(); <-done }, nil
+		}
+		time.Sleep(150 * time.Millisecond)
 	}
-	return func() { cancel(); _ = cmd.Wait() }, nil
+	cancel()
+	return nil, fmt.Errorf("timeout acquisizione lease NAS: %s", stderr.String())
 }
 
 func (c *Client) script() string { return c.cfg.RemoteScript() }
@@ -461,7 +520,7 @@ func (c *Client) JournalAppend(
 	if len(puts) == 0 {
 		return true, nil
 	}
-	useV3 := strings.ToLower(c.cfg.String("remote_causal_versions_available")) == "true"
+	useV3 := c.cfg.Bool("remote_causal_versions_available")
 	fields := [][]byte{[]byte("JOURNAL_V3")}
 	if !useV3 {
 		fields = [][]byte{[]byte("JOURNAL_V2")}

@@ -51,6 +51,15 @@ func TestNewestAndDownloadVerifySha256(t *testing.T) {
 	}
 }
 
+func TestAvailableRefusesDowngrade(t *testing.T) {
+	if Available(&Manifest{Version: "0.1.0"}) {
+		t.Fatal("downgrade must not be offered")
+	}
+	if !Available(&Manifest{Version: "99.0.0"}) {
+		t.Fatal("newer version must be offered")
+	}
+}
+
 func TestApplyInstallsAndKeepsBackup(t *testing.T) {
 	cfg := config.New("")
 	cfg.Set("remote_prefix", "/volume1/NASBox", false)

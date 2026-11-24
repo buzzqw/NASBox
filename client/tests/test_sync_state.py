@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 
 from sync_client.config import Config
-from sync_client.sync_state import CausalVersion, Fingerprint, SyncStateStore
+from sync_client.sync_state import CausalVersion, Fingerprint, FingerprintUnavailable, SyncStateStore
 
 from tests.support import ClientEnvironment
 
@@ -42,6 +42,23 @@ class SyncStateTests(unittest.TestCase):
         self.assertTrue(fingerprint.digest)
         self.assertIsNone(self.store.fingerprint(self.root / "missing"))
         self.assertIsNone(self.store.fingerprint(directory))
+
+    def test_local_fingerprint_fails_closed_on_unreadable_file(self) -> None:
+        path = self.root / "locked.txt"
+        path.write_bytes(b"secret")
+        path.chmod(0o000)
+        try:
+            with self.assertRaises(FingerprintUnavailable):
+                self.store.local_fingerprint(str(self.root), "locked.txt")
+        finally:
+            path.chmod(0o600)
+
+    def test_local_fingerprint_fails_closed_on_symlink(self) -> None:
+        target = self.root / "target.txt"
+        target.write_bytes(b"data")
+        (self.root / "link.txt").symlink_to(target)
+        with self.assertRaises(FingerprintUnavailable):
+            self.store.local_fingerprint(str(self.root), "link.txt")
 
     def test_record_local_and_tombstone_round_trip(self) -> None:
         file_path = self.root / "file.txt"

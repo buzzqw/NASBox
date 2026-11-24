@@ -112,6 +112,11 @@ func SyncOnce(
 		return result, err
 	}
 
+	mode := strings.ToLower(cfg.String("sync_mode"))
+	allowUpload := mode == "" || mode == "bidirectional" || mode == "push_only" || mode == "archive"
+	allowDownload := mode == "" || mode == "bidirectional" || mode == "pull_only"
+	allowDelete := cfg.Bool("delete_enabled") && mode != "archive"
+
 	missing := make([]string, 0)
 	uploads := make([]string, 0)
 	downloads := make([]string, 0)
@@ -123,7 +128,11 @@ func SyncOnce(
 		}
 		current, present := local[path]
 		if !present {
-			missing = append(missing, path)
+			if allowDownload {
+				downloads = append(downloads, path)
+			} else if allowDelete {
+				missing = append(missing, path)
+			}
 			continue
 		}
 		if current.Digest == remoteState.Digest {
@@ -132,26 +141,34 @@ func SyncOnce(
 		baseline := entries[path]
 		localClock, _ := causal.Parse(baseline.Causal)
 		remoteClock, _ := causal.Parse(remoteState.Causal)
+		preferUpload := false
 		switch {
 		case localClock != nil && localClock.Dominates(remoteClock):
-			uploads = append(uploads, path)
+			preferUpload = true
 		case remoteClock != nil && remoteClock.Dominates(localClock):
-			downloads = append(downloads, path)
-		case manualConflicts:
+			preferUpload = false
+		case manualConflicts && allowUpload && allowDownload:
 			if _, err := conflicts.Create(cfg.LocalRoot(), path, remoteDevice(remoteState.Causal), remoteState.Digest); err != nil {
 				return result, err
 			}
 			result.Conflicts++
-			downloads = append(downloads, path)
+			preferUpload = false
 		case current.MTimeNS >= remoteState.MTimeNS:
-			uploads = append(uploads, path)
+			preferUpload = true
 		default:
+			preferUpload = false
+		}
+		if preferUpload && allowUpload {
+			uploads = append(uploads, path)
+		} else if !preferUpload && allowDownload {
 			downloads = append(downloads, path)
 		}
 	}
-	for path := range local {
-		if _, known := manifest[path]; !known {
-			uploads = append(uploads, path)
+	if allowUpload {
+		for path := range local {
+			if _, known := manifest[path]; !known {
+				uploads = append(uploads, path)
+			}
 		}
 	}
 
@@ -233,6 +250,9 @@ func SyncOnce(
 		}
 	}
 	deletions := report.Unexplained
+	if !allowDelete {
+		deletions = nil
+	}
 	if err := deletesafety.Shared().Check(cfg, len(deletions), "sync"); err != nil {
 		if blocked, ok := err.(*deletesafety.BlockedError); ok {
 			result.Blocked = i18n.T("safety.blocked_cumulative", map[string]any{
@@ -337,33 +357,60 @@ func guardMessage(cfg *config.Config, report classify.Report) string {
 func scanLocal(cfg *config.Config, identities map[string]state.Identity) (map[string]localFile, error) {
 	root := cfg.LocalRoot()
 	result := make(map[string]localFile)
-	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
-		if err != nil || info == nil || !info.Mode().IsRegular() {
-			return nil
+	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return fmt.Errorf("scan locale non riuscito per %s: %w", path, walkErr)
 		}
 		rel, err := filepath.Rel(root, path)
 		if err != nil {
-			return nil
+			return err
 		}
 		rel = filepath.ToSlash(rel)
-		if excluded(cfg, rel) || strings.HasPrefix(rel, ".git/") ||
-			strings.HasPrefix(rel, ".venv/") || strings.HasPrefix(rel, ".nasbox-client-update/") ||
-			strings.HasSuffix(rel, ".pyc") {
+		if rel == "." {
 			return nil
 		}
-		stat := statOf(info)
+		if excluded(cfg, rel) || strings.HasPrefix(rel, ".git/") ||
+			strings.HasPrefix(rel, ".venv/") || strings.HasPrefix(rel, ".nasbox-client-update/") ||
+			strings.HasPrefix(rel, ".nasbox-client-update-go/") ||
+			strings.HasPrefix(rel, ".sync-partial/") || strings.HasPrefix(rel, ".sync-trash/") ||
+			strings.HasPrefix(rel, ".nasbox-staging/") || strings.HasPrefix(rel, "@eaDir/") ||
+			strings.HasSuffix(rel, ".pyc") {
+			if entry.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		if !entry.Type().IsRegular() {
+			return fmt.Errorf("percorso locale non regolare, sync interrotto: %s", rel)
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return fmt.Errorf("stat locale non riuscito per %s: %w", rel, err)
+		}
+		before := statOf(info)
 		digest := ""
-		if known, ok := identities[rel]; ok && known.Size == stat.size &&
-			known.MTimeNS == stat.mtimeNS && known.CtimeNS == stat.ctimeNS && known.Digest != "" {
+		if known, ok := identities[rel]; ok && known.Size == before.size &&
+			known.MTimeNS == before.mtimeNS && known.CtimeNS == before.ctimeNS && known.Digest != "" {
 			digest = known.Digest
 		} else {
 			sum, err := hashFile(path)
 			if err != nil {
-				return nil
+				return fmt.Errorf("lettura locale non riuscita per %s: %w", rel, err)
 			}
 			digest = sum
+			afterInfo, err := os.Lstat(path)
+			if err != nil {
+				return fmt.Errorf("file cambiato durante la lettura: %s: %w", rel, err)
+			}
+			after := statOf(afterInfo)
+			if before != after {
+				return fmt.Errorf("file instabile durante la lettura, sync interrotto: %s", rel)
+			}
 		}
-		result[rel] = localFile{Digest: digest, Size: stat.size, MTimeNS: stat.mtimeNS}
+		result[rel] = localFile{Digest: digest, Size: before.size, MTimeNS: before.mtimeNS}
 		return nil
 	})
 	return result, err

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"nasbox-go/internal/config"
+	"nasbox-go/internal/paths"
 	"nasbox-go/internal/remote"
 )
 
@@ -51,6 +52,9 @@ func SyncOnce(cfg *config.Config, client *remote.Client) (int, error) {
 	synced := 0
 	for _, item := range mirrors {
 		if !item.Enabled || item.Source == "" || item.Dest == "" {
+			continue
+		}
+		if err := paths.ValidateRelative(item.Dest); err != nil {
 			continue
 		}
 		if info, err := os.Stat(item.Source); err != nil || !info.IsDir() {

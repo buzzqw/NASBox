@@ -41,10 +41,13 @@ func (f *fakeNAS) RenameV2(string, string, string, string, int64, int64, string)
 	return true, nil
 }
 
-type fakeTransfer struct{ uploaded []string }
+type fakeTransfer struct {
+	uploaded   []string
+	downloaded []string
+}
 
 func (f *fakeTransfer) Upload(paths []string) error    { f.uploaded = paths; return nil }
-func (f *fakeTransfer) Download(paths []string) error  { return nil }
+func (f *fakeTransfer) Download(paths []string) error  { f.downloaded = paths; return nil }
 func (f *fakeTransfer) SetContext(ctx context.Context) {}
 
 func digest(data string) string {
@@ -91,8 +94,39 @@ func nasConfig() map[string]string {
 	}
 }
 
+func TestScanLocalFailsClosedOnUnreadableFile(t *testing.T) {
+	cfg, _, root := setupTest(t)
+	path := filepath.Join(root, "locked.txt")
+	if err := os.WriteFile(path, []byte("secret"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(path, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chmod(path, 0o600)
+	if _, err := scanLocal(cfg, map[string]state.Identity{}); err == nil {
+		t.Fatal("unreadable file must stop the scan")
+	}
+}
+
+func TestScanLocalFailsClosedOnSymlink(t *testing.T) {
+	cfg, _, root := setupTest(t)
+	target := filepath.Join(root, "target.txt")
+	if err := os.WriteFile(target, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, filepath.Join(root, "link.txt")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := scanLocal(cfg, map[string]state.Identity{}); err == nil {
+		t.Fatal("symlink must stop the scan")
+	}
+}
+
 func TestSyncOnceDeletesMissingFileWithoutTouchingPresentOne(t *testing.T) {
 	cfg, store, root := setupTest(t)
+	cfg.Set("sync_mode", "push_only", false)
+	cfg.Set("delete_enabled", true, false)
 	if err := os.WriteFile(filepath.Join(root, "keep.txt"), []byte("hello"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -120,8 +154,57 @@ func TestSyncOnceDeletesMissingFileWithoutTouchingPresentOne(t *testing.T) {
 	}
 }
 
+func TestDeleteDisabledNeverDeletes(t *testing.T) {
+	cfg, store, _ := setupTest(t)
+	cfg.Set("delete_enabled", false, false)
+	manifest := fmt.Sprintf("NASBOX_MANIFEST_V1\ngone.txt\t%s\t3\t1700000000000000000\tdev\t1700000000\t\n", digest("abc"))
+	nas := &fakeNAS{config: nasConfig(), manifest: manifest}
+	transfers := &fakeTransfer{}
+	result, err := SyncOnce(cfg, store, nas, transfers)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Deleted != 0 || len(nas.deleted) != 0 || len(transfers.downloaded) != 1 {
+		t.Fatalf("delete policy ignored: %+v deleted=%v downloads=%v", result, nas.deleted, transfers.downloaded)
+	}
+}
+
+func TestPullOnlyNeverUploads(t *testing.T) {
+	cfg, store, root := setupTest(t)
+	cfg.Set("sync_mode", "pull_only", false)
+	if err := os.WriteFile(filepath.Join(root, "local.txt"), []byte("local"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	nas := &fakeNAS{config: nasConfig(), manifest: "NASBOX_MANIFEST_V1\n"}
+	transfers := &fakeTransfer{}
+	result, err := SyncOnce(cfg, store, nas, transfers)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Uploaded != 0 || len(transfers.uploaded) != 0 {
+		t.Fatalf("pull_only uploaded: %+v %v", result, transfers.uploaded)
+	}
+}
+
+func TestPushOnlyNeverDownloads(t *testing.T) {
+	cfg, store, _ := setupTest(t)
+	cfg.Set("sync_mode", "push_only", false)
+	manifest := fmt.Sprintf("NASBOX_MANIFEST_V1\ngone.txt\t%s\t3\t1700000000000000000\tdev\t1700000000\t\n", digest("abc"))
+	nas := &fakeNAS{config: nasConfig(), manifest: manifest}
+	transfers := &fakeTransfer{}
+	result, err := SyncOnce(cfg, store, nas, transfers)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Downloads != 0 || len(transfers.downloaded) != 0 {
+		t.Fatalf("push_only downloaded: %+v %v", result, transfers.downloaded)
+	}
+}
+
 func TestSyncOnceBlocksDirectoryAnomalyBeforeAnyMutation(t *testing.T) {
 	cfg, store, _ := setupTest(t)
+	cfg.Set("sync_mode", "push_only", false)
+	cfg.Set("delete_enabled", true, false)
 	cfg.Set("delete_dir_guard_min_files", float64(20), false)
 	manifest := "NASBOX_MANIFEST_V1\n"
 	for i := 0; i < 30; i++ {

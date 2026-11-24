@@ -23,7 +23,9 @@ func Acquire() (func(), error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, err
 	}
-	path := filepath.Join(dir, "go-client.lock")
+	// Same lock as the Python client: the two implementations must never write
+	// config/SQLite or synchronise the same tree concurrently.
+	path := filepath.Join(dir, "client.instance.lock")
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return nil, err

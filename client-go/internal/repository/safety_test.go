@@ -8,6 +8,20 @@ import (
 	"testing"
 )
 
+func TestBindRefusesDifferentRepository(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	root := t.TempDir()
+	if err := Initialize(root, "repo1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := Bind(root, "repo2"); err == nil {
+		t.Fatal("bind must refuse a different repository")
+	}
+	if err := Bind(root, "repo1"); err != nil {
+		t.Fatalf("same repository bind failed: %v", err)
+	}
+}
+
 func TestValidateRejectsWrongVolume(t *testing.T) {
 	base := t.TempDir()
 	t.Setenv("XDG_STATE_HOME", base)

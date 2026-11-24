@@ -3,7 +3,10 @@
 package state
 
 import (
+	"crypto/rand"
 	"database/sql"
+	"encoding/hex"
+	"fmt"
 	"os"
 	"path/filepath"
 	"syscall"
@@ -101,7 +104,16 @@ func (s *Store) DeviceID() string {
 	if err == nil && value != "" {
 		return value
 	}
-	return "go-client"
+	buffer := make([]byte, 16)
+	if _, err := rand.Read(buffer); err != nil {
+		return fmt.Sprintf("go-%d", time.Now().UnixNano())
+	}
+	value = hex.EncodeToString(buffer)
+	_, _ = s.db.Exec(
+		`INSERT OR IGNORE INTO meta(key, value) VALUES('device_id', ?)`, value,
+	)
+	_ = s.db.QueryRow(`SELECT value FROM meta WHERE key='device_id'`).Scan(&value)
+	return value
 }
 
 // EntryCount mirrors SyncStateStore.entry_count().

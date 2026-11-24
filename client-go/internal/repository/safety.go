@@ -64,9 +64,54 @@ func Initialize(localRoot, repositoryID string) error {
 	return os.Rename(tmp, path)
 }
 
+// Bind creates a marker only when absent, or verifies an existing one. It never
+// silently re-associates a local folder with a different NAS repository.
+func Bind(localRoot, repositoryID string) error {
+	if repositoryID == "" {
+		return fmt.Errorf("ID repository vuoto")
+	}
+	path, err := markerPath()
+	if err != nil {
+		return err
+	}
+	content, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return Initialize(localRoot, repositoryID)
+	}
+	if err != nil {
+		return err
+	}
+	var value marker
+	if err := json.Unmarshal(content, &value); err != nil {
+		return fmt.Errorf("marker locale non valido")
+	}
+	if value.RepositoryID != "" && value.RepositoryID != repositoryID {
+		return fmt.Errorf("la cartella locale e' associata a un repository diverso")
+	}
+	resolvedRoot, err := filepath.EvalSymlinks(localRoot)
+	if err != nil {
+		return err
+	}
+	markerRoot, err := filepath.EvalSymlinks(value.LocalRoot)
+	if err != nil || markerRoot != resolvedRoot {
+		return fmt.Errorf("la cartella locale non corrisponde al marker")
+	}
+	value.RepositoryID = repositoryID
+	content, _ = json.MarshalIndent(value, "", "  ")
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, append(content, '\n'), 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
+}
+
 // Validate checks path, filesystem device and repository identity.
 func Validate(localRoot, repositoryID string, destructive bool) error {
-	root, err := filepath.Abs(localRoot)
+	root, err := filepath.EvalSymlinks(localRoot)
+	if err != nil {
+		return err
+	}
+	root, err = filepath.Abs(root)
 	if err != nil {
 		return err
 	}
@@ -86,7 +131,7 @@ func Validate(localRoot, repositoryID string, destructive bool) error {
 	if err := json.Unmarshal(content, &value); err != nil {
 		return fmt.Errorf("marker locale non valido: %s", path)
 	}
-	markerRoot, err := filepath.Abs(value.LocalRoot)
+	markerRoot, err := filepath.EvalSymlinks(value.LocalRoot)
 	if err != nil || markerRoot != root {
 		return fmt.Errorf("la cartella locale non e' quella configurata: %s", root)
 	}
@@ -94,8 +139,8 @@ func Validate(localRoot, repositoryID string, destructive bool) error {
 	if !ok || raw.Dev != value.Dev {
 		return fmt.Errorf("il filesystem locale e' cambiato (volume non montato?)")
 	}
-	if destructive && repositoryID != "" && value.RepositoryID != "" && value.RepositoryID != repositoryID {
-		return fmt.Errorf("la cartella locale e' associata a un repository NASBox diverso")
+	if destructive && (repositoryID == "" || value.RepositoryID == "" || value.RepositoryID != repositoryID) {
+		return fmt.Errorf("repository locale non verificato per operazioni distruttive")
 	}
 	return nil
 }

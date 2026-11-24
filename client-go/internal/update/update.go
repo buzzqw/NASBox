@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"nasbox-go/internal/config"
@@ -52,14 +53,45 @@ func Newest(cfg *config.Config, client FileReader) (*Manifest, error) {
 	return manifest, nil
 }
 
+func versionTuple(value string) []int {
+	parts := strings.Split(strings.TrimPrefix(value, "v"), ".")
+	out := make([]int, 0, len(parts))
+	for _, part := range parts {
+		n, _ := strconv.Atoi(part)
+		out = append(out, n)
+	}
+	return out
+}
+
+func newer(left, right string) bool {
+	a, b := versionTuple(left), versionTuple(right)
+	for index := 0; index < len(a) || index < len(b); index++ {
+		x, y := 0, 0
+		if index < len(a) {
+			x = a[index]
+		}
+		if index < len(b) {
+			y = b[index]
+		}
+		if x > y {
+			return true
+		}
+		if x < y {
+			return false
+		}
+	}
+	return false
+}
+
 // Available reports whether the remote manifest advertises a newer version.
+// Downgrades are intentionally refused.
 func Available(manifest *Manifest) bool {
-	return manifest != nil && manifest.Version != "" && manifest.Version != version.AppVersion
+	return manifest != nil && manifest.Version != "" && newer(manifest.Version, version.AppVersion)
 }
 
 // Download verifies sha256 before making the artifact usable.
 func Download(cfg *config.Config, client FileReader, manifest *Manifest, destination string) error {
-	if manifest == nil || manifest.Artifact == "" {
+	if manifest == nil || manifest.Artifact == "" || strings.ContainsAny(manifest.Artifact, "/\\") {
 		return fmt.Errorf("manifest go non valido")
 	}
 	prefix := strings.TrimSuffix(cfg.RemotePrefix(), "/")
