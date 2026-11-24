@@ -83,8 +83,24 @@ func excluded(cfg *config.Config, path string) bool {
 			return true
 		}
 	}
+	// Selective sync excludes are exact folder paths anchored at the root:
+	// the folder and everything below it, never a glob and never a name that
+	// matches at other depths (before 1.0.0 "Documenti/Progetti" excluded only
+	// the folder entry, not its files, and "Foto" also hid "Lavoro/Foto").
+	if values, ok := cfg.Get("selective_sync_excludes").([]any); ok {
+		for _, value := range values {
+			folder, ok := value.(string)
+			folder = strings.Trim(strings.TrimSpace(folder), "/")
+			if !ok || folder == "" {
+				continue
+			}
+			if normalized == folder || strings.HasPrefix(normalized, folder+"/") {
+				return true
+			}
+		}
+	}
 	patterns := append([]string{}, systemExcludes...)
-	for _, key := range []string{"exclude_patterns", "selective_sync_excludes"} {
+	for _, key := range []string{"exclude_patterns"} {
 		values, ok := cfg.Get(key).([]any)
 		if !ok {
 			continue

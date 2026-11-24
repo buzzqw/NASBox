@@ -21,3 +21,10 @@ func TestParseFileStates(t *testing.T) {
 		t.Fatal("truncated answer must be rejected")
 	}
 }
+
+func TestParseDirSizes(t *testing.T) {
+	sizes := parseDirSizes("1024\tDocumenti/\n12\tFoto con spazi/\n4\t.sync-trash/\nrumore\n")
+	if sizes["Documenti"] != 1024*1024 || sizes["Foto con spazi"] != 12*1024 || len(sizes) != 2 {
+		t.Fatalf("%v", sizes)
+	}
+}

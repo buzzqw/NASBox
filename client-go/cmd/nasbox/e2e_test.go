@@ -461,3 +461,27 @@ func TestE2ERestoreVersionFromNASHistory(t *testing.T) {
 		t.Fatal("la versione sostituita dal ripristino deve restare nello storico NAS")
 	}
 }
+
+// Selective sync: an excluded folder (and only that folder) is not
+// downloaded, and excluding it never deletes anything on the NAS.
+func TestE2ESelectiveSyncIsSafe(t *testing.T) {
+	nas := newE2ENAS(t)
+	a := nas.client("pc-a")
+	a.write("Foto/mare.jpg", "mare")
+	a.write("Lavoro/Foto/ufficio.jpg", "ufficio")
+	a.write("Documenti/Progetti/piano.txt", "piano")
+	a.sync()
+	b := nas.client("pc-b", map[string]any{"selective_sync_excludes": []string{"Foto", "Documenti/Progetti"}})
+	b.sync()
+	if readOrEmpty(filepath.Join(b.local, "Lavoro", "Foto", "ufficio.jpg")) != "ufficio" {
+		t.Fatal("una cartella omonima a un'altra profondita' non deve essere esclusa")
+	}
+	for _, path := range []string{"Foto/mare.jpg", "Documenti/Progetti/piano.txt"} {
+		if _, err := os.Stat(filepath.Join(b.local, filepath.FromSlash(path))); !os.IsNotExist(err) {
+			t.Fatalf("%s e' in una cartella esclusa e non deve essere scaricato", path)
+		}
+		if readOrEmpty(filepath.Join(nas.share, filepath.FromSlash(path))) == "<assente>" {
+			t.Fatalf("escludere una cartella non deve cancellare %s dal NAS", path)
+		}
+	}
+}

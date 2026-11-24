@@ -625,3 +625,23 @@ func TestSyncOnceStagingFailureLeavesBaselineUnchanged(t *testing.T) {
 		t.Fatalf("baseline recorded before publish: %+v", entries)
 	}
 }
+
+func TestSelectiveExcludesAreAnchoredFolderPrefixes(t *testing.T) {
+	cfg := config.New("")
+	cfg.Set("selective_sync_excludes", []any{"Documenti/Progetti", "Foto", "Archivio [2024]"}, false)
+	for path, want := range map[string]bool{
+		"Documenti/Progetti":           true,
+		"Documenti/Progetti/a.txt":     true,
+		"Documenti/Progetti/sub/b.txt": true,
+		"Documenti/ProgettiX/c.txt":    false,
+		"Foto/mare.jpg":                true,
+		"Lavoro/Foto/ufficio.jpg":      false,
+		"Archivio [2024]/fattura.pdf":  true,
+		"Archivio 2/fattura.pdf":       false,
+		"Documenti/altro.txt":          false,
+	} {
+		if got := excluded(cfg, path); got != want {
+			t.Errorf("excluded(%q) = %v, want %v", path, got, want)
+		}
+	}
+}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -99,6 +100,14 @@ func (c *clientApp) installClientUpdate(manifest *update.Manifest, interactive b
 	binary, err := os.Executable()
 	if err != nil {
 		c.appendAction(tr("ui.update.failed", map[string]any{"detail": err.Error()}))
+		return
+	}
+	// Installed by a package manager (e.g. /usr/bin from the .deb): the
+	// package manager updates it, not the built-in updater.
+	if syscall.Access(filepath.Dir(binary), 2 /* W_OK */) != nil {
+		if interactive {
+			c.appendAction(tr("ui.update.package_managed", nil))
+		}
 		return
 	}
 	applied, versionName, err := update.Apply(c.cfg, c.client, binary)

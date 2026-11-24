@@ -4,6 +4,32 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 1.0.0 - 2026-11-24
+
+NASBox Go diventa il client definitivo ("NASBox"):
+
+- **Integrazione con il file manager**: voce "NASBox: versioni precedenti" nel
+  clic destro di Thunar, Nautilus, Nemo, Dolphin e Caja (Impostazioni ›
+  Generale o `nasbox-go integrate`, reversibile; `uca.xml` di Thunar salvato
+  prima della modifica). Emblema di stato sulla cartella NASBox e sulle copie
+  di conflitto.
+- **Controllo locale** (socket utente): riaprire NASBox porta in primo piano
+  la finestra esistente; `nasbox-go versions <file>`, `show`, `status`.
+- **Sync selettiva sull'albero del NAS** con dimensioni calcolate sul NAS. Le
+  cartelle escluse restano visibili e reincludibili (prima l'elenco era quello
+  locale: una cartella esclusa spariva e non si poteva più includere).
+- **Corretto: esclusioni selettive** ancorate e complete. `Documenti/Progetti`
+  escludeva solo la voce della cartella, non i file al suo interno; `Foto`
+  escludeva anche `Lavoro/Foto`. Test end-to-end dedicato.
+- **Avvio senza NAS**: un PC già configurato parte anche con il NAS
+  irraggiungibile (stato "NAS non raggiungibile", nuovi tentativi in
+  background) invece di non aprirsi.
+- **Installazione**: `install.sh` (utente, menu, avvio automatico, `--migrate`
+  dal client Python, `--uninstall`) e `packaging/build-deb-go.sh` (pacchetto
+  `.deb` senza bisogno di `dpkg-deb`). Con installazione da pacchetto
+  l'aggiornamento passa dal gestore pacchetti.
+- README riscritto: funzioni, requisiti, migrazione dal Python, CLI, sviluppo.
+
 ## 0.21.0 - 2026-11-24
 
 Client Go, parità completa con il client Python:

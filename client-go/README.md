@@ -1,58 +1,94 @@
-# NASBox Go — migrazione parallela
+# NASBox — il tuo cloud, sul tuo NAS
 
-Questo client Go **non sostituisce ancora** quello Python: è una migrazione
-parallela. Il client Python resta quello di produzione e pubblicato nel canale
-`stable` finché il Go non raggiunge parità funzionale.
+NASBox sincronizza una cartella dei tuoi PC con il tuo NAS, come fanno i
+servizi di cloud storage, ma con i dati che restano a casa tua: SSH e rsync
+verso il NAS, nessun servizio esterno, nessun account.
 
-## Principi
+Questo è il **client definitivo** (Go + Fyne, un unico binario per X11 e
+Wayland). Il client Python resta disponibile solo per la migrazione.
 
-1. **NAS stupido, PC intelligente**: il NAS ARM da 1 GB esegue solo
-   `sync-daemon-server.sh` (bash, `flock`, TSV, `mv`). Nessun database, nessun
-   demone nuovo, nessun indice in memoria.
-2. **Parità del formato dati**: config JSON, SQLite locale, manifest/journal,
-   cestino e protocollo NUL del server restano gli stessi del client Python.
-3. **Nessuna sorpresa all'utente**: Python e Go possono coesistere; il
-   passaggio avverrà con un nuovo canale di distribuzione e rollback.
+## Cosa fa
 
-## Requisito GUI: X11 e Wayland
+- **Sync bidirezionale continua** con rilevamento immediato delle modifiche
+  (inotify), più PC sullo stesso NAS, coordinati da un lease sul NAS.
+- **Mai perdere un file**: ogni versione sostituita o cancellata finisce nello
+  storico (sul NAS in `.sync-trash`, sul PC nel cestino locale); "Versioni del
+  file" le elenca tutte e le ripristina con un clic, anche dal menu del file
+  manager.
+- **Conflitti gestiti**: vince la versione più recente (o scegli tu); la
+  versione perdente resta recuperabile.
+- **Protezioni**: blocco delle cancellazioni di massa, sentinelle, guardia per
+  cartelle che spariscono, fail-closed su file illeggibili.
+- **Interfaccia** con stato chiaro, trasferimenti in tempo reale (file,
+  velocità, tempo stimato), attività recente, tray con pause temporizzate,
+  monitor del NAS con grafici, "Controlla il sistema".
+- **Sync selettiva** sull'albero delle cartelle del NAS, con dimensioni.
+- **Integrazione desktop**: voce "NASBox: versioni precedenti" nel clic destro
+  di Thunar, Nautilus, Nemo, Dolphin e Caja; emblema di stato sulla cartella.
+- **Aggiornamenti automatici** del client (con rollback) e aggiornamento del
+  server NAS dal client, dopo conferma.
 
-La UI nativa verrà costruita con un toolkit che supporta **entrambi** i backend
-di display su Linux (Fyne/Gio con backend X11 e Wayland selezionabile via
-`FYNE_BACKEND`/`GIO_BACKEND`, con rilevamento automatico). Non useremo Qt via
-binding né WebView, per evitare dipendenze pesanti e garantire un singolo
-binario.
+## Requisiti
 
-| Fase | Contenuto | Stato |
-|---|---|---|
-| 0 | Struttura modulo, i18n embed, classificatore portato | completata |
-| 1 | Config compatibile, SQLite condiviso, parser manifest, anteprima CLI, guardia, undo, ssh/rsync, lock | completata |
-| 2 | UI nativa Fyne (10 tab: Stato, Trasferimenti, Log, Conflitti, Storico, Sfoglia NAS, Cartelle esterne, Selettivo, Monitor NAS, Impostazioni) con backend X11 + Wayland, tray e motore continuo | completata (Tier A) |
-| 3 | Canale di aggiornamento separato `manifest-go.json`, download/verifica/install con backup | completata |
-| 4 | Tier B: Browse NAS (list/delete/rename), mirror, selective sync, metriche/dispositivi, bandwidth/schedule, lock istanza, setup repository, cambio lingua | completata |
-| 5 | Ridisegno UX/UI: 5 aree, design system semantic light/dark, banner guidato con wash semantici chiari (non pieni), card e layout responsive; palette meno blu e pulsanti sempre azionabili con feedback | completata (0.5.2) |
-| 6 | Funzioni complete: journal upload, rename atomico, guardia cumulativa + conferma, esclusioni/selective, browse download, keep-both, storico remoto, audit, controllo server, prune, cancel | completata (0.6.0) |
-| 7 | UI ricostruita su funzioni complete: navigazione nativa con selezione visibile, contrasto, tutte le azioni collegate (conferma, cancel, download, keep-both, storico remoto, audit, server-check, update) | completata (0.7.0) |
-| 7b | Fix UX: tooltip nel footer, tre liste attività distinte, chiave repository locale corretta (file tracciati), form rename grande, dispositivi con nome/IP, aggiunta mirror guidata, bordi visibili | completata (0.8.0) |
-| 7c | Icona tray storica + animazione, zero sfondi grigi, evidenziazione navigazione con marcatore, browse a doppio clic sulle cartelle, storico filtrabile, hint non troncato | completata (0.9.0) |
-| 7d | Banner semantico theme-aware (legibile anche in dark), selezione navigazione più forte, download per percorso digitato, elenco file compatto | completata (0.10.0) |
-| 7e | Stato sempre scritto nel banner, placeholder {direction} corretto, impostazioni complete (bastione/jump host e tutti i parametri Python), footer non troncato | completata (0.11.0) |
-| 7f | Fix layout verificato: righe impostazioni a due colonne (non più 1 carattere per riga), footer a larghezza piena, avvio diretto su sezione per diagnostica | completata (0.12.0) |
-| 7g | Impostazioni con dropdown per tutte le scelte, pulsanti `?` con spiegazione (es. Sentinelle), fascia pausa strutturata invece di JSON, nomi dispositivi gestiti dal tab NAS | completata (0.13.0) |
-| 8 | Hardening P0: policy sync/delete applicate, fail-closed su errori di lettura, validazione path, bootstrap repository/lock/capability, device ID persistente, lock istanza comune, lease con handshake, rsync force-transfer | completata (0.14.0) |
-| 9 | Transfer atomico staging+publish, reconciliation baseline-aware, updater state machine/rollback, config atomica, restore server transazionale e journal durable | completata (0.15.0, server 3.26.0) |
-| 10 | P1: SSH LAN/WAN/bastione con pin, mirror locale sicuro e annullabile, audit schedulato in formato Python, impostazioni compatte | completata (0.16.0) |
-| 11 | Evoluzione: manifest delta, conflict storm, diagnostica persistente, banda separata, pull completo reale, UI moderna verificata | completata (0.17.0) |
-| 12 | Fix updater: manifest Go include target e requires_server | completata (0.17.1) |
-| 13 | Sync immediato all'avvio | completata (0.17.2) |
-| 14 | Updater: nessun blocco dopo il primo riavvio | completata (0.17.3) |
-| 15 | Guardia cancellazioni: esclusi canali update e file generati | completata (0.17.4) |
-| 16 | Parità Python: storage insights, pulizia duplicati, metriche CPU/I-O/rete, log filtrabile, anteprima strutturata, pausa programmata e temporizzata, setup guidato, tray completo | completata (0.18.0) |
-| 17 | Rollout graduale e rimozione del client Python | da fare |
+- PC Linux (X11 o Wayland) con `ssh`, `rsync` ≥ 3.1 (consigliato
+  `inotify-tools`).
+- NAS raggiungibile via SSH con chiave, `bash`, `flock`, `sha256sum`, `rsync`
+  (anche 3.1.2 come sui Synology) e lo script `server/sync-daemon-server.sh`
+  ≥ 3.25.0.
 
-Lo stato dettagliato del confronto con il client Python, comprese le funzioni
-ancora mancanti, è in [`PARITY.md`](PARITY.md).
+## Installazione
 
-Il documento di design dell'interfaccia è in `internal/ui/DESIGN.md`.
+```bash
+./install.sh nasbox-go             # per l'utente: ~/.local/bin, menu, avvio automatico
+./install.sh --migrate nasbox-go   # come sopra e disattiva il client Python
+./install.sh --uninstall
+```
+
+Pacchetto Debian/Ubuntu: `packaging/build-deb-go.sh <binario>` produce
+`dist/nasbox-go_<versione>_amd64.deb` (in quel caso gli aggiornamenti passano
+dal gestore pacchetti).
+
+### Migrare dal client Python
+
+Configurazione (`~/.config/sync-daemon/client.json`), stato
+(`~/.local/state/sync-daemon/`), storico e cestino sono **gli stessi**: non
+serve migrare dati. Basta fermare il client Python e avviare il Go
+(`./install.sh --migrate`). I due client non possono girare insieme (lock di
+istanza comune). Per tornare indietro: riattivare `sync-daemon-client.service`.
+
+## Riga di comando
+
+```
+nasbox-go gui                      interfaccia (una sola istanza: riaprire porta in primo piano)
+nasbox-go sync                     una passata di sync (elenca i file trasferiti)
+nasbox-go versions <file>          versioni del file nella GUI (usato dal file manager)
+nasbox-go status | show            stato / mostra la finestra
+nasbox-go doctor [--json]          diagnosi (server, lock, rsync locale e del NAS, errori)
+nasbox-go integrate [--remove]     menu del file manager
+nasbox-go update-check | update-install
+nasbox-go server-update-check | server-update-install
+nasbox-go preview | audit | undo | remote-history | remote-restore | prune-trash
+```
+
+## Sviluppo
+
+```bash
+go vet ./... && go test ./...      # include i test end-to-end
+NASBOX_UI_CAPTURE=/tmp/shots go test ./internal/ui -run TestCaptureSoftware
+```
+
+I **test end-to-end** (`cmd/nasbox/e2e_test.go`) eseguono il binario vero,
+rsync e lo script server vero su una share temporanea con più PC simulati
+(ssh finto locale): creazione, modifica con storico, cancellazioni propagate,
+conflitti, cancellazioni di massa, modifiche fatte direttamente sul NAS,
+aggiornamento del server, ripristino dallo storico e sync selettiva.
+
+Vincoli da rispettare (verificati sul NAS reale): il rsync del NAS è 3.1.2,
+quindi nessuna opzione introdotta dopo (es. `--mkpath`); `staging-publish`
+crea solo file nuovi; il lease si rilascia chiudendo stdin.
+
+Lo stato del confronto con il client Python è in [`PARITY.md`](PARITY.md),
+il design dell'interfaccia in `internal/ui/DESIGN.md`.
 
 ## Canale di aggiornamento Go
 

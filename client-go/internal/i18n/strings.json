@@ -6309,5 +6309,77 @@
   "ui.chart.net": {
     "en": "NAS network",
     "it": "Rete del NAS"
+  },
+  "ui.desktop.title": {
+    "en": "Desktop integration",
+    "it": "Integrazione con il desktop"
+  },
+  "ui.desktop.subtitle": {
+    "en": "\"NASBox: previous versions\" entry in the file manager menu and status emblems on the NASBox folder.",
+    "it": "Voce \"NASBox: versioni precedenti\" nel menu del file manager ed emblemi di stato sulla cartella NASBox."
+  },
+  "ui.desktop.menu_on": {
+    "en": "The NASBox entry is in the file manager context menu (right-click a file).",
+    "it": "La voce NASBox è nel menu contestuale del file manager (clic destro su un file)."
+  },
+  "ui.desktop.menu_off": {
+    "en": "Add \"NASBox: previous versions\" to the right-click menu of Thunar, Nautilus, Nemo, Dolphin or Caja.",
+    "it": "Aggiungi \"NASBox: versioni precedenti\" al clic destro di Thunar, Nautilus, Nemo, Dolphin o Caja."
+  },
+  "ui.desktop.menu_add": {
+    "en": "Add to file manager",
+    "it": "Aggiungi al file manager"
+  },
+  "ui.desktop.menu_remove": {
+    "en": "Remove from file manager",
+    "it": "Rimuovi dal file manager"
+  },
+  "ui.desktop.emblems": {
+    "en": "Show the status with an emblem on the NASBox folder and on conflict copies",
+    "it": "Mostra lo stato con un emblema sulla cartella NASBox e sulle copie di conflitto"
+  },
+  "ui.desktop.done": {
+    "en": "Integration updated: {list}",
+    "it": "Integrazione aggiornata: {list}"
+  },
+  "ui.desktop.failed": {
+    "en": "Integration failed: {detail}",
+    "it": "Integrazione non riuscita: {detail}"
+  },
+  "ui.selective.loading": {
+    "en": "Loading NAS folders…",
+    "it": "Caricamento delle cartelle del NAS…"
+  },
+  "ui.selective.hint": {
+    "en": "Click a folder to include or exclude it on this PC ({count} excluded). Folders are the NAS ones.",
+    "it": "Clic su una cartella per includerla o escluderla da questo PC ({count} escluse). Le cartelle sono quelle del NAS."
+  },
+  "ui.selective.sizes": {
+    "en": "Compute sizes",
+    "it": "Calcola dimensioni"
+  },
+  "ui.selective.sizing": {
+    "en": "Computing sizes on the NAS…",
+    "it": "Calcolo delle dimensioni sul NAS…"
+  },
+  "ui.selective.error": {
+    "en": "NAS unreachable: {detail}",
+    "it": "NAS non raggiungibile: {detail}"
+  },
+  "ui.selective.parent_excluded": {
+    "en": "A parent folder is excluded: include that one first.",
+    "it": "È esclusa una cartella superiore: includi prima quella."
+  },
+  "ui.selective.included": {
+    "en": "Folder included in sync: {path}",
+    "it": "Cartella inclusa nella sync: {path}"
+  },
+  "ui.selective.excluded": {
+    "en": "Folder excluded from sync on this PC: {path}",
+    "it": "Cartella esclusa dalla sync su questo PC: {path}"
+  },
+  "ui.update.package_managed": {
+    "en": "NASBox is installed by the package manager: update it with the package manager.",
+    "it": "NASBox è installato dal gestore pacchetti: aggiornalo con il gestore pacchetti."
   }
 }

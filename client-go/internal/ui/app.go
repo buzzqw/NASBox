@@ -233,6 +233,10 @@ type clientApp struct {
 	trayPause     *fyne.MenuItem
 	notifyMu      sync.Mutex
 	lastNotify    map[string]time.Time
+
+	emblemMu   sync.Mutex
+	lastEmblem string
+	marked     map[string]bool
 }
 
 // Run starts the native client. It blocks until the window/tray exits. When
@@ -337,6 +341,11 @@ func startClient(
 	go c.seedRecent()
 	go c.tickRelativeTimes(ctx)
 	go c.autoUpdateLoop(ctx)
+	stopIPC := c.startDesktopIntegration()
+	go func() {
+		<-ctx.Done()
+		stopIPC()
+	}()
 	return c
 }
 
@@ -772,6 +781,7 @@ func (c *clientApp) settingsView() fyne.CanvasObject {
 
 	general := container.NewVBox(
 		c.settingsAppearance(),
+		c.settingsDesktop(),
 		c.settingsConnection(),
 		c.settingsSync(),
 		c.settingsGroup(tr("ui.settings.info_title", nil), "",
@@ -798,7 +808,7 @@ func (c *clientApp) settingsView() fyne.CanvasObject {
 		c.surface(container.NewVBox(
 			widget.NewLabelWithStyle(tr("dialogs.selective.title", nil), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 			c.note(tr("ui.hint.selective", nil)),
-			container.NewGridWrap(fyne.NewSize(1, 150), c.selectiveList),
+			c.buildSelectiveTree(),
 		), ""),
 		c.surface(c.excludePatternsSetting(), ""),
 	)
@@ -910,6 +920,7 @@ func (c *clientApp) applyStatusUI(level statusLevel, reason string) {
 	if level == statusOK {
 		c.lastSyncAt = time.Now()
 	}
+	c.updateFolderEmblem(level)
 	c.updateLastSync()
 	switch level {
 	case statusBlocked:
@@ -1187,6 +1198,11 @@ func (c *clientApp) refreshConflicts() {
 		}
 		c.updateNavBadges()
 		c.refreshTray()
+		copies := []string{}
+		for _, group := range groups {
+			copies = append(copies, group.Candidates...)
+		}
+		c.markConflictCopies(copies)
 		found := false
 		for _, group := range groups {
 			if group.Original == c.selectedGroup {

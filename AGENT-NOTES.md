@@ -98,6 +98,19 @@ rm -f ./nasbox-go-<versione>
 
 - La versione sta in `client-go/internal/version/version.go`; la matrice di
   parità con il client Python e le lacune residue in `client-go/PARITY.md`.
+- `go test ./...` include i **test end-to-end** (`cmd/nasbox/e2e_test.go`):
+  binario, rsync e `server/sync-daemon-server.sh` veri su una share
+  temporanea, ssh finto. Vanno lanciati prima di ogni rilascio.
+- Revisione grafica senza display:
+  `NASBOX_UI_CAPTURE=/tmp/shots go test ./internal/ui -run TestCaptureSoftware`.
+- Vincoli del NAS (DS420j): rsync **3.1.2** (vietate le opzioni più recenti,
+  es. `--mkpath`, c'è un test); rsync via SSH solo dentro le share
+  (`/volume1/...`); `staging-publish` crea solo file nuovi; il lease
+  (`--transfer-wait`) si rilascia chiudendo stdin.
+- Dalla 0.21.0 i client Go si aggiornano da soli (avvio + ogni 6 ore); il
+  manifest include la sezione del CHANGELOG della versione.
+- Pacchetti: `client-go/install.sh` (installazione utente, `--migrate` dal
+  Python) e `packaging/build-deb-go.sh <binario>`.
 - Il canale Go è indipendente: `manifest-go.json` e `nasbox-go-<versione>` in
   `.nasbox-client-update-go/`, mai `manifest.json` del Python.
 - Verifica: `nasbox-go update-check` sul client deve proporre la nuova versione;

@@ -159,17 +159,17 @@ func (c *clientApp) trayStatusText() string {
 	}
 	switch c.level {
 	case statusOK:
-		return "✓ " + tr("overview.banner_ok", nil)
+		return "✓ " + plainTitle(tr("overview.banner_ok", nil))
 	case statusProgress:
-		return "⟳ " + tr("overview.banner_progress", nil)
+		return "⟳ " + plainTitle(tr("overview.banner_progress", nil))
 	case statusPaused:
-		return "⏸ " + tr("ui.status.paused", nil)
+		return "⏸ " + plainTitle(tr("ui.status.paused", nil))
 	case statusAttention:
-		return "⚠ " + tr("overview.banner_warning", nil)
+		return "⚠ " + plainTitle(tr("overview.banner_warning", nil))
 	case statusBlocked:
-		return "⛔ " + tr("ui.status.blocked", nil)
+		return "⛔ " + plainTitle(tr("ui.status.blocked", nil))
 	case statusOffline:
-		return "⚡ " + tr("overview.banner_offline", nil)
+		return "⚡ " + plainTitle(tr("overview.banner_offline", nil))
 	}
 	return tr("status.starting", nil)
 }

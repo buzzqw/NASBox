@@ -191,7 +191,7 @@ func TestCaptureSoftware(t *testing.T) {
 		{"02-activity", sectionActivity, 0}, {"02b-transfers", sectionActivity, 1}, {"03-files", sectionFiles, 0},
 		{"04-conflicts", sectionFiles, 1}, {"05-history", sectionFiles, 2},
 		{"06-nas", sectionNAS, 0}, {"07-devices", sectionNAS, 1},
-		{"08-settings", sectionSettings, 0}, {"09-advanced", sectionSettings, 4},
+		{"08-settings", sectionSettings, 0}, {"08b-folders", sectionSettings, 3}, {"09-advanced", sectionSettings, 4},
 	}
 	for _, shot := range shots {
 		c.navigate(shot.section, shot.tab)

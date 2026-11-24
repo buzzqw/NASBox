@@ -140,3 +140,39 @@ func parseManifestHit(output []byte) (string, bool, error) {
 	}
 	return fields[2], fields[2] != "", nil
 }
+
+// DirSizes returns the size in bytes of each sub-directory of relative on the
+// NAS ("" = repository root), computed on the NAS with du (on demand only:
+// it reads the directory tree).
+func (c *Client) DirSizes(relative string) (map[string]int64, error) {
+	base := strings.TrimSuffix(c.cfg.RemotePrefix(), "/")
+	if relative = strings.Trim(relative, "/"); relative != "" {
+		if strings.Contains(relative, "..") {
+			return nil, fmt.Errorf("percorso non valido")
+		}
+		base += "/" + relative
+	}
+	output, err := c.Run([]string{"sh", "-c",
+		"cd " + shellQuote(base) + " && du -sk -- */ 2>/dev/null; true"}, nil, 10*time.Minute)
+	if err != nil {
+		return nil, err
+	}
+	return parseDirSizes(string(output)), nil
+}
+
+func parseDirSizes(output string) map[string]int64 {
+	sizes := map[string]int64{}
+	for _, line := range strings.Split(output, "\n") {
+		kilobytes, name, ok := strings.Cut(strings.TrimSpace(line), "\t")
+		if !ok {
+			continue
+		}
+		value, err := strconv.ParseInt(strings.TrimSpace(kilobytes), 10, 64)
+		name = strings.TrimSuffix(strings.TrimSpace(name), "/")
+		if err != nil || name == "" || strings.HasPrefix(name, ".") {
+			continue
+		}
+		sizes[name] = value * 1024
+	}
+	return sizes
+}

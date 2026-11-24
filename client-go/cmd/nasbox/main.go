@@ -9,9 +9,12 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"nasbox-go/internal/config"
@@ -20,7 +23,9 @@ import (
 	"nasbox-go/internal/engine"
 	"nasbox-go/internal/history"
 	"nasbox-go/internal/instance"
+	"nasbox-go/internal/integration"
 	"nasbox-go/internal/integrity"
+	"nasbox-go/internal/ipc"
 	"nasbox-go/internal/remote"
 	"nasbox-go/internal/repository"
 	"nasbox-go/internal/state"
@@ -72,6 +77,14 @@ func main() {
 		updateCheck(args)
 	case "update-install":
 		updateInstall(args)
+	case "versions":
+		openVersions(args)
+	case "show":
+		sendOrStart("show", "")
+	case "status":
+		guiStatus()
+	case "integrate":
+		integrate(args)
 	case "server-update-check":
 		serverUpdate(args, false)
 	case "server-update-install":
@@ -83,7 +96,7 @@ func main() {
 }
 
 func usage() {
-	fmt.Println("uso: nasbox <version|doctor|diagnostics-bundle|preview|sync|undo|confirm-delete|browse-download|remote-history|remote-restore|prune-trash|audit|server-check|bootstrap-check|gui|update-check|update-install|server-update-check|server-update-install> [opzioni]")
+	fmt.Println("uso: nasbox <version|doctor|diagnostics-bundle|preview|sync|undo|confirm-delete|browse-download|remote-history|remote-restore|prune-trash|audit|server-check|bootstrap-check|gui|update-check|update-install|server-update-check|server-update-install|versions|show|status|integrate> [opzioni]")
 }
 
 func bootstrapConfig(cfg *config.Config) error {
@@ -762,6 +775,11 @@ func confirmDelete(args []string) {
 func gui(args []string) {
 	release, err := instance.Acquire()
 	if err != nil {
+		// Already running: bring the existing window forward instead of
+		// failing, as people expect when they reopen a sync app.
+		if _, sendErr := ipc.Send("show", ""); sendErr == nil {
+			return
+		}
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
@@ -777,8 +795,14 @@ func gui(args []string) {
 	}
 	if cfg.LocalRoot() != "" {
 		if err := bootstrapConfig(cfg); err != nil {
-			fmt.Fprintln(os.Stderr, "bootstrap NAS fallito:", err)
-			os.Exit(1)
+			// A PC already bound to a repository starts anyway (NAS off,
+			// laptop away from home): the GUI shows "NAS non raggiungibile"
+			// and the engine retries. Only a never-bootstrapped setup stops.
+			if cfg.RepositoryID() == "" {
+				fmt.Fprintln(os.Stderr, "bootstrap NAS fallito:", err)
+				os.Exit(1)
+			}
+			fmt.Fprintln(os.Stderr, "NAS non raggiungibile all'avvio, riprovo in background:", err)
 		}
 	}
 	var store *state.Store
@@ -984,4 +1008,108 @@ func serverUpdate(args []string, install bool) {
 		os.Exit(1)
 	}
 	fmt.Printf("server aggiornato a %s\n", update.Version)
+}
+
+// openVersions is what file-manager menus call: "versions <file>".
+func openVersions(args []string) {
+	if len(args) < 1 {
+		fmt.Fprintln(os.Stderr, "uso: nasbox versions <file>")
+		os.Exit(2)
+	}
+	cfg, err := loadConfig(args[1:])
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	relative, err := relativeToRoot(cfg.LocalRoot(), args[0])
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	sendOrStart("versions", relative)
+}
+
+// relativeToRoot maps an absolute (or relative) path inside the NASBox folder
+// to the repository path; symlinks in the prefix are resolved.
+func relativeToRoot(root, target string) (string, error) {
+	if root == "" {
+		return "", fmt.Errorf("cartella NASBox non configurata")
+	}
+	absolute, err := filepath.Abs(target)
+	if err != nil {
+		return "", err
+	}
+	if resolved, err := filepath.EvalSymlinks(filepath.Dir(absolute)); err == nil {
+		absolute = filepath.Join(resolved, filepath.Base(absolute))
+	}
+	base := root
+	if resolved, err := filepath.EvalSymlinks(root); err == nil {
+		base = resolved
+	}
+	relative, err := filepath.Rel(base, absolute)
+	if err != nil || relative == "." || strings.HasPrefix(relative, "..") {
+		return "", fmt.Errorf("%s non e' dentro la cartella NASBox (%s)", target, root)
+	}
+	return filepath.ToSlash(relative), nil
+}
+
+// sendOrStart delivers a command to the running GUI or starts it with the
+// command queued (NASBOX_OPEN_VERSIONS) when it is not running.
+func sendOrStart(command, argument string) {
+	reply, err := ipc.Send(command, argument)
+	if err == nil {
+		if reply != "" && reply != "ok" {
+			fmt.Println(reply)
+		}
+		return
+	}
+	binary, exeErr := os.Executable()
+	if exeErr != nil {
+		fmt.Fprintln(os.Stderr, exeErr)
+		os.Exit(1)
+	}
+	start := exec.Command(binary, "gui")
+	start.Env = os.Environ()
+	if command == "versions" {
+		start.Env = append(start.Env, "NASBOX_OPEN_VERSIONS="+argument)
+	}
+	start.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	if err := start.Start(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+}
+
+func guiStatus() {
+	reply, err := ipc.Send("status", "")
+	if err != nil {
+		fmt.Println(err)
+		os.Exit(3)
+	}
+	fmt.Println(reply)
+}
+
+// integrate installs (or with --remove removes) the file-manager entries.
+func integrate(args []string) {
+	remove := len(args) > 0 && args[0] == "--remove"
+	var result integration.Result
+	var err error
+	if remove {
+		result, err = integration.Remove()
+	} else {
+		binary, exeErr := os.Executable()
+		if exeErr != nil {
+			fmt.Fprintln(os.Stderr, exeErr)
+			os.Exit(1)
+		}
+		result, err = integration.Install(binary)
+	}
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	fmt.Printf("aggiornati: %s\n", strings.Join(result.Changed, ", "))
+	if len(result.Skipped) > 0 {
+		fmt.Printf("non installati: %s\n", strings.Join(result.Skipped, ", "))
+	}
 }
