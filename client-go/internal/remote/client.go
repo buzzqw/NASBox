@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -171,6 +173,67 @@ func (c *Client) RestoreBatch(requests []RestoreRequest, device string) (map[str
 		return nil, err
 	}
 	return parsePairedStatus(output, "RESTORE_BATCH_V1")
+}
+
+// RetryPendingJournal replays a journal payload that was saved locally before
+// a failed append. The local file is removed only after the NAS acknowledges.
+func (c *Client) RetryPendingJournal(device string) (bool, string, error) {
+	base := os.Getenv("XDG_STATE_HOME")
+	if base == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return false, "", err
+		}
+		base = filepath.Join(home, ".local", "state")
+	}
+	path := filepath.Join(base, "sync-daemon", "journal-pending.bin")
+	content, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return true, "", nil
+		}
+		return false, "", err
+	}
+	output, err := c.RunLocked([]string{c.script(), "--journal-append"}, content, device, 2*time.Minute)
+	if err != nil {
+		detail := strings.ToLower(err.Error())
+		if strings.Contains(detail, "unknown option") || strings.Contains(detail, "opzione sconosciuta") {
+			_ = os.Remove(path)
+			return true, "journal non supportato", nil
+		}
+		return false, "", err
+	}
+	_ = os.Remove(path)
+	return true, strings.TrimSpace(string(output)), nil
+}
+
+type StagedFile struct {
+	Path, Digest, Causal string
+	Size, MTimeNS        int64
+}
+
+// StagingPublish publishes staged files atomically and bumps the manifest.
+func (c *Client) StagingPublish(
+	stagingDir, txID, device string, files []StagedFile,
+) (bool, error) {
+	if len(files) == 0 {
+		return true, nil
+	}
+	fields := [][]byte{
+		[]byte("STAGING_PUBLISH_V2"), []byte(stagingDir), []byte(txID),
+		[]byte(device), []byte(fmt.Sprint(len(files))),
+	}
+	for _, file := range files {
+		fields = append(fields,
+			[]byte(file.Path), []byte(file.Digest),
+			[]byte(fmt.Sprint(file.Size)), []byte(fmt.Sprint(file.MTimeNS)),
+			[]byte(file.Causal),
+		)
+	}
+	_, err := c.RunLocked(
+		[]string{c.script(), "--staging-publish"}, nulJoin(fields), device, 5*time.Minute,
+	)
+	return err == nil, err
 }
 
 func nulJoin(fields [][]byte) []byte {

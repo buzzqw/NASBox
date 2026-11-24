@@ -26,9 +26,9 @@ binario.
 |---|---|---|
 | 0 | Struttura modulo, i18n embed, classificatore portato | completata |
 | 1 | Config compatibile, SQLite condiviso, parser manifest, anteprima CLI, guardia, undo, ssh/rsync, lock | completata |
-| 2 | UI nativa Fyne (tab, tray) con backend X11 + Wayland | completata (base) |
-| 3 | Canale di aggiornamento separato `manifest-go.json` | completata |
-| 4 | Rollout graduale, parità UI completa, rimozione del client Python | da fare |
+| 2 | UI nativa Fyne (7 tab: Stato, Trasferimenti, Log, Conflitti, Storico, Monitor, Impostazioni) con backend X11 + Wayland, tray e motore continuo | completata (Tier A) |
+| 3 | Canale di aggiornamento separato `manifest-go.json`, download/verifica/install con backup | completata |
+| 4 | Rollout graduale, Tier B (Browse NAS, mirrors, selective sync, metriche), rimozione del client Python | da fare |
 
 ## Canale di aggiornamento Go
 

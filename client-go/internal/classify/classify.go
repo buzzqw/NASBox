@@ -13,6 +13,7 @@ type RemoteState struct {
 	Digest  string
 	Size    int64
 	MTimeNS int64
+	Causal  string
 }
 
 type Identity struct {

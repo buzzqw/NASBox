@@ -40,6 +40,8 @@ func main() {
 		gui(args)
 	case "update-check":
 		updateCheck(args)
+	case "update-install":
+		updateInstall(args)
 	default:
 		usage()
 		os.Exit(2)
@@ -47,7 +49,7 @@ func main() {
 }
 
 func usage() {
-	fmt.Println("uso: nasbox <version|doctor|preview|sync|undo|gui|update-check> [opzioni]")
+	fmt.Println("uso: nasbox <version|doctor|preview|sync|undo|gui|update-check|update-install> [opzioni]")
 }
 
 func loadConfig(args []string) (*config.Config, error) {
@@ -98,6 +100,29 @@ func updateCheck(args []string) {
 		if manifest.Notes != "" {
 			fmt.Println(manifest.Notes)
 		}
+	} else {
+		fmt.Println("nessun aggiornamento")
+	}
+}
+
+func updateInstall(args []string) {
+	cfg, err := loadConfig(args)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	binary, err := os.Executable()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	applied, versionName, err := update.Apply(cfg, remote.New(cfg), binary)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	if applied {
+		fmt.Printf("aggiornato a %s — riavvia il client\n", versionName)
 	} else {
 		fmt.Println("nessun aggiornamento")
 	}

@@ -83,6 +83,32 @@ func Download(cfg *config.Config, client FileReader, manifest *Manifest, destina
 	return os.Rename(tmp, destination)
 }
 
+// Apply checks, downloads and installs an available update, keeping a backup.
+// It returns true when a new binary is ready and a restart is required.
+func Apply(cfg *config.Config, client FileReader, binaryPath string) (bool, string, error) {
+	manifest, err := Newest(cfg, client)
+	if err != nil {
+		return false, "", err
+	}
+	if !Available(manifest) {
+		return false, "", nil
+	}
+	newBinary := binaryPath + ".new"
+	if err := Download(cfg, client, manifest, newBinary); err != nil {
+		return false, "", err
+	}
+	backup, err := Install(binaryPath)
+	if err != nil {
+		return false, "", err
+	}
+	if err := os.Rename(newBinary, binaryPath); err != nil {
+		_ = Rollback(binaryPath)
+		return false, "", err
+	}
+	_ = backup
+	return true, manifest.Version, nil
+}
+
 // Install replaces the running binary after keeping a rollback copy. The new
 // binary is not executed here; the tray menu or next start will use it.
 func Install(binaryPath string) (string, error) {

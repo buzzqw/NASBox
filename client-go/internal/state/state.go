@@ -156,6 +156,59 @@ func (s *Store) RecordIdentities(repository, root string, digests map[string]str
 	return tx.Commit()
 }
 
+// EntryState is one authoritative baseline row from the same table the Python
+// client uses for causal decisions.
+type EntryState struct {
+	Digest, Causal string
+	Size, MTimeNS  int64
+}
+
+func (s *Store) EntrySnapshot(repository string) (map[string]EntryState, error) {
+	rows, err := s.db.Query(`
+		SELECT path, digest, size, mtime_ns, causal FROM entry WHERE repository = ?
+	`, repository)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make(map[string]EntryState)
+	for rows.Next() {
+		var path string
+		var digest, causal sql.NullString
+		var size, mtimeNS sql.NullInt64
+		if err := rows.Scan(&path, &digest, &size, &mtimeNS, &causal); err != nil {
+			return nil, err
+		}
+		entry := EntryState{}
+		if digest.Valid {
+			entry.Digest = digest.String
+		}
+		if causal.Valid {
+			entry.Causal = causal.String
+		}
+		if size.Valid {
+			entry.Size = size.Int64
+		}
+		if mtimeNS.Valid {
+			entry.MTimeNS = mtimeNS.Int64
+		}
+		result[path] = entry
+	}
+	return result, rows.Err()
+}
+
+func (s *Store) RecordEntry(repository, path string, entry EntryState) error {
+	_, err := s.db.Exec(`
+		INSERT INTO entry(repository, path, digest, size, mtime_ns, causal, synced_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(repository, path) DO UPDATE SET
+			digest=excluded.digest, size=excluded.size, mtime_ns=excluded.mtime_ns,
+			causal=excluded.causal, synced_at=excluded.synced_at
+	`, repository, path, entry.Digest, entry.Size, entry.MTimeNS, entry.Causal,
+		float64(time.Now().UnixNano())/1e9)
+	return err
+}
+
 // BackfillIdentities records lstat identity for the whole local tree, without
 // hashing file contents. Digests already known in `entry` are preserved.
 func (s *Store) BackfillIdentities(

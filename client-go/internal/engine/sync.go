@@ -11,10 +11,13 @@ import (
 	"syscall"
 	"time"
 
+	"nasbox-go/internal/causal"
 	"nasbox-go/internal/classify"
 	"nasbox-go/internal/config"
+	"nasbox-go/internal/conflicts"
 	"nasbox-go/internal/i18n"
 	"nasbox-go/internal/remote"
+	"nasbox-go/internal/repository"
 	"nasbox-go/internal/state"
 )
 
@@ -23,6 +26,7 @@ type ConfigSource interface {
 	PrintConfig() (map[string]string, error)
 	ManifestExport(since string) ([]byte, error)
 	CheckedDelete(requests []remote.CheckedRequest, runTS, device string) (map[string]string, error)
+	RetryPendingJournal(device string) (bool, string, error)
 }
 
 // Transferer uploads and downloads batches of paths.
@@ -32,11 +36,13 @@ type Transferer interface {
 }
 
 type SyncResult struct {
-	Uploaded int
-	Deleted  int
-	Blocked  string
-	Missing  int
-	Renames  int
+	Uploaded  int
+	Deleted   int
+	Blocked   string
+	Missing   int
+	Renames   int
+	Conflicts int
+	Downloads int
 }
 
 type localFile struct {
@@ -79,7 +85,20 @@ func SyncOnce(
 	if err != nil {
 		return result, err
 	}
+	if err := repository.Validate(cfg.LocalRoot(), cfg.RepositoryID(), true); err != nil {
+		return result, err
+	}
+	if ok, detail, err := client.RetryPendingJournal(store.DeviceID()); err != nil || !ok {
+		if err != nil {
+			return result, err
+		}
+		return result, fmt.Errorf("journal NAS: %s", detail)
+	}
 	identities, err := store.IdentitySnapshot(cfg.RepositoryID())
+	if err != nil {
+		return result, err
+	}
+	entries, err := store.EntrySnapshot(cfg.RepositoryID())
 	if err != nil {
 		return result, err
 	}
@@ -90,6 +109,9 @@ func SyncOnce(
 
 	missing := make([]string, 0)
 	uploads := make([]string, 0)
+	downloads := make([]string, 0)
+	device := store.DeviceID()
+	manualConflicts := cfg.String("conflict_policy") == "manual"
 	for path, remoteState := range manifest {
 		if remoteState.Kind != "FILE" {
 			continue
@@ -99,10 +121,27 @@ func SyncOnce(
 			missing = append(missing, path)
 			continue
 		}
-		if current.Digest != remoteState.Digest {
-			// The local version is the one we can prove right now; the losing
-			// bytes stay in the NAS trash via rsync backups.
+		if current.Digest == remoteState.Digest {
+			continue
+		}
+		baseline := entries[path]
+		localClock, _ := causal.Parse(baseline.Causal)
+		remoteClock, _ := causal.Parse(remoteState.Causal)
+		switch {
+		case localClock != nil && localClock.Dominates(remoteClock):
 			uploads = append(uploads, path)
+		case remoteClock != nil && remoteClock.Dominates(localClock):
+			downloads = append(downloads, path)
+		case manualConflicts:
+			if _, err := conflicts.Create(cfg.LocalRoot(), path, remoteDevice(remoteState.Causal), remoteState.Digest); err != nil {
+				return result, err
+			}
+			result.Conflicts++
+			downloads = append(downloads, path)
+		case current.MTimeNS >= remoteState.MTimeNS:
+			uploads = append(uploads, path)
+		default:
+			downloads = append(downloads, path)
 		}
 	}
 	for path := range local {
@@ -127,6 +166,34 @@ func SyncOnce(
 			return result, err
 		}
 		result.Uploaded = len(uploads)
+		for _, path := range uploads {
+			clock, _ := causal.Parse(entries[path].Causal)
+			if clock == nil {
+				clock = &causal.Version{}
+			}
+			file := local[path]
+			_ = store.RecordEntry(cfg.RepositoryID(), path, state.EntryState{
+				Digest: file.Digest, Size: file.Size, MTimeNS: file.MTimeNS,
+				Causal: clock.Increment(device).Encode(),
+			})
+		}
+	}
+	if len(downloads) > 0 {
+		if err := transfers.Download(downloads); err != nil {
+			return result, err
+		}
+		result.Downloads = len(downloads)
+		for _, path := range downloads {
+			remoteState := manifest[path]
+			clock, _ := causal.Parse(remoteState.Causal)
+			if clock == nil {
+				clock = &causal.Version{}
+			}
+			_ = store.RecordEntry(cfg.RepositoryID(), path, state.EntryState{
+				Digest: remoteState.Digest, Size: remoteState.Size,
+				MTimeNS: remoteState.MTimeNS, Causal: clock.Encode(),
+			})
+		}
 	}
 	deletions := report.Unexplained
 	if len(deletions) > 0 {
@@ -156,6 +223,14 @@ func SyncOnce(
 		result.Deleted = len(done)
 	}
 	return result, nil
+}
+
+func remoteDevice(causalText string) string {
+	clock, ok := causal.Parse(causalText)
+	if !ok || len(clock.Clock) == 0 {
+		return "nas"
+	}
+	return clock.Clock[len(clock.Clock)-1].Device
 }
 
 func toClassifyIdentities(identities map[string]state.Identity) map[string]classify.Identity {

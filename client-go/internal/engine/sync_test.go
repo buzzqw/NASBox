@@ -3,9 +3,11 @@ package engine
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
 
 	"nasbox-go/internal/config"
@@ -30,6 +32,8 @@ func (f *fakeNAS) CheckedDelete(reqs []remote.CheckedRequest, _ string, _ string
 	return out, nil
 }
 
+func (f *fakeNAS) RetryPendingJournal(string) (bool, string, error) { return true, "", nil }
+
 type fakeTransfer struct{ uploaded []string }
 
 func (f *fakeTransfer) Upload(paths []string) error   { f.uploaded = paths; return nil }
@@ -42,12 +46,29 @@ func digest(data string) string {
 
 func setupTest(t *testing.T) (*config.Config, *state.Store, string) {
 	t.Helper()
-	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	base := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", base)
 	cfg := config.New("")
 	cfg.Set("repository_id", "repo1", false)
 	root := t.TempDir()
 	cfg.Set("local_root", root, false)
 	cfg.Set("delete_dir_guard_min_files", float64(1000), false)
+	info, err := os.Stat(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	marker := map[string]any{
+		"version": 1, "local_root": root,
+		"st_dev": info.Sys().(*syscall.Stat_t).Dev, "repository_id": "repo1",
+	}
+	markerPath := filepath.Join(base, "sync-daemon", "repository-marker.json")
+	if err := os.MkdirAll(filepath.Dir(markerPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	content, _ := json.Marshal(marker)
+	if err := os.WriteFile(markerPath, content, 0o600); err != nil {
+		t.Fatal(err)
+	}
 	store, err := state.Open(cfg)
 	if err != nil {
 		t.Fatal(err)

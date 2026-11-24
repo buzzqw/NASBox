@@ -51,6 +51,37 @@ func TestNewestAndDownloadVerifySha256(t *testing.T) {
 	}
 }
 
+func TestApplyInstallsAndKeepsBackup(t *testing.T) {
+	cfg := config.New("")
+	cfg.Set("remote_prefix", "/volume1/NASBox", false)
+	path := ManifestPath(cfg)
+	binaryPath := filepath.Join(t.TempDir(), "nasbox")
+	if err := os.WriteFile(binaryPath, []byte("old"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	newBinary := []byte("new-binary")
+	sum := sha256.Sum256(newBinary)
+	manifestJSON := fmt.Sprintf(
+		`{"version":"9.9.9","channel":"go-stable","artifact":"nasbox-go-9.9.9","sha256":"%s","size":%d}`,
+		hex.EncodeToString(sum[:]), len(newBinary),
+	)
+	reader := &fakeReader{files: map[string][]byte{
+		path: []byte(manifestJSON),
+		"/volume1/NASBox/.nasbox-client-update-go/nasbox-go-9.9.9": newBinary,
+	}}
+	applied, versionName, err := Apply(cfg, reader, binaryPath)
+	if err != nil || !applied || versionName != "9.9.9" {
+		t.Fatalf("apply failed: %v %s %v", applied, versionName, err)
+	}
+	content, _ := os.ReadFile(binaryPath)
+	if string(content) != string(newBinary) {
+		t.Fatalf("binary not replaced: %q", content)
+	}
+	if _, err := os.Stat(binaryPath + ".bak"); err != nil {
+		t.Fatal("rollback copy missing")
+	}
+}
+
 func TestDownloadRejectsWrongSha(t *testing.T) {
 	cfg := config.New("")
 	cfg.Set("remote_prefix", "/volume1/NASBox", false)

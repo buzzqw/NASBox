@@ -43,12 +43,16 @@ func ParseManifest(data []byte) (map[string]classify.RemoteState, error) {
 			return nil, err
 		}
 		mtimeNS, _ := strconv.ParseInt(string(fields[3]), 10, 64)
+		causal := ""
+		if len(fields) >= 7 {
+			causal = string(fields[6])
+		}
 		kind := "TOMBSTONE"
 		if digest != "" {
 			kind = "FILE"
 		}
 		result[path] = classify.RemoteState{
-			Kind: kind, Digest: digest, Size: size, MTimeNS: mtimeNS,
+			Kind: kind, Digest: digest, Size: size, MTimeNS: mtimeNS, Causal: causal,
 		}
 	}
 	if err := scanner.Err(); err != nil {
