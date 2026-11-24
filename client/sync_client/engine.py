@@ -353,6 +353,51 @@ class SyncEngine(QThread):
     def delete_safety_snapshot(self) -> dict:
         return delete_safety.shared().snapshot(self.cfg)
 
+    def undo_deletions(self, hours: float = 24, limit: int = 500) -> dict:
+        """Restore recent NAS deletions from the trash, batch by batch.
+
+        The decision and the bookkeeping stay on the PC; the NAS only receives
+        small streaming ``--restore-batch`` calls while we own the lease.
+        """
+        conn = self._conn
+        if conn is None:
+            return {"ok": False, "restored": 0, "errors": 0, "detail": "NAS non connesso"}
+        try:
+            entries = self.sync_state.recent_undo(hours=hours, limit=limit)
+        except (OSError, RuntimeError, TypeError) as exc:
+            return {"ok": False, "restored": 0, "errors": 0, "detail": str(exc)}
+        if not entries:
+            return {"ok": True, "restored": 0, "errors": 0, "detail": "nessuna eliminazione recente"}
+
+        batches: dict[str, list[dict]] = {}
+        for entry in entries:
+            batches.setdefault(str(entry.get("batch_id") or ""), []).append(entry)
+        restored = 0
+        errors = 0
+        device_id = self.sync_state.device_id()
+        try:
+            with rsync_ops.remote_lock(
+                self.cfg, conn, owner_id=device_id, priority=0,
+            ):
+                for batch_id, items in batches.items():
+                    requests = [
+                        (str(item.get("path") or ""), str(item.get("version_ts") or "latest"))
+                        for item in items
+                    ]
+                    statuses = rsync_ops.restore_batch(self.cfg, conn, requests, device_id)
+                    done = [path for path, state in statuses.items() if state == "RESTORED"]
+                    if done:
+                        self.sync_state.mark_undo_applied(batch_id, done)
+                        restored += len(done)
+                    errors += sum(
+                        1 for state in statuses.values()
+                        if state in ("ERROR", "NO_VERSION", "EXISTS")
+                    )
+        except (rsync_ops.RemoteLockError, OSError, RuntimeError) as exc:
+            return {"ok": False, "restored": restored, "errors": errors, "detail": str(exc)}
+        self.logger.log("UNDO", "-", f"recuperati {restored} file dal cestino NAS ({errors} errori)")
+        return {"ok": errors == 0, "restored": restored, "errors": errors}
+
     def assurance_snapshot(self) -> dict:
         """Facts that answer one question: 'is everything synced?'."""
         now = time.time()
@@ -367,6 +412,10 @@ class SyncEngine(QThread):
         scheduler = self.transfer_scheduler.snapshot() if self.transfer_scheduler else {}
         pending = self._pending_summary or {}
         delete_snapshot = delete_safety.shared().snapshot(self.cfg)
+        try:
+            undo_count = int(self.sync_state.undo_count())
+        except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
+            undo_count = 0
         result = {
             "tracked_files": tracked,
             "pending_count": int(pending.get("count", 0) or 0),
@@ -383,6 +432,7 @@ class SyncEngine(QThread):
             "journal_ready": bool(self.cfg.get("remote_journal_ready")),
             "delete_used": delete_snapshot.get("used", 0),
             "delete_limit": delete_snapshot.get("limit", 0),
+            "undo_count": undo_count,
         }
         return result
 

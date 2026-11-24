@@ -555,6 +555,13 @@ STRINGS: dict[str, dict[str, str]] = {
         "it": "Autorizza per 10 minuti le cancellazioni oltre il limite di sicurezza. Usalo SOLO dopo aver controllato nel Log quali file verrebbero rimossi: i file spariranno anche dal NAS.",
         "en": "Allows deletions above the safety limit for 10 minutes. Use it ONLY after checking the Log for the files involved: they will be removed from the NAS as well.",
     },
+    "status.undo_btn": {"it": "Annulla eliminazioni recenti", "en": "Undo recent deletions"},
+    "status.undo_tooltip": {
+        "it": "Ripristina dal cestino del NAS i file eliminati nelle ultime 24 ore",
+        "en": "Restore files deleted in the last 24 hours from the NAS trash",
+    },
+    "status.undo_done": {"it": "Recuperati {count} file dal cestino del NAS.", "en": "Restored {count} files from the NAS trash."},
+    "status.undo_empty": {"it": "Nessuna eliminazione recente da annullare.", "en": "No recent deletions to undo."},
     "a11y.confirm_deletes_btn": {"it": "Conferma cancellazioni di massa", "en": "Confirm mass deletion"},
     "status.remote_lock_held": {
         "it": "Lock NAS: occupato da circa {age}; proprietario {owner}.",

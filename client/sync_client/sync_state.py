@@ -218,6 +218,74 @@ class SyncStateStore:
                 )
             }
 
+    def record_undo(self, paths, version_ts: str, batch_id: str | None = None) -> None:
+        """Remember what a delete batch moved to the NAS trash, for later undo."""
+        paths = list(paths)
+        if not paths or not version_ts:
+            return
+        repository = self._repository()
+        batch = batch_id or version_ts
+        created_at = time.time()
+        rows = [
+            (repository, batch, path, version_ts, created_at)
+            for path in paths
+        ]
+        with self._lock, self._connection() as conn:
+            conn.executemany(
+                """
+                INSERT INTO undo_event(repository, batch_id, path, version_ts, created_at, applied)
+                VALUES (?, ?, ?, ?, ?, 0)
+                ON CONFLICT(repository, batch_id, path) DO NOTHING
+                """,
+                rows,
+            )
+
+    def recent_undo(self, hours: float = 24, limit: int = 500) -> list[dict]:
+        """Undeleted-but-still-restorable paths from recent delete batches."""
+        cutoff = time.time() - max(0.0, hours) * 3600
+        with self._lock, self._connection() as conn:
+            return [
+                {
+                    "batch_id": row[0], "path": row[1], "version_ts": row[2],
+                    "created_at": row[3],
+                }
+                for row in conn.execute(
+                    """
+                    SELECT batch_id, path, version_ts, created_at
+                    FROM undo_event
+                    WHERE repository = ? AND applied = 0 AND created_at >= ?
+                    ORDER BY created_at DESC LIMIT ?
+                    """,
+                    (self._repository(), cutoff, max(1, limit)),
+                )
+            ]
+
+    def undo_count(self, hours: float = 24) -> int:
+        cutoff = time.time() - max(0.0, hours) * 3600
+        with self._lock, self._connection() as conn:
+            row = conn.execute(
+                """
+                SELECT COUNT(*) FROM undo_event
+                WHERE repository = ? AND applied = 0 AND created_at >= ?
+                """,
+                (self._repository(), cutoff),
+            ).fetchone()
+            return int(row[0]) if row else 0
+
+    def mark_undo_applied(self, batch_id: str, paths) -> None:
+        paths = list(paths)
+        if not paths:
+            return
+        repository = self._repository()
+        with self._lock, self._connection() as conn:
+            conn.executemany(
+                """
+                UPDATE undo_event SET applied = 1
+                WHERE repository = ? AND batch_id = ? AND path = ?
+                """,
+                [(repository, batch_id, path) for path in paths],
+            )
+
     def entry_count(self) -> int:
         """Number of tracked files in the authoritative local baseline."""
         with self._lock, self._connection() as conn:
@@ -317,6 +385,17 @@ class SyncStateStore:
                 );
                 CREATE INDEX IF NOT EXISTS idx_file_identity_digest
                     ON file_identity(repository, digest);
+                CREATE TABLE IF NOT EXISTS undo_event (
+                    repository TEXT NOT NULL,
+                    batch_id TEXT NOT NULL,
+                    path TEXT NOT NULL,
+                    version_ts TEXT NOT NULL,
+                    created_at REAL NOT NULL,
+                    applied INTEGER NOT NULL DEFAULT 0,
+                    PRIMARY KEY (repository, batch_id, path)
+                );
+                CREATE INDEX IF NOT EXISTS idx_undo_created
+                    ON undo_event(repository, created_at);
                 CREATE TABLE IF NOT EXISTS pending (
                     repository TEXT NOT NULL,
                     path TEXT NOT NULL,

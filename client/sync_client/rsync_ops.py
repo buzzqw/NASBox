@@ -997,6 +997,54 @@ def checked_delete_remote(
     return CheckedDeleteResult(True, items, completed, stale)
 
 
+def restore_batch(
+    cfg: Config, conn: NasConnection,
+    requests: list[tuple[str, str]], device_id: str,
+) -> dict[str, str]:
+    """Restore files from the NAS trash, in small streaming batches.
+
+    ``requests`` contains ``(relative_path, version_ts)`` pairs; ``version_ts``
+    may be ``"latest"``. Returns ``path -> RESTORED|NO_VERSION|EXISTS|ERROR``.
+    The NAS does one `mv` and one journal append per path, with constant memory.
+    """
+    if not requests:
+        return {}
+    script_path = (cfg.get("remote_server_script") or "").strip()
+    if not script_path:
+        return {path: "ERROR" for path, _version in requests}
+    for path, version in requests:
+        if version != "latest" and not re.fullmatch(
+            r"\d{4}-\d{2}-\d{2}--\d{2}-\d{2}-\d{2}-\d{6}Z", version
+        ):
+            return {path: "ERROR" for path, _version in requests}
+    fields = [
+        b"RESTORE_BATCH_V1", device_id.encode("ascii"), str(len(requests)).encode("ascii"),
+    ]
+    for path, version in requests:
+        fields.extend((os.fsencode(path), version.encode("ascii")))
+    payload = b"\0".join(fields) + b"\0"
+    ok, output, error = run_remote_script_input_bytes(
+        cfg, conn, script_path, ["--restore-batch"], payload, timeout=300,
+    )
+    if not ok:
+        return {path: "ERROR" for path, _version in requests}
+    values = output.split(b"\0")
+    if values and values[-1] == b"":
+        values.pop()
+    if len(values) < 2 or values[0] != b"RESTORE_BATCH_V1":
+        return {path: "ERROR" for path, _version in requests}
+    try:
+        count = int(values[1])
+    except ValueError:
+        count = -1
+    if count != len(requests) or len(values) != 2 + count * 2:
+        return {path: "ERROR" for path, _version in requests}
+    return {
+        os.fsdecode(values[2 + index * 2]): values[3 + index * 2].decode("ascii", "replace")
+        for index in range(count)
+    }
+
+
 def create_remote_staging(cfg: Config, conn: NasConnection, transaction_id: str) -> str | None:
     """Create one private, same-filesystem staging tree for a publish batch."""
     if not re.fullmatch(r"[A-Za-z0-9._:-]{1,128}", transaction_id):

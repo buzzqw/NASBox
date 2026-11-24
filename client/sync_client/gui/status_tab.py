@@ -263,6 +263,13 @@ class StatusTab(QWidget):
         # the time invites the user to bypass a safety guard by accident.
         self.confirm_deletes_btn.hide()
         status_layout.addWidget(self.confirm_deletes_btn)
+        self.undo_btn = QToolButton()
+        self.undo_btn.setObjectName("undoDeletes")
+        self.undo_btn.setText(t("status.undo_btn"))
+        self.undo_btn.setToolTip(t("status.undo_tooltip"))
+        self.undo_btn.clicked.connect(self._undo_deletions)
+        self.undo_btn.hide()
+        status_layout.addWidget(self.undo_btn)
         self.watcher_label = QLabel(t("status.watcher_starting"))
         self.watcher_label.setObjectName("statusWatcher")
         self.watcher_label.setWordWrap(True)
@@ -778,6 +785,12 @@ class StatusTab(QWidget):
             self.guidance_btn.hide()
         # The override is only meaningful while a deletion is actually blocked.
         self.confirm_deletes_btn.setVisible(self._recent_safety() is not None)
+        # Undo appears only while there is something recent to restore.
+        try:
+            undo_count = int(data.get("undo_count") or 0)
+        except (TypeError, ValueError):
+            undo_count = 0
+        self.undo_btn.setVisible(undo_count > 0)
 
         if last:
             age = max(0, int(time.time() - last))
@@ -934,6 +947,19 @@ class StatusTab(QWidget):
         # The confirmation alone only lifts the safety guard: without a sync
         # request the pending deletions would stay queued until the next poll.
         self.engine.sync_now()
+
+    def _undo_deletions(self) -> None:
+        result = self.engine.undo_deletions()
+        if not isinstance(result, dict):
+            return
+        restored = int(result.get("restored") or 0)
+        self.sync_feedback_label.setText(
+            t("status.undo_done", count=restored) if restored
+            else t("status.undo_empty")
+        )
+        self.sync_feedback_label.show()
+        if self._last_assurance:
+            self._refresh_assurance(self._last_assurance)
 
     def _on_devices_done(self, devices, exc: Exception | None) -> None:
         if exc is not None or not devices:

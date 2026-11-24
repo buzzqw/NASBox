@@ -479,6 +479,14 @@ class PullWorker(TransferWorker):
                                     # check and the conditional repair. Keep it
                                     # in the rsync set so the current version wins.
                                     continue
+                                if any(
+                                    item.direction == "delete_remote"
+                                    for item in repair.items
+                                ):
+                                    try:
+                                        self.sync_state.record_undo([path], run_ts)
+                                    except (OSError, RuntimeError, TypeError):
+                                        pass
                             local_fp = self.sync_state.fingerprint(Path(self.cfg.local_root(), path))
                             baseline = baselines.get(path)
                             if local_fp is None or (

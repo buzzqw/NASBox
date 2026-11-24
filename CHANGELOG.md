@@ -4,6 +4,17 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 1.34.0 - 2026-11-24
+
+- **Undo stile Rewind**: le cancellazioni recenti vengono registrate nel DB
+  locale con la loro versione nel cestino; il pulsante "Annulla eliminazioni
+  recenti" ripristina i file dal NAS in batch streaming, senza nuovi servizi.
+- Nuovo verbo server `--restore-batch` (3.25.0): sposta i file dal cestino al
+  loro percorso e aggiorna journal e manifest, sempre con il lock globale e con
+  memoria costante (adatto al NAS ARM da 1 GB).
+- L'anteprima di sicurezza include ora le informazioni necessarie a capire se
+  una cancellazione è un errore e come annullarla.
+
 ## 1.33.0 - 2026-11-24
 
 - Intelligenza lato client nella guardia alle cancellazioni: i percorsi spiegati

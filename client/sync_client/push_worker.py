@@ -610,6 +610,14 @@ class PushWorker(TransferWorker):
                 delete_safety.shared().record(
                     self.cfg, len(delete_result.completed_paths), "upload",
                 )
+                deleted_paths = [
+                    item.path for item in delete_result.items
+                    if item.direction == "delete_remote"
+                ]
+                try:
+                    self.sync_state.record_undo(deleted_paths, chunk_run_ts)
+                except (OSError, RuntimeError, TypeError):
+                    pass
             for path in sorted(delete_result.stale_paths):
                 self._log(
                     "STALE_DELETE", path,

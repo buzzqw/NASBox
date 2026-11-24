@@ -33,7 +33,7 @@
 #
 set -uo pipefail
 
-VERSION="3.24.0"
+VERSION="3.25.0"
 SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -1522,6 +1522,98 @@ cmd_checked_delete() {
             rm -f "$txfile"
             printf '%s\0ERROR\0' "$path"
         fi
+    done
+    flock -u 9
+    exec 9>&-
+}
+
+# Restore previously deleted files from .sync-trash. The client sends a small
+# NUL-delimited batch; this verb only streams results and appends a PUT entry to
+# the journal per restored file. No graph, no daemon, no in-memory index: the
+# same streaming shape as --checked-delete, suitable for the 1 GB ARM NAS.
+cmd_restore_batch() {
+    local magic device count index path version search_dir prefix candidate newest
+    local target backup digest size mtime tmp_payload txid
+    local -a paths versions
+    IFS= read -r -d '' magic || return 1
+    IFS= read -r -d '' device || return 1
+    IFS= read -r -d '' count || return 1
+    [[ "$magic" == "RESTORE_BATCH_V1" ]] || return 1
+    [[ "$device" =~ ^[A-Za-z0-9._:-]{1,128}$ ]] || return 1
+    [[ "$count" =~ ^[0-9]+$ && "$count" -le 1000 ]] || return 1
+    for ((index = 0; index < count; index++)); do
+        IFS= read -r -d '' path || return 1
+        IFS= read -r -d '' version || return 1
+        valid_sync_relative_path "$path" || return 1
+        [[ "$version" == "latest" || "$version" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}--[0-9]{2}-[0-9]{2}-[0-9]{2}-[0-9]{6}Z$ ]] || return 1
+        paths[index]="$path"
+        versions[index]="$version"
+    done
+
+    require_sync_transfer_owner "$device" || return $?
+    exec 9>"$JOURNAL_LOCK_FILE"
+    flock -x 9 || { exec 9>&-; return 1; }
+    ensure_journal_files
+    recover_pending_transactions_unlocked || { flock -u 9; exec 9>&-; return 1; }
+    printf 'RESTORE_BATCH_V1\0%s\0' "$count"
+    local trash="$SHARE_ROOT/$TRASH_DIRNAME"
+    for ((index = 0; index < count; index++)); do
+        path="${paths[index]}"
+        version="${versions[index]}"
+        prefix="${path##*/}-"
+        if [[ "${path%/*}" == "$path" ]]; then
+            search_dir="$trash"
+        else
+            search_dir="$trash/${path%/*}"
+        fi
+        newest=""
+        if [[ -d "$search_dir" ]]; then
+            while IFS= read -r -d '' candidate; do
+                [[ "${candidate##*/}" == "$prefix"* ]] || continue
+                if [[ "$version" != "latest" && "${candidate##*/}" != "$prefix$version" ]]; then
+                    continue
+                fi
+                if [[ -z "$newest" || "${candidate##*/}" > "${newest##*/}" ]]; then
+                    newest="$candidate"
+                fi
+            done < <(find "$search_dir" -maxdepth 1 -type f -print0 2>/dev/null)
+        fi
+        if [[ -z "$newest" ]]; then
+            printf '%s\0NO_VERSION\0' "$path"
+            continue
+        fi
+        target="$SHARE_ROOT/$path"
+        if [[ -e "$target" || -L "$target" ]]; then
+            printf '%s\0EXISTS\0' "$path"
+            continue
+        fi
+        mkdir -p "${target%/*}" || { printf '%s\0ERROR\0' "$path"; continue; }
+        if ! mv "$newest" "$target"; then
+            printf '%s\0ERROR\0' "$path"
+            continue
+        fi
+        digest=$(portable_sha256 "$target" || true)
+        size=$(portable_file_size "$target" || true)
+        mtime=$(portable_file_mtime "$target" || true)
+        [[ "$digest" =~ ^[0-9a-f]{64}$ && "$size" =~ ^[0-9]+$ && "$mtime" =~ ^[0-9]+$ ]] || {
+            mv "$target" "$newest" 2>/dev/null || true
+            printf '%s\0ERROR\0' "$path"
+            continue
+        }
+        tmp_payload="${TRANSACTION_DIR}/restore-${RANDOM}.paths"
+        if ! printf '%s\0%s\0%s\0%s\0' "$path" "$digest" "$size" "$((mtime * 1000000000))" > "$tmp_payload"; then
+            mv "$target" "$newest" 2>/dev/null || true
+            printf '%s\0ERROR\0' "$path"
+            continue
+        fi
+        txid="restore-$(date +%s)-${index}-${RANDOM}"
+        if append_put_journal_batch_unlocked "$tmp_payload" "$device" "$txid" "STAGING_PUBLISH_V1"; then
+            printf '%s\0RESTORED\0' "$path"
+        else
+            mv "$target" "$newest" 2>/dev/null || true
+            printf '%s\0ERROR\0' "$path"
+        fi
+        rm -f "$tmp_payload"
     done
     flock -u 9
     exec 9>&-
@@ -3018,6 +3110,7 @@ Uso:
   $(basename "$0") --manifest-get PATH          Legge lo stato di un percorso
   $(basename "$0") --file-states               Stato batch file/tombstone (input/output NUL)
    $(basename "$0") --checked-delete            Cancella solo la baseline attesa (input/output NUL)
+   $(basename "$0") --restore-batch             Ripristina file dal cestino (input/output NUL)
    $(basename "$0") --staging-publish           Pubblica nuovi file staged (input/output NUL, lock client richiesto)
   $(basename "$0") --journal-status             Stato e dimensione journal/manifest
   $(basename "$0") --history-list              Elenco NUL dello storico sul NAS (per il client)
@@ -3057,6 +3150,7 @@ while [[ $# -gt 0 ]]; do
         --file-states) ACTION="file_states" ;;
         --file-states-current) ACTION="file_states_current" ;;
         --checked-delete) ACTION="checked_delete" ;;
+        --restore-batch) ACTION="restore_batch" ;;
         --staging-publish) ACTION="staging_publish" ;;
         --browse-list) shift; BROWSE_PATH="${1:-}"; ACTION="browse_list" ;;
         --browse-delete) ACTION="browse_delete" ;;
@@ -3115,6 +3209,7 @@ case "$ACTION" in
     file_states) cmd_file_states; exit $? ;;
     file_states_current) cmd_file_states false; exit $? ;;
     checked_delete) cmd_checked_delete; exit $? ;;
+    restore_batch) cmd_restore_batch; exit $? ;;
     staging_publish) cmd_staging_publish; exit $? ;;
     browse_list) cmd_browse_list "$BROWSE_PATH"; exit $? ;;
     browse_delete) cmd_browse_delete; exit $? ;;
