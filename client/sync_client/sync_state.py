@@ -218,6 +218,83 @@ class SyncStateStore:
                 )
             }
 
+    def backfill_identities(
+        self, local_root: str,
+        is_excluded: Callable[[str], bool] | None = None,
+        on_progress: Callable[[int, int], None] | None = None,
+    ) -> int:
+        """Record ``lstat`` identity for every local file, without hashing.
+
+        A full pass costs one directory walk and a few stat calls per file, but
+        it lets the classifier explain renames across the whole tree instead of
+        only the files that happened to be pushed recently.
+        """
+        root = Path(local_root)
+        repository = self._repository()
+        observed_at = time.time()
+        with self._lock, self._connection() as conn:
+            known = {
+                row[0]: row[1]
+                for row in conn.execute(
+                    "SELECT path, digest FROM entry WHERE repository = ?",
+                    (repository,),
+                )
+            }
+        rows: list[tuple] = []
+        stack: list[str] = [""]
+        seen = 0
+        while stack:
+            relative_dir = stack.pop()
+            try:
+                with os.scandir(root / relative_dir) as entries:
+                    for entry in entries:
+                        relative_path = (
+                            f"{relative_dir}/{entry.name}" if relative_dir else entry.name
+                        )
+                        if is_excluded is not None and is_excluded(relative_path):
+                            continue
+                        try:
+                            if entry.is_dir(follow_symlinks=False):
+                                stack.append(relative_path)
+                                continue
+                            if not entry.is_file(follow_symlinks=False):
+                                continue
+                            info = entry.stat(follow_symlinks=False)
+                        except OSError:
+                            continue
+                        seen += 1
+                        stat_key = (
+                            info.st_dev, info.st_ino, info.st_size,
+                            info.st_mtime_ns, info.st_ctime_ns,
+                        )
+                        with _stat_digest_cache_lock:
+                            digest = _stat_digest_cache.get(stat_key)
+                        rows.append((
+                            repository, relative_path, info.st_dev, info.st_ino,
+                            info.st_ctime_ns, info.st_size, info.st_mtime_ns,
+                            digest or known.get(relative_path), observed_at,
+                        ))
+            except OSError:
+                continue
+        if rows:
+            with self._lock, self._connection() as conn:
+                conn.executemany(
+                    """
+                    INSERT INTO file_identity(
+                        repository, path, dev, ino, ctime_ns, size, mtime_ns, digest, observed_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(repository, path) DO UPDATE SET
+                        dev=excluded.dev, ino=excluded.ino, ctime_ns=excluded.ctime_ns,
+                        size=excluded.size, mtime_ns=excluded.mtime_ns,
+                        digest=COALESCE(excluded.digest, file_identity.digest),
+                        observed_at=excluded.observed_at
+                    """,
+                    rows,
+                )
+                if on_progress is not None:
+                    on_progress(len(rows), seen)
+        return len(rows)
+
     def record_undo(self, paths, version_ts: str, batch_id: str | None = None) -> None:
         """Remember what a delete batch moved to the NAS trash, for later undo."""
         paths = list(paths)

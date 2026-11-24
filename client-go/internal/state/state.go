@@ -156,6 +156,107 @@ func (s *Store) RecordIdentities(repository, root string, digests map[string]str
 	return tx.Commit()
 }
 
+// BackfillIdentities records lstat identity for the whole local tree, without
+// hashing file contents. Digests already known in `entry` are preserved.
+func (s *Store) BackfillIdentities(
+	repository, root string,
+	excluded func(string) bool,
+	progress func(int, int),
+) (int, error) {
+	known := map[string]string{}
+	rows, err := s.db.Query(`SELECT path, digest FROM entry WHERE repository = ?`, repository)
+	if err != nil {
+		return 0, err
+	}
+	for rows.Next() {
+		var path string
+		var digest sql.NullString
+		if err := rows.Scan(&path, &digest); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		if digest.Valid {
+			known[path] = digest.String
+		}
+	}
+	rows.Close()
+
+	type identityRow struct {
+		path, digest                     string
+		dev, ino, ctimeNS, size, mtimeNS int64
+	}
+	collected := make([]identityRow, 0, 1024)
+	seen := 0
+	err = filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return nil
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return nil
+		}
+		rel = filepath.ToSlash(rel)
+		if rel == "." {
+			return nil
+		}
+		if excluded != nil && excluded(rel) {
+			if entry.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if entry.IsDir() || !entry.Type().IsRegular() {
+			return nil
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return nil
+		}
+		stat := statInfo(info)
+		seen++
+		collected = append(collected, identityRow{
+			path: rel, digest: known[rel], dev: stat.dev, ino: stat.ino,
+			ctimeNS: stat.ctimeNS, size: stat.size, mtimeNS: stat.mtimeNS,
+		})
+		return nil
+	})
+	if err != nil {
+		return 0, err
+	}
+	if len(collected) == 0 {
+		return 0, nil
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	stmt, err := tx.Prepare(`
+		INSERT INTO file_identity(repository, path, dev, ino, ctime_ns, size, mtime_ns, digest, observed_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(repository, path) DO UPDATE SET
+			dev=excluded.dev, ino=excluded.ino, ctime_ns=excluded.ctime_ns,
+			size=excluded.size, mtime_ns=excluded.mtime_ns,
+			digest=COALESCE(excluded.digest, file_identity.digest),
+			observed_at=excluded.observed_at
+	`)
+	if err != nil {
+		return 0, err
+	}
+	defer stmt.Close()
+	now := float64(time.Now().UnixNano()) / 1e9
+	for _, row := range collected {
+		if _, err := stmt.Exec(repository, row.path, row.dev, row.ino, row.ctimeNS,
+			row.size, row.mtimeNS, row.digest, now); err != nil {
+			return 0, err
+		}
+	}
+	if progress != nil {
+		progress(len(collected), seen)
+	}
+	return len(collected), tx.Commit()
+}
+
 // IdentitySnapshot returns all known local identities for a repository.
 func (s *Store) IdentitySnapshot(repository string) (map[string]Identity, error) {
 	rows, err := s.db.Query(`

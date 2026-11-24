@@ -25,11 +25,34 @@ binario.
 | Fase | Contenuto | Stato |
 |---|---|---|
 | 0 | Struttura modulo, i18n embed, classificatore portato | completata |
-| 1 | Config compatibile, SQLite condiviso, parser manifest, anteprima CLI, guardia e undo nel DB | **in corso** |
-| 1b | Trasferimenti reali (ssh/rsync), lock, journal, UI nativa | da fare |
-| 2 | UI nativa (tab, tray, notifiche) X11 + Wayland, parità con PyQt6 | da fare |
-| 3 | Canale di aggiornamento separato, rollout graduale | da fare |
-| 4 | Rimozione del client Python | da fare |
+| 1 | Config compatibile, SQLite condiviso, parser manifest, anteprima CLI, guardia, undo, ssh/rsync, lock | completata |
+| 2 | UI nativa Fyne (tab, tray) con backend X11 + Wayland | completata (base) |
+| 3 | Canale di aggiornamento separato `manifest-go.json` | completata |
+| 4 | Rollout graduale, parità UI completa, rimozione del client Python | da fare |
+
+## Canale di aggiornamento Go
+
+Il client Go **non legge mai** `manifest.json` del Python. Usa
+`manifest-go.json` dentro `.nasbox-client-update-go/` (config
+`client_update_remote_path_go`). Pubblicazione:
+
+```bash
+cd /volume1/Varie/sync-daemon
+python3 tools/publish_go_client.py \
+    --binary /tmp/nasbox-go-0.1.0 \
+    --dest-dir /volume1/NASBox/.nasbox-client-update-go \
+    --notes "prima build Go"
+```
+
+Verifica dal client: `nasbox update-check`. La verifica sha256 e della
+dimensione avviene prima di rendere utilizzabile l'artifact.
+
+## Display: X11 e Wayland
+
+`go_display_backend` (`auto`, `x11`, `wayland`) seleziona `FYNE_BACKEND` prima
+di creare la finestra. Con `auto` viene scelto `wayland` se è impostato
+`WAYLAND_DISPLAY`, altrimenti `x11`. Entrambi i backend sono supportati dal
+toolkit Fyne; il client non usa Qt o WebView.
 
 ## Struttura
 

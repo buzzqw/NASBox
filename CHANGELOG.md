@@ -4,6 +4,13 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 1.35.1 - 2026-11-24
+
+- Backfill dell'identità filesystem dell'intero albero locale (solo `stat`,
+  nessun hashing): la classificazione riconosce gli spostamenti di cartelle
+  anche per file mai inviati in precedenza, riducendo i falsi positivi nella
+  guardia alle cancellazioni.
+
 ## 1.35.0 - 2026-11-24
 
 - **Anteprima modifiche**: quando una cancellazione viene bloccata, lo Stato

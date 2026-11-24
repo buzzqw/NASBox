@@ -12,6 +12,9 @@ import (
 	"nasbox-go/internal/engine"
 	"nasbox-go/internal/remote"
 	"nasbox-go/internal/state"
+	"nasbox-go/internal/transfer"
+	"nasbox-go/internal/ui"
+	"nasbox-go/internal/update"
 	"nasbox-go/internal/version"
 )
 
@@ -29,6 +32,14 @@ func main() {
 		doctor(args)
 	case "preview":
 		preview(args)
+	case "sync":
+		syncOnce(args)
+	case "undo":
+		undoDeletions(args)
+	case "gui":
+		gui(args)
+	case "update-check":
+		updateCheck(args)
 	default:
 		usage()
 		os.Exit(2)
@@ -36,7 +47,7 @@ func main() {
 }
 
 func usage() {
-	fmt.Println("uso: nasbox <version|doctor|preview> [opzioni]")
+	fmt.Println("uso: nasbox <version|doctor|preview|sync|undo|gui|update-check> [opzioni]")
 }
 
 func loadConfig(args []string) (*config.Config, error) {
@@ -68,6 +79,115 @@ func doctor(args []string) {
 	fmt.Printf("repository:  %s\n", cfg.RepositoryID())
 	fmt.Printf("tracked:     %d\n", store.EntryCount(cfg.RepositoryID()))
 	fmt.Printf("undo count:  %d\n", store.UndoCount(cfg.RepositoryID(), 24))
+}
+
+func updateCheck(args []string) {
+	cfg, err := loadConfig(args)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	manifest, err := update.Newest(cfg, remote.New(cfg))
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	fmt.Printf("canale Go: %s %s\n", manifest.Channel, manifest.Version)
+	if update.Available(manifest) {
+		fmt.Printf("aggiornamento disponibile: %s -> %s\n", version.AppVersion, manifest.Version)
+		if manifest.Notes != "" {
+			fmt.Println(manifest.Notes)
+		}
+	} else {
+		fmt.Println("nessun aggiornamento")
+	}
+}
+
+func gui(args []string) {
+	cfg, err := loadConfig(args)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	store, err := state.Open(cfg)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	defer store.Close()
+	ui.Run(cfg, store)
+}
+
+func syncOnce(args []string) {
+	cfg, err := loadConfig(args)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	store, err := state.Open(cfg)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	defer store.Close()
+	client := remote.New(cfg)
+	result, err := engine.SyncOnce(cfg, store, client, transfer.New(cfg, client))
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	if result.Blocked != "" {
+		fmt.Println("BLOCCATO:", result.Blocked)
+		return
+	}
+	fmt.Printf("caricati %d, cancellati %d, spostamenti rilevati %d\n",
+		result.Uploaded, result.Deleted, result.Renames)
+}
+
+func undoDeletions(args []string) {
+	cfg, err := loadConfig(args)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	store, err := state.Open(cfg)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	defer store.Close()
+	entries, err := store.RecentUndo(cfg.RepositoryID(), 24, 500)
+	if err != nil || len(entries) == 0 {
+		fmt.Println("nessuna eliminazione recente da annullare")
+		return
+	}
+	batches := map[string][]remote.RestoreRequest{}
+	for _, item := range entries {
+		batches[item.BatchID] = append(batches[item.BatchID], remote.RestoreRequest{
+			Path: item.Path, VersionTS: item.VersionTS,
+		})
+	}
+	client := remote.New(cfg)
+	device := store.DeviceID()
+	restored := 0
+	for batchID, requests := range batches {
+		statuses, err := client.RestoreBatch(requests, device)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			continue
+		}
+		done := []string{}
+		for path, status := range statuses {
+			if status == "RESTORED" {
+				done = append(done, path)
+			}
+		}
+		if len(done) > 0 {
+			_ = store.MarkUndoApplied(cfg.RepositoryID(), batchID, done)
+			restored += len(done)
+		}
+	}
+	fmt.Printf("recuperati %d file dal cestino NAS\n", restored)
 }
 
 func preview(args []string) {

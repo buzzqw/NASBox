@@ -91,6 +91,7 @@ class SyncEngine(QThread):
         self._last_integrity_check = 0.0
         self._started_at = time.time()
         self._assurance_cache: tuple[float, int] | None = None
+        self._identity_backfilled = False
         self._offered_server_update = ""
         self._server_health = "unknown"
 
@@ -543,6 +544,15 @@ class SyncEngine(QThread):
     def _tick(self) -> None:
         now = time.time()
         self._reconcile_watcher()
+        if not self._identity_backfilled and now - self._started_at >= 5:
+            self._identity_backfilled = True
+            try:
+                self.sync_state.backfill_identities(
+                    self.cfg.local_root(),
+                    lambda path: rsync_ops.path_is_excluded(self.cfg, path),
+                )
+            except (AttributeError, OSError, RuntimeError, TypeError):
+                pass
         self._maybe_integrity_check(now)
         self._maybe_full_audit(now)
         self._maybe_refresh_devices(now)

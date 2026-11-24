@@ -127,3 +127,4 @@ func (c *Config) Save() error {
 func (c *Config) LocalRoot() string    { return c.String("local_root") }
 func (c *Config) RemoteScript() string { return c.String("remote_server_script") }
 func (c *Config) RepositoryID() string { return c.String("repository_id") }
+func (c *Config) RemotePrefix() string { return c.String("remote_prefix") }

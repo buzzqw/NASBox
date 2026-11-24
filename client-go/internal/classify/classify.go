@@ -9,9 +9,10 @@ import (
 )
 
 type RemoteState struct {
-	Kind   string // "FILE" or "TOMBSTONE"
-	Digest string
-	Size   int64
+	Kind    string // "FILE" or "TOMBSTONE"
+	Digest  string
+	Size    int64
+	MTimeNS int64
 }
 
 type Identity struct {
