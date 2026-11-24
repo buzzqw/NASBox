@@ -4,14 +4,19 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"os"
+	"runtime"
+	"strconv"
+	"strings"
 	"time"
 
 	"nasbox-go/internal/config"
 	"nasbox-go/internal/deletesafety"
+	"nasbox-go/internal/diagnostics"
 	"nasbox-go/internal/engine"
 	"nasbox-go/internal/history"
 	"nasbox-go/internal/instance"
@@ -36,7 +41,9 @@ func main() {
 	case "version":
 		fmt.Printf("%s %s\n", version.AppName, version.AppVersion)
 	case "doctor":
-		doctor(args)
+		os.Exit(doctor(args))
+	case "diagnostics-bundle":
+		os.Exit(diagnosticsBundle(args))
 	case "preview":
 		preview(args)
 	case "sync":
@@ -72,7 +79,7 @@ func main() {
 }
 
 func usage() {
-	fmt.Println("uso: nasbox <version|doctor|preview|sync|undo|confirm-delete|browse-download|remote-history|remote-restore|prune-trash|audit|server-check|bootstrap-check|gui|update-check|update-install> [opzioni]")
+	fmt.Println("uso: nasbox <version|doctor|diagnostics-bundle|preview|sync|undo|confirm-delete|browse-download|remote-history|remote-restore|prune-trash|audit|server-check|bootstrap-check|gui|update-check|update-install> [opzioni]")
 }
 
 func bootstrapConfig(cfg *config.Config) error {
@@ -127,23 +134,392 @@ func loadConfig(args []string) (*config.Config, error) {
 	return config.Load()
 }
 
-func doctor(args []string) {
-	cfg, err := loadConfig(args)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+type doctorReport struct {
+	Version          string              `json:"version"`
+	ConfigPath       string              `json:"config_path"`
+	LocalRoot        string              `json:"local_root"`
+	Repository       string              `json:"repository"`
+	Tracked          int                 `json:"tracked"`
+	Undo             int                 `json:"undo"`
+	LastErrors       []diagnostics.Entry `json:"last_errors"`
+	ServerVersion    string              `json:"server_version,omitempty"`
+	ServerReachable  bool                `json:"server_reachable"`
+	ServerError      string              `json:"server_error,omitempty"`
+	Lock             doctorLockReport    `json:"lock"`
+	Error            string              `json:"error,omitempty"`
+	DiagnosticsError string              `json:"diagnostics_error,omitempty"`
+}
+
+type doctorLockReport struct {
+	Local  diagnostics.LocalLockStatus `json:"local"`
+	Remote remoteLockReport            `json:"remote"`
+}
+
+type remoteLockReport struct {
+	State         string `json:"state"`
+	File          string `json:"file,omitempty"`
+	AgeSeconds    int64  `json:"age_seconds"`
+	OwnerID       string `json:"owner_id,omitempty"`
+	OwnerHost     string `json:"owner_host,omitempty"`
+	OwnerPID      string `json:"owner_pid,omitempty"`
+	StartedAt     string `json:"started_at,omitempty"`
+	Phase         string `json:"phase,omitempty"`
+	ProgressDone  int64  `json:"progress_done"`
+	ProgressTotal int64  `json:"progress_total"`
+	Error         string `json:"error,omitempty"`
+}
+
+type serverProbe struct {
+	Version    string
+	Reachable  bool
+	Error      string
+	RemoteLock remoteLockReport
+}
+
+func doctor(args []string) int {
+	flags := flag.NewFlagSet("doctor", flag.ContinueOnError)
+	jsonOutput := flags.Bool("json", false, "emetti un report JSON")
+	cfgPath := flags.String("config", "", "percorso di client.json")
+	if err := flags.Parse(args); err != nil {
+		return 2
 	}
+	if flags.NArg() != 0 {
+		fmt.Fprintln(os.Stderr, "uso: nasbox doctor [--json] [--config <file>]")
+		return 2
+	}
+
+	report := doctorReport{
+		Version:    version.AppVersion,
+		LastErrors: make([]diagnostics.Entry, 0),
+		Lock: doctorLockReport{
+			Remote: remoteLockReport{State: "unknown"},
+		},
+	}
+	if *cfgPath != "" {
+		report.ConfigPath = *cfgPath
+	} else {
+		report.ConfigPath = config.DefaultPath()
+	}
+
+	logger, logErr := diagnostics.Open()
+	if logErr != nil {
+		report.DiagnosticsError = logErr.Error()
+	} else {
+		defer logger.Close()
+		entries, recentErr := recentErrors(logger)
+		if recentErr != nil {
+			report.DiagnosticsError = recentErr.Error()
+		} else {
+			report.LastErrors = entries
+		}
+	}
+	stateDir, dirErr := diagnostics.DefaultDir()
+	if logger != nil {
+		stateDir = logger.Dir()
+	}
+	if dirErr != nil {
+		report.Lock.Local = diagnostics.LocalLockStatus{State: "unknown", Error: dirErr.Error()}
+	} else {
+		report.Lock.Local = diagnostics.ProbeLocalLock(stateDir)
+	}
+
+	var cfg *config.Config
+	var err error
+	if *cfgPath != "" {
+		cfg, err = config.LoadFrom(*cfgPath)
+	} else {
+		cfg, err = config.Load()
+	}
+	if err != nil {
+		report.Error = err.Error()
+		if diagnosticErr := recordDiagnostic(logger, "DOCTOR_ERROR", report.ConfigPath, report.Error); diagnosticErr != nil {
+			report.DiagnosticsError = diagnosticErr.Error()
+		}
+		if writeErr := writeDoctorReport(report, *jsonOutput); writeErr != nil {
+			fmt.Fprintln(os.Stderr, writeErr)
+		}
+		return 1
+	}
+
 	store, err := state.Open(cfg)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		report.Error = err.Error()
+	} else {
+		defer store.Close()
+		repositoryID := cfg.LocalRepositoryID()
+		report.LocalRoot = cfg.LocalRoot()
+		report.Repository = cfg.RepositoryID()
+		report.Tracked = store.EntryCount(repositoryID)
+		report.Undo = store.UndoCount(repositoryID, 24)
 	}
-	defer store.Close()
-	fmt.Printf("config:      %s\n", cfg.Path)
-	fmt.Printf("local root:  %s\n", cfg.LocalRoot())
-	fmt.Printf("repository:  %s\n", cfg.RepositoryID())
-	fmt.Printf("tracked:     %d\n", store.EntryCount(cfg.LocalRepositoryID()))
-	fmt.Printf("undo count:  %d\n", store.UndoCount(cfg.LocalRepositoryID(), 24))
+
+	probe := probeServer(cfg)
+	report.ServerVersion = probe.Version
+	report.ServerReachable = probe.Reachable
+	report.ServerError = probe.Error
+	report.Lock.Remote = probe.RemoteLock
+	if !probe.Reachable && probe.Error != "" {
+		report.Lock.Remote.Error = probe.Error
+	}
+
+	action := "DOCTOR"
+	if report.Error != "" {
+		action = "DOCTOR_ERROR"
+	}
+	if diagnosticErr := recordDiagnostic(logger, action, report.ConfigPath, report.Error); diagnosticErr != nil {
+		report.DiagnosticsError = diagnosticErr.Error()
+	}
+	if err := writeDoctorReport(report, *jsonOutput); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	if report.Error != "" {
+		return 1
+	}
+	return 0
+}
+
+func recentErrors(logger *diagnostics.Logger) ([]diagnostics.Entry, error) {
+	errors := make([]diagnostics.Entry, 0)
+	if logger == nil {
+		return errors, nil
+	}
+	entries, err := logger.Recent(500)
+	if err != nil {
+		return nil, err
+	}
+	for index := len(entries) - 1; index >= 0 && len(errors) < 20; index-- {
+		if entries[index].Level == "ERROR" {
+			errors = append(errors, entries[index])
+		}
+	}
+	return errors, nil
+}
+
+func probeServer(cfg *config.Config) serverProbe {
+	probe := serverProbe{
+		RemoteLock: remoteLockReport{State: "unknown"},
+	}
+	if cfg == nil {
+		probe.Error = "configurazione non disponibile"
+		return probe
+	}
+	if strings.TrimSpace(cfg.String("nas_lan")) == "" &&
+		strings.TrimSpace(cfg.String("nas_wan")) == "" &&
+		strings.TrimSpace(cfg.String("jump_host")) == "" {
+		probe.Error = "NAS non configurato"
+		return probe
+	}
+	if strings.TrimSpace(cfg.RemoteScript()) == "" {
+		probe.Error = "script server non configurato"
+		return probe
+	}
+	client, err := remote.NewResolved(cfg)
+	if err != nil {
+		probe.Error = err.Error()
+		return probe
+	}
+	values, err := client.PrintConfig()
+	if err != nil {
+		probe.Error = err.Error()
+		return probe
+	}
+	probe.Reachable = true
+	probe.Version = strings.TrimSpace(values["VERSION"])
+	if probe.Version == "" {
+		probe.Error = "versione server sconosciuta"
+	}
+	probe.RemoteLock = remoteLockFromValues(values)
+	return probe
+}
+
+func remoteLockFromValues(values map[string]string) remoteLockReport {
+	status := remoteLockReport{
+		State:     "unknown",
+		File:      values["SYNC_LOCK_FILE"],
+		OwnerID:   values["SYNC_LOCK_OWNER_ID"],
+		OwnerHost: values["SYNC_LOCK_OWNER_HOST"],
+		OwnerPID:  values["SYNC_LOCK_OWNER_PID"],
+		StartedAt: values["SYNC_LOCK_STARTED_AT"],
+		Phase:     values["SYNC_LOCK_PHASE"],
+	}
+	switch strings.ToLower(strings.TrimSpace(values["SYNC_LOCK_HELD"])) {
+	case "true":
+		status.State = "held"
+	case "false":
+		status.State = "free"
+	}
+	status.AgeSeconds, _ = strconv.ParseInt(values["SYNC_LOCK_AGE_SECONDS"], 10, 64)
+	status.ProgressDone, _ = strconv.ParseInt(values["SYNC_LOCK_PROGRESS_DONE"], 10, 64)
+	status.ProgressTotal, _ = strconv.ParseInt(values["SYNC_LOCK_PROGRESS_TOTAL"], 10, 64)
+	return status
+}
+
+func recordDiagnostic(logger *diagnostics.Logger, action, path, detail string) error {
+	if logger == nil {
+		return nil
+	}
+	if err := logger.Log(action, path, detail); err != nil {
+		return err
+	}
+	return logger.Event(action, path, detail)
+}
+
+func writeDoctorReport(report doctorReport, asJSON bool) error {
+	if asJSON {
+		encoder := json.NewEncoder(os.Stdout)
+		encoder.SetIndent("", "  ")
+		return encoder.Encode(report)
+	}
+	fmt.Printf("version:     %s\n", report.Version)
+	fmt.Printf("config:      %s\n", report.ConfigPath)
+	fmt.Printf("local root:  %s\n", report.LocalRoot)
+	fmt.Printf("repository:  %s\n", report.Repository)
+	fmt.Printf("tracked:     %d\n", report.Tracked)
+	fmt.Printf("undo count:  %d\n", report.Undo)
+	if len(report.LastErrors) == 0 {
+		fmt.Println("ultimi errori: nessuno")
+	} else {
+		fmt.Println("ultimi errori:")
+		for _, entry := range report.LastErrors {
+			fmt.Printf("  %s [%s] %s %s %s\n",
+				entry.Timestamp.Format(time.RFC3339), entry.Level, entry.Action,
+				entry.Path, strings.Join(strings.Fields(entry.Detail), " "))
+		}
+	}
+	if report.ServerReachable {
+		fmt.Printf("server:      %s (raggiungibile)\n", report.ServerVersion)
+	} else {
+		fmt.Printf("server:      non raggiungibile: %s\n", report.ServerError)
+	}
+	fmt.Printf("lock locale: %s", report.Lock.Local.State)
+	if report.Lock.Local.Error != "" {
+		fmt.Printf(" (%s)", report.Lock.Local.Error)
+	}
+	fmt.Println()
+	fmt.Printf("lock NAS:    %s\n", formatRemoteLock(report.Lock.Remote))
+	if report.Error != "" {
+		fmt.Println("errore:", report.Error)
+	}
+	if report.DiagnosticsError != "" {
+		fmt.Println("diagnostica:", report.DiagnosticsError)
+	}
+	return nil
+}
+
+func formatRemoteLock(status remoteLockReport) string {
+	if status.State == "held" {
+		owner := strings.Join(nonempty(status.OwnerID, status.OwnerHost, status.OwnerPID), " / ")
+		if owner == "" {
+			owner = "sconosciuto"
+		}
+		if status.Phase != "" {
+			owner += " (" + status.Phase + ")"
+		}
+		if status.ProgressTotal > 0 {
+			owner += fmt.Sprintf(" %d/%d", status.ProgressDone, status.ProgressTotal)
+		}
+		return fmt.Sprintf("occupato da %s da %d secondi", owner, status.AgeSeconds)
+	}
+	if status.Error != "" {
+		return status.State + ": " + status.Error
+	}
+	return status.State
+}
+
+func nonempty(values ...string) []string {
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			result = append(result, value)
+		}
+	}
+	return result
+}
+
+func diagnosticsBundle(args []string) int {
+	flags := flag.NewFlagSet("diagnostics-bundle", flag.ContinueOnError)
+	output := flags.String("output", "", "percorso del tar.gz da creare")
+	cfgPath := flags.String("config", "", "percorso di client.json")
+	if err := flags.Parse(args); err != nil {
+		return 2
+	}
+	if flags.NArg() != 0 || strings.TrimSpace(*output) == "" {
+		fmt.Fprintln(os.Stderr, "uso: nasbox diagnostics-bundle --output <file> [--config <file>]")
+		return 2
+	}
+
+	stateDir, dirErr := diagnostics.DefaultDir()
+	logger, logErr := diagnostics.Open()
+	warnings := make([]string, 0)
+	if logErr != nil {
+		warnings = append(warnings, "logger diagnostico non disponibile: "+logErr.Error())
+		fmt.Fprintln(os.Stderr, "avviso:", logErr)
+	} else {
+		defer logger.Close()
+		stateDir = logger.Dir()
+	}
+	if dirErr != nil {
+		fmt.Fprintln(os.Stderr, "directory diagnostica:", dirErr)
+		return 1
+	}
+
+	configPath := *cfgPath
+	if configPath == "" {
+		configPath = config.DefaultPath()
+	}
+	var cfg *config.Config
+	var err error
+	if *cfgPath != "" {
+		cfg, err = config.LoadFrom(*cfgPath)
+	} else {
+		cfg, err = config.Load()
+	}
+	if err != nil {
+		warnings = append(warnings, "configurazione non leggibile: "+err.Error())
+		fmt.Fprintln(os.Stderr, "avviso: configurazione non leggibile:", err)
+	}
+
+	versions := map[string]any{
+		"client_name":    version.AppName,
+		"client_version": version.AppVersion,
+		"go_version":     runtime.Version(),
+		"os":             runtime.GOOS,
+		"arch":           runtime.GOARCH,
+		"config_path":    configPath,
+	}
+	if cfg != nil {
+		versions["minimum_server_version"] = cfg.String("min_server_version")
+		probe := probeServer(cfg)
+		versions["server_version"] = probe.Version
+		versions["server_reachable"] = probe.Reachable
+		if probe.Error != "" {
+			versions["server_error"] = probe.Error
+		}
+	} else {
+		versions["server_reachable"] = false
+	}
+
+	if diagnosticErr := recordDiagnostic(logger, "DIAGNOSTICS_BUNDLE_START", *output, configPath); diagnosticErr != nil {
+		warnings = append(warnings, "scrittura evento di avvio non riuscita: "+diagnosticErr.Error())
+	}
+	err = diagnostics.CreateBundle(diagnostics.BundleOptions{
+		Output:     *output,
+		StateDir:   stateDir,
+		ConfigPath: configPath,
+		Versions:   versions,
+		Warnings:   warnings,
+	})
+	if err != nil {
+		_ = recordDiagnostic(logger, "DIAGNOSTICS_BUNDLE_ERROR", *output, err.Error())
+		fmt.Fprintln(os.Stderr, "creazione bundle diagnostico fallita:", err)
+		return 1
+	}
+	if diagnosticErr := recordDiagnostic(logger, "DIAGNOSTICS_BUNDLE", *output, "bundle tar.gz redatto creato"); diagnosticErr != nil {
+		fmt.Fprintln(os.Stderr, "avviso: bundle creato ma evento non registrabile:", diagnosticErr)
+	}
+	fmt.Println("bundle diagnostico:", *output)
+	return 0
 }
 
 func updateCheck(args []string) {

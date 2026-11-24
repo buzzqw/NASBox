@@ -4,12 +4,16 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"nasbox-go/internal/classify"
 	"nasbox-go/internal/config"
+	"nasbox-go/internal/conflicts"
+	"nasbox-go/internal/diagnostics"
 	"nasbox-go/internal/history"
 	"nasbox-go/internal/i18n"
 	"nasbox-go/internal/integrity"
@@ -44,19 +48,36 @@ type Runner struct {
 	transferCtx    context.Context
 	cancelTransfer context.CancelFunc
 	lastPrune      time.Time
+	lastFullSync   time.Time
 	nextMirror     time.Time
 	auditRunning   atomic.Bool
+
+	manifestMu       sync.Mutex
+	manifest         map[string]classify.RemoteState
+	manifestRevision int
+	storm            *conflicts.StormTracker
+	logger           *diagnostics.Logger
 }
 
 func NewRunner(
 	cfg *config.Config, store *state.Store, client ConfigSource, transfers Transferer,
+	loggers ...*diagnostics.Logger,
 ) *Runner {
 	ctx, cancel := context.WithCancel(context.Background())
-	return &Runner{
+	runner := &Runner{
 		cfg: cfg, store: store, client: client, transfers: transfers,
 		dirty: map[string]bool{}, events: make(chan Event, 64), wake: make(chan struct{}, 1),
 		transferCtx: ctx, cancelTransfer: cancel,
+		manifestRevision: -1,
+		storm: conflicts.NewStormTracker(conflicts.StormConfig{
+			ConflictStormLimit:         cfg.Int("conflict_storm_limit"),
+			ConflictStormWindowSeconds: cfg.Int("conflict_storm_window_seconds"),
+		}),
 	}
+	if len(loggers) > 0 {
+		runner.logger = loggers[0]
+	}
+	return runner
 }
 
 func (r *Runner) Events() <-chan Event { return r.events }
@@ -132,20 +153,17 @@ func (r *Runner) emit(kind, message string) {
 	case r.events <- Event{Kind: kind, Message: message}:
 	default:
 	}
+	if r.logger != nil {
+		action := strings.ToUpper(kind)
+		if kind == "status" {
+			action = "INFO"
+		}
+		r.logger.Log(action, "-", message)
+	}
 }
 
 func (r *Runner) excluded(relative string) bool {
-	for _, pattern := range r.cfg.Get("exclude_patterns").([]any) {
-		text, ok := pattern.(string)
-		if !ok {
-			continue
-		}
-		text = strings.TrimSuffix(text, "/")
-		if text != "" && (relative == text || strings.HasPrefix(relative, text+"/")) {
-			return true
-		}
-	}
-	return false
+	return excluded(r.cfg, relative)
 }
 
 // Run blocks until ctx is cancelled. Filesystem events and the periodic timer
@@ -158,6 +176,10 @@ func (r *Runner) Run(ctx context.Context) error {
 	interval := time.Duration(r.cfg.Int("poll_interval")) * time.Second
 	if interval <= 0 {
 		interval = 300 * time.Second
+	}
+	fullPullInterval := time.Duration(r.cfg.Int("full_pull_interval_seconds")) * time.Second
+	if fullPullInterval <= 0 {
+		fullPullInterval = 2 * time.Hour
 	}
 	mirrorInterval := time.Duration(r.cfg.Int("mirror_interval_seconds")) * time.Second
 	if mirrorInterval <= 0 {
@@ -177,7 +199,12 @@ func (r *Runner) Run(ctx context.Context) error {
 		case path := <-watcher.Events():
 			r.markDirty(path)
 		case <-ticker.C:
-			r.markDirty("")
+			r.mu.Lock()
+			fullDue := r.lastFullSync.IsZero() || time.Since(r.lastFullSync) >= fullPullInterval
+			r.mu.Unlock()
+			if fullDue {
+				r.markDirty("")
+			}
 		case <-mirrorTicker.C:
 			r.markDirty("")
 		case <-r.wake:
@@ -192,7 +219,13 @@ func (r *Runner) Run(ctx context.Context) error {
 			continue
 		}
 		paths := r.takeDirty()
-		_ = paths // SyncOnce reconciles the whole tree; paths only drive the wake-up.
+		fullPass := false
+		for _, path := range paths {
+			if path == "" {
+				fullPass = true
+				break
+			}
+		}
 		r.mu.Lock()
 		transferCtx := r.transferCtx
 		r.mu.Unlock()
@@ -214,7 +247,12 @@ func (r *Runner) Run(ctx context.Context) error {
 			}
 		}
 		r.emit("status", i18n.T("metrics.sync_busy_title", nil))
-		result, err := SyncOnce(r.cfg, r.store, r.client, r.transfers)
+		manifest, err := r.loadManifest(fullPass)
+		if err != nil {
+			r.handleFailure(err)
+			continue
+		}
+		result, err := SyncOnceWithManifest(r.cfg, r.store, r.client, r.transfers, manifest, r.storm)
 		if err != nil {
 			r.handleFailure(err)
 			continue
@@ -230,10 +268,18 @@ func (r *Runner) Run(ctx context.Context) error {
 		r.mu.Lock()
 		r.backoff = 0
 		r.nextTry = time.Time{}
+		if fullPass {
+			r.lastFullSync = time.Now()
+		}
 		r.mu.Unlock()
-		r.emit("sync", i18n.T("assurance.activity", map[string]any{
+		summary := i18n.T("assurance.activity", map[string]any{
 			"uploads": result.Uploaded, "downloads": result.Downloads, "deletes": result.Deleted,
-		})+", "+i18n.T("overview.reason_conflicts", map[string]any{"count": result.Conflicts}))
+		}) + ", " + i18n.T("overview.reason_conflicts", map[string]any{"count": result.Conflicts})
+		r.emit("sync", summary)
+		if r.cfg.Bool("notify_sync_completion") &&
+			(result.Uploaded+result.Downloads+result.Deleted > 0) {
+			r.emit("notify", summary)
+		}
 		// A successful sync is the natural point for the rare full audit. It
 		// runs in its own goroutine so the UI and the next sync never block.
 		r.maybeAudit()
@@ -245,6 +291,55 @@ func (r *Runner) Run(ctx context.Context) error {
 			}
 		}
 	}
+}
+
+// loadManifest keeps a client-side snapshot and applies server deltas. A full
+// export is only needed on first run, after a long gap, or when the server
+// explicitly asks for fallback.
+func (r *Runner) loadManifest(full bool) (map[string]classify.RemoteState, error) {
+	r.manifestMu.Lock()
+	defer r.manifestMu.Unlock()
+	if full || r.manifest == nil || r.manifestRevision < 0 {
+		raw, err := r.client.ManifestExport("")
+		if err != nil {
+			return nil, err
+		}
+		manifest, err := remote.ParseManifest(raw)
+		if err != nil {
+			return nil, err
+		}
+		revision := 0
+		if status, err := r.client.JournalStatus(); err == nil {
+			revision, _ = strconv.Atoi(status["MANIFEST_REVISION"])
+		}
+		r.manifest = manifest
+		r.manifestRevision = revision
+		return manifest, nil
+	}
+	raw, err := r.client.ManifestExport(strconv.Itoa(r.manifestRevision))
+	if err != nil {
+		return nil, err
+	}
+	delta, err := remote.ParseManifestDelta(raw)
+	if err != nil {
+		return nil, err
+	}
+	if delta.FallbackFull {
+		raw, err = r.client.ManifestExport("")
+		if err != nil {
+			return nil, err
+		}
+		manifest, err := remote.ParseManifest(raw)
+		if err != nil {
+			return nil, err
+		}
+		r.manifest = manifest
+		r.manifestRevision = int(delta.CurrentRevision)
+		return manifest, nil
+	}
+	r.manifest = remote.MergeDelta(r.manifest, delta)
+	r.manifestRevision = int(delta.CurrentRevision)
+	return r.manifest, nil
 }
 
 // maybeAudit starts the scheduled integrity audit after a successful sync.

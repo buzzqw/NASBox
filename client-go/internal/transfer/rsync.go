@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"net"
 	"os/exec"
 	"strings"
 	"time"
@@ -53,6 +54,29 @@ func (t *Transfer) sshArgs() string { return t.client.Builder().EArg() }
 
 func (t *Transfer) remoteSpec(path string) string { return t.client.Builder().RemoteSpec(path) }
 
+func (t *Transfer) bandwidthLimit(upload bool) int {
+	if upload {
+		if limit := t.cfg.Int("bandwidth_upload_kbps"); limit > 0 {
+			return limit
+		}
+	} else if limit := t.cfg.Int("bandwidth_download_kbps"); limit > 0 {
+		return limit
+	}
+	return t.cfg.Int("bandwidth_kbps")
+}
+
+func (t *Transfer) shouldCompress() bool {
+	switch strings.ToLower(t.cfg.String("compression_mode")) {
+	case "on":
+		return true
+	case "off":
+		return false
+	default:
+		ip := net.ParseIP(t.client.Host)
+		return ip == nil || !ip.IsPrivate()
+	}
+}
+
 // DownloadPath fetches one remote relative path into the same local path.
 func (t *Transfer) DownloadPath(relative string) error {
 	if relative == "" {
@@ -72,8 +96,11 @@ func (t *Transfer) DownloadPath(relative string) error {
 		"--ignore-times", "--protect-args", "-e", t.sshArgs(),
 		t.remoteSpec(remotePath), local,
 	}
-	if limit := t.cfg.Int("bandwidth_kbps"); limit > 0 {
+	if limit := t.bandwidthLimit(false); limit > 0 {
 		args = append(args[:1], append([]string{"--bwlimit", fmt.Sprint(limit)}, args[1:]...)...)
+	}
+	if t.shouldCompress() {
+		args = append(args, "--compress")
 	}
 	_, err = runRsync(t.ctx, nil, args...)
 	return err
@@ -88,10 +115,10 @@ func (t *Transfer) BuildCommand(paths []string, upload bool) ([]string, []byte) 
 		"--delay-updates", "--mkpath", "--ignore-times", "--protect-args",
 		"--files-from=-", "--from0", "-e", t.sshArgs(),
 	}
-	if t.cfg.String("compression_mode") == "on" {
+	if t.shouldCompress() {
 		args = append(args, "--compress")
 	}
-	if limit := t.cfg.Int("bandwidth_kbps"); limit > 0 {
+	if limit := t.bandwidthLimit(upload); limit > 0 {
 		args = append(args, "--bwlimit", fmt.Sprint(limit))
 	}
 	source, destination := remoteSpec, root

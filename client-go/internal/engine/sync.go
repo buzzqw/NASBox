@@ -28,6 +28,7 @@ import (
 type ConfigSource interface {
 	PrintConfig() (map[string]string, error)
 	ManifestExport(since string) ([]byte, error)
+	JournalStatus() (map[string]string, error)
 	CheckedDelete(requests []remote.CheckedRequest, runTS, device string) (map[string]string, error)
 	RetryPendingJournal(device string) (bool, string, error)
 	JournalAppend(repositoryID, txid, device string, puts []remote.JournalPut) (bool, error)
@@ -92,6 +93,25 @@ func SyncOnce(
 	manifest, err := remote.ParseManifest(raw)
 	if err != nil {
 		return result, err
+	}
+	return SyncOnceWithManifest(cfg, store, client, transfers, manifest)
+}
+
+// SyncOnceWithManifest runs a pass against an already-authoritative snapshot.
+// The Runner uses this to merge server deltas without exporting the full tree
+// on every filesystem event.
+func SyncOnceWithManifest(
+	cfg *config.Config,
+	store *state.Store,
+	client ConfigSource,
+	transfers Transferer,
+	manifest map[string]classify.RemoteState,
+	stormTrackers ...*conflicts.StormTracker,
+) (SyncResult, error) {
+	result := SyncResult{}
+	storm := (*conflicts.StormTracker)(nil)
+	if len(stormTrackers) > 0 {
+		storm = stormTrackers[0]
 	}
 	if err := repository.Validate(cfg.LocalRoot(), cfg.RepositoryID(), true); err != nil {
 		return result, err
@@ -210,9 +230,17 @@ func SyncOnce(
 			}
 			if decision.Action == reconcile.ConflictRemoteWins && manualConflicts {
 				if _, present := local[path]; present {
-					if _, err := conflicts.Create(cfg.LocalRoot(), path, remoteDevice(remoteState.Causal), local[path].Digest); err != nil {
-						return result, err
+					var conflictPath string
+					var conflictErr error
+					if storm != nil {
+						conflictPath, conflictErr = storm.Create(cfg.LocalRoot(), path, remoteDevice(remoteState.Causal), local[path].Digest)
+					} else {
+						conflictPath, conflictErr = conflicts.Create(cfg.LocalRoot(), path, remoteDevice(remoteState.Causal), local[path].Digest)
 					}
+					if conflictErr != nil {
+						return result, conflictErr
+					}
+					_ = conflictPath
 					result.Conflicts++
 				}
 			}

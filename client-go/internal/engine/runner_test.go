@@ -11,6 +11,36 @@ import (
 	"nasbox-go/internal/i18n"
 )
 
+func TestRunnerMergesManifestDelta(t *testing.T) {
+	cfg, store, _ := setupTest(t)
+	full := "NASBOX_MANIFEST_V1\na.txt\t" + strings.Repeat("a", 64) + "\t1\t1000\t\t\t\n"
+	delta := "NASBOX_MANIFEST_DELTA_V1\nBASE_REVISION=1\nCURRENT_REVISION=2\nCHANGED=1\n" +
+		"b.txt\t" + strings.Repeat("b", 64) + "\t1\t2000\t\t2000\t\nREMOVED=\n"
+	nas := &fakeNAS{config: nasConfig(), manifest: full, delta: delta, revision: 2}
+	runner := NewRunner(cfg, store, nas, &fakeTransfer{})
+
+	first, err := runner.loadManifest(true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := first["a.txt"]; !ok {
+		t.Fatal("full manifest missing a.txt")
+	}
+	second, err := runner.loadManifest(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := second["a.txt"]; !ok {
+		t.Fatal("delta merge lost a.txt")
+	}
+	if _, ok := second["b.txt"]; !ok {
+		t.Fatal("delta merge missed b.txt")
+	}
+	if runner.manifestRevision != 2 {
+		t.Fatalf("revision = %d, want 2", runner.manifestRevision)
+	}
+}
+
 func TestRunnerUsesExistingTranslationKeys(t *testing.T) {
 	// The runner emits localized messages using the shared table; no new key
 	// may be required for the statuses it produces.

@@ -21,13 +21,27 @@ import (
 type fakeNAS struct {
 	config         map[string]string
 	manifest       string
+	delta          string
+	revision       int
 	deleted        []remote.CheckedRequest
 	renames        [][2]string
 	journalAppends int
 }
 
 func (f *fakeNAS) PrintConfig() (map[string]string, error) { return f.config, nil }
-func (f *fakeNAS) ManifestExport(string) ([]byte, error)   { return []byte(f.manifest), nil }
+func (f *fakeNAS) ManifestExport(since string) ([]byte, error) {
+	if since != "" && f.delta != "" {
+		return []byte(f.delta), nil
+	}
+	return []byte(f.manifest), nil
+}
+func (f *fakeNAS) JournalStatus() (map[string]string, error) {
+	revision := f.revision
+	if revision == 0 {
+		revision = 1
+	}
+	return map[string]string{"MANIFEST_REVISION": fmt.Sprint(revision)}, nil
+}
 func (f *fakeNAS) CheckedDelete(reqs []remote.CheckedRequest, _ string, _ string) (map[string]string, error) {
 	f.deleted = reqs
 	out := map[string]string{}
