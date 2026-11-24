@@ -2,6 +2,7 @@ package ui
 
 import (
 	"bytes"
+	"nasbox-go/internal/update"
 	"os"
 	"strings"
 	"testing"
@@ -236,10 +237,15 @@ func TestBuildingSettingsDoesNotWriteConfig(t *testing.T) {
 func TestDestructiveActionsOpenConfirmation(t *testing.T) {
 	c := newTestClient(t)
 	for name, action := range map[string]func(){
-		"undo":       c.onUndo,
-		"prune":      c.onPrune,
-		"mass del":   c.onConfirmDelete,
-		"update":     c.onInstallUpdate,
+		"undo":     c.onUndo,
+		"prune":    c.onPrune,
+		"mass del": c.onConfirmDelete,
+		// Installing an update always goes through the release-notes dialog
+		// (it is shown after the NAS check, here directly).
+		"update": func() {
+			c.appendLog("update")
+			c.showUpdateDialog(&update.Manifest{Version: "9.9.9", Notes: "note"})
+		},
 		"remote":     c.onRemoteRestore,
 		"add mirror": c.onAddMirror,
 	} {

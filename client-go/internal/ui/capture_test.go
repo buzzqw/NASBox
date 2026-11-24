@@ -197,6 +197,16 @@ func TestCaptureSoftware(t *testing.T) {
 		c.navigate(shot.section, shot.tab)
 		save(shot.name)
 	}
+	for index := 0; index < 90; index++ {
+		wave := float64(index % 30)
+		c.cpuChart.add(12 + wave*1.8 + float64(index%7)*3)
+		c.loadChart.add(0.3 + wave/25)
+		c.netChart.add(float64((index*37)%23) / 3)
+	}
+	c.navigate(sectionNAS, 0)
+	save("06b-nas-charts")
+	c.navigate(sectionSettings, 5)
+	save("09b-info-health")
 	c.setTheme("dark")
 	c.showSection(sectionStatus)
 	save("10-status-dark")

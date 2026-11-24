@@ -36,7 +36,6 @@ import (
 	"nasbox-go/internal/state"
 	"nasbox-go/internal/storage"
 	"nasbox-go/internal/transfer"
-	"nasbox-go/internal/update"
 	"nasbox-go/internal/version"
 )
 
@@ -136,6 +135,7 @@ type clientApp struct {
 	browseDeleteBtn     *widget.Button
 	browseRenameBtn     *widget.Button
 	browseDownloadBtn   *widget.Button
+	browseVersionsBtn   *widget.Button
 	browseUpBtn         *widget.Button
 	mirrorLabel         *widget.Label
 	mirrorList          *widget.List
@@ -160,6 +160,9 @@ type clientApp struct {
 	selectedDeviceLabel *widget.Label
 	monitorDevicesLabel *widget.Label
 	metricsCollector    metrics.Collector
+	cpuChart            *metricChart
+	loadChart           *metricChart
+	netChart            *metricChart
 	healthValue         *widget.Label
 	cpuValue            *widget.Label
 	swapValue           *widget.Label
@@ -333,6 +336,7 @@ func startClient(
 	c.appendLog(tr("main_window.brand_tagline", nil) + " — " + version.AppVersion)
 	go c.seedRecent()
 	go c.tickRelativeTimes(ctx)
+	go c.autoUpdateLoop(ctx)
 	return c
 }
 
@@ -658,9 +662,14 @@ func (c *clientApp) nasView() fyne.CanvasObject {
 		loadTile, cpuTile, memoryTile, swapTile, netTile, ioTile, uptimeTile,
 		lockTile, queueTile, stagingTile, metadataTile,
 	)
+	var cpuCard, loadCard, netCard fyne.CanvasObject
+	c.cpuChart, cpuCard = c.newMetricChart(tr("ui.chart.cpu", nil), " %", 100)
+	c.loadChart, loadCard = c.newMetricChart(tr("ui.chart.load", nil), "", 0)
+	c.netChart, netCard = c.newMetricChart(tr("ui.chart.net", nil), " MB/s", 0)
 	monitorPane := container.NewVBox(
 		c.sectionTitle(tr("metrics.nasbox_title", nil), tr("settings.metrics_refresh_note", nil)),
 		c.surface(container.NewVBox(c.nasLabel, c.nasUpdatedLabel, c.healthValue, c.activityValue), ""),
+		container.NewGridWithColumns(3, cpuCard, loadCard, netCard),
 		metrics,
 		c.surface(container.NewVBox(
 			widget.NewLabelWithStyle(tr("status.nas_overview_title", nil), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
@@ -794,12 +803,14 @@ func (c *clientApp) settingsView() fyne.CanvasObject {
 		c.surface(c.excludePatternsSetting(), ""),
 	)
 	about := c.settingsGroup(tr("ui.group.about", nil), "",
-		widget.NewLabel(fmt.Sprintf("%s: %s %s", tr("settings.info_version_label", nil), version.AppName, version.AppVersion)),
-		widget.NewLabel(fmt.Sprintf("%s: %s", tr("settings.info_min_server_label", nil), valueOrDash(c.cfg.String("min_server_version")))),
-		newHintButton(tr("ui.action.check_update", nil), theme.ViewRefreshIcon(),
-			tr("main_window.version_tooltip", nil), widget.MediumImportance, c.onCheckUpdate, c.setHint),
-		newHintButton(tr("ui.action.update_install", nil), theme.ViewRefreshIcon(),
-			tr("ui.settings.install_update_hint", nil), widget.HighImportance, c.onInstallUpdate, c.setHint),
+		widget.NewLabel(fmt.Sprintf("%s: %s %s", strings.TrimSuffix(tr("settings.info_version_label", nil), ":"), version.AppName, version.AppVersion)),
+		widget.NewLabel(fmt.Sprintf("%s: %s", strings.TrimSuffix(tr("settings.info_min_server_label", nil), ":"), valueOrDash(c.cfg.String("min_server_version")))),
+		container.NewGridWithColumns(2,
+			newHintButton(tr("ui.action.check_update", nil), theme.ViewRefreshIcon(),
+				tr("main_window.version_tooltip", nil), widget.HighImportance, c.onCheckUpdate, c.setHint),
+			newHintButton(tr("ui.server_update.check", nil), theme.StorageIcon(),
+				tr("ui.server_update.check_hint", nil), widget.MediumImportance, c.onCheckServerUpdate, c.setHint),
+		),
 		newHintButton(tr("ui.action.confirm_delete", nil), theme.ConfirmIcon(),
 			tr("status.confirm_deletes_tooltip", nil), widget.DangerImportance, c.onConfirmDelete, c.setHint),
 	)
@@ -1702,21 +1713,7 @@ func (c *clientApp) onMirrorSync() {
 	}()
 }
 
-func (c *clientApp) onCheckUpdate() {
-	c.appendLog(tr("status.update_checking", nil))
-	go func() {
-		manifest, err := update.Newest(c.cfg, c.client)
-		if err != nil {
-			c.appendLog(tr("status.update_check_failed", map[string]any{"detail": err.Error()}))
-			return
-		}
-		if update.Available(manifest) {
-			c.appendLog(tr("status.update_available", map[string]any{"version": manifest.Version}))
-			return
-		}
-		c.appendLog(tr("main_window.update_none", nil))
-	}()
-}
+func (c *clientApp) onCheckUpdate() { go c.checkClientUpdate(true) }
 
 func (c *clientApp) onRestoreVersion() {
 	if c.selectedVersion == "" {
@@ -1965,32 +1962,7 @@ func (c *clientApp) onServerCheck() {
 	}()
 }
 
-func (c *clientApp) onInstallUpdate() {
-	c.appendAction(tr("ui.action.update_install", nil))
-	dialog.ShowConfirm(tr("ui.confirm.update_title", nil), tr("ui.confirm.update_body", nil), func(ok bool) {
-		if !ok {
-			c.appendAction(tr("ui.action.cancelled", nil))
-			return
-		}
-		go func() {
-			binary, err := os.Executable()
-			if err != nil {
-				c.appendLog("Installazione aggiornamento fallita: " + err.Error())
-				return
-			}
-			applied, versionName, err := update.Apply(c.cfg, c.client, binary)
-			if err != nil {
-				c.appendLog("Installazione aggiornamento fallita: " + err.Error())
-				return
-			}
-			if applied {
-				c.appendAction(tr("ui.update.installed", map[string]any{"version": versionName}))
-			} else {
-				c.appendAction(tr("main_window.update_none", nil))
-			}
-		}()
-	}, c.window)
-}
+func (c *clientApp) onInstallUpdate() { go c.checkClientUpdate(true) }
 
 func (c *clientApp) setTheme(value string) {
 	if c.cfg.String("go_theme") == value && variantFrom(value) == c.uiTheme.variant {

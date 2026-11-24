@@ -4,6 +4,32 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 0.21.0 - 2026-11-24
+
+Client Go, parità completa con il client Python:
+
+- **Aggiornamento automatico del client**, come il Python: controllo 2 minuti
+  dopo l'avvio e ogni 6 ore, installazione solo quando non ci sono
+  trasferimenti in corso, notifica e riavvio automatico (rollback se la nuova
+  versione non parte). Disattivabile con `go_auto_update=false`.
+- **Note di rilascio**: il manifest Go contiene la sezione del CHANGELOG della
+  versione (estratta da `publish_go_client.py`); "Controlla aggiornamenti"
+  la mostra prima di installare.
+- **Aggiornamento del server dal client**: `sync-daemon-server-<versione>.sh`
+  accanto allo script attivo viene proposto (mai una versione più vecchia),
+  installato dopo conferma, il demone riavviato e la versione verificata; lo
+  script precedente resta come `.prev`. Comandi CLI `server-update-check` e
+  `server-update-install`. Il client notifica i nuovi server disponibili.
+- **Versioni del file**: per ogni file, un'unica lista delle versioni salvate
+  su questo PC e sul NAS, ripristinabili con un clic (da File › Sfoglia NAS e
+  da Storico). Il ripristino non cancella mai la versione attuale: finisce a
+  sua volta nello storico. Se il file esiste, la versione del NAS viene
+  scaricata e poi caricata come modifica normale (il server rifiuta di
+  ripristinare sopra un file esistente).
+- **Grafici del NAS**: andamento di CPU, carico e rete (ultimi 120 campioni)
+  nel monitor NAS.
+- Nuovi test end-to-end: aggiornamento del server e ripristino dallo storico.
+
 ## 0.20.0 - 2026-11-24
 
 Client Go, affidabilità:

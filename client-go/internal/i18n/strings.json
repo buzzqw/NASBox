@@ -6165,5 +6165,149 @@
   "ui.health.client": {
     "en": "Client version",
     "it": "Versione client"
+  },
+  "ui.update.title": {
+    "en": "NASBox {version} available",
+    "it": "NASBox {version} disponibile"
+  },
+  "ui.update.header": {
+    "en": "You are running {current}. What's new in {version}:",
+    "it": "Stai usando la {current}. Novità della {version}:"
+  },
+  "ui.update.install_restart": {
+    "en": "Install and restart",
+    "it": "Installa e riavvia"
+  },
+  "ui.update.later": {
+    "en": "Later",
+    "it": "Più tardi"
+  },
+  "ui.update.failed": {
+    "en": "Update failed: {detail}",
+    "it": "Aggiornamento non riuscito: {detail}"
+  },
+  "ui.update.installed_restart": {
+    "en": "NASBox updated to {version}: restarting.",
+    "it": "NASBox aggiornato alla {version}: riavvio in corso."
+  },
+  "ui.update.done_title": {
+    "en": "NASBox updated",
+    "it": "NASBox aggiornato"
+  },
+  "ui.server_update.title": {
+    "en": "NAS server update",
+    "it": "Aggiornamento del server NAS"
+  },
+  "ui.server_update.check": {
+    "en": "Check for server update",
+    "it": "Cerca aggiornamento server"
+  },
+  "ui.server_update.check_hint": {
+    "en": "Looks for a newer server script on the NAS and installs it after confirmation.",
+    "it": "Cerca sul NAS uno script server più recente e lo installa dopo conferma."
+  },
+  "ui.server_update.none": {
+    "en": "NAS server {version}: no update.",
+    "it": "Server NAS {version}: nessun aggiornamento."
+  },
+  "ui.server_update.available": {
+    "en": "Server {version} is available on the NAS (current {current}).",
+    "it": "Sul NAS è disponibile il server {version} (attuale {current})."
+  },
+  "ui.server_update.confirm": {
+    "en": "Update the NAS server from {current} to {version}? The daemon restarts: other PCs wait a few seconds.",
+    "it": "Aggiornare il server NAS da {current} a {version}? Il demone verrà riavviato: gli altri PC attenderanno qualche secondo."
+  },
+  "ui.server_update.installing": {
+    "en": "Installing server {version}…",
+    "it": "Installazione del server {version} in corso…"
+  },
+  "ui.server_update.done": {
+    "en": "NAS server updated to {version} and verified.",
+    "it": "Server NAS aggiornato alla {version} e verificato."
+  },
+  "ui.versions.title": {
+    "en": "File versions",
+    "it": "Versioni del file"
+  },
+  "ui.versions.button": {
+    "en": "Versions",
+    "it": "Versioni"
+  },
+  "ui.versions.button_file": {
+    "en": "Versions of a file…",
+    "it": "Versioni di un file…"
+  },
+  "ui.versions.hint": {
+    "en": "Every previous version of the file, on this PC and on the NAS, restorable in one click.",
+    "it": "Tutte le versioni precedenti del file, su questo PC e sul NAS, ripristinabili con un clic."
+  },
+  "ui.versions.note": {
+    "en": "Restoring deletes nothing: the current version is kept in the history too.",
+    "it": "Ripristinare non cancella nulla: la versione attuale viene conservata a sua volta nello storico."
+  },
+  "ui.versions.loading": {
+    "en": "Loading versions…",
+    "it": "Caricamento delle versioni…"
+  },
+  "ui.versions.count": {
+    "en": "{count} versions available. Select one and press Restore.",
+    "it": "{count} versioni disponibili. Selezionane una e premi Ripristina."
+  },
+  "ui.versions.empty": {
+    "en": "No previous version for this file.",
+    "it": "Nessuna versione precedente per questo file."
+  },
+  "ui.versions.restore": {
+    "en": "Restore this version",
+    "it": "Ripristina questa versione"
+  },
+  "ui.versions.restoring": {
+    "en": "Restoring…",
+    "it": "Ripristino in corso…"
+  },
+  "ui.versions.failed": {
+    "en": "Restore failed: {detail}",
+    "it": "Ripristino non riuscito: {detail}"
+  },
+  "ui.versions.done": {
+    "en": "Version restored: {path}",
+    "it": "Versione ripristinata: {path}"
+  },
+  "ui.versions.on_pc": {
+    "en": "On this PC",
+    "it": "Su questo PC"
+  },
+  "ui.versions.on_nas": {
+    "en": "On the NAS",
+    "it": "Sul NAS"
+  },
+  "ui.versions.server_status": {
+    "en": "the NAS answered {status}",
+    "it": "il NAS ha risposto {status}"
+  },
+  "ui.versions.path": {
+    "en": "File",
+    "it": "File"
+  },
+  "ui.versions.path_hint": {
+    "en": "path inside the NASBox folder, e.g. Documents/note.txt",
+    "it": "percorso nella cartella NASBox, es. Documenti/nota.txt"
+  },
+  "ui.versions.open": {
+    "en": "Show versions",
+    "it": "Mostra versioni"
+  },
+  "ui.chart.cpu": {
+    "en": "NAS CPU",
+    "it": "CPU del NAS"
+  },
+  "ui.chart.load": {
+    "en": "Load (1 min)",
+    "it": "Carico (1 min)"
+  },
+  "ui.chart.net": {
+    "en": "NAS network",
+    "it": "Rete del NAS"
   }
 }

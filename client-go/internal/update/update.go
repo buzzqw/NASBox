@@ -37,12 +37,15 @@ var ErrRollbackPerformed = errors.New("rollback aggiornamento applicato")
 // Manifest is the Go channel's manifest. Besides the legacy fields it carries
 // platform and server requirements used to refuse an incompatible artifact.
 type Manifest struct {
-	Version        string `json:"version"`
-	Channel        string `json:"channel"`
-	Artifact       string `json:"artifact"`
-	SHA256         string `json:"sha256"`
-	Size           int64  `json:"size"`
-	Notes          string `json:"notes"`
+	Version  string `json:"version"`
+	Channel  string `json:"channel"`
+	Artifact string `json:"artifact"`
+	SHA256   string `json:"sha256"`
+	Size     int64  `json:"size"`
+	Notes    string `json:"notes"`
+	// Changelog is the CHANGELOG.md section of this version (Markdown),
+	// shown before installing. Older manifests simply lack it.
+	Changelog      string `json:"changelog,omitempty"`
 	RequiresServer string `json:"requires_server,omitempty"`
 	Target         string `json:"target,omitempty"`
 	OS             string `json:"os,omitempty"`

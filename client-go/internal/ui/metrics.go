@@ -102,6 +102,17 @@ func (c *clientApp) updateMetricsUI(values map[string]string) {
 		return
 	}
 	sample = c.metricsCollector.Observe(sample, time.Now())
+	if sample.CPUUsagePercent != nil {
+		c.cpuChart.add(*sample.CPUUsagePercent)
+	}
+	c.loadChart.add(sample.Load1)
+	if sample.NetRxRate != nil {
+		tx := 0.0
+		if sample.NetTxRate != nil {
+			tx = *sample.NetTxRate
+		}
+		c.netChart.add((*sample.NetRxRate + tx) / (1 << 20))
+	}
 	if c.nasLabel != nil {
 		c.nasLabel.SetText(fmt.Sprintf(tr("ui.nas.config_short", nil), valueOrDash(c.cfg.String("nas_lan")),
 			tr("settings.info_version_label", nil), metricText(values["VERSION"])))

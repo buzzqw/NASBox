@@ -22,6 +22,24 @@ def read_version(source: Path) -> str:
 ARTIFACT_RE = re.compile(r"^nasbox-go-(\d+)\.(\d+)\.(\d+)$")
 
 
+def changelog_section(changelog: Path, version: str) -> str:
+    """Return the body of the '## <version> - <date>' section, or ''."""
+    if not changelog.is_file():
+        return ""
+    lines = changelog.read_text(encoding="utf-8").splitlines()
+    body: list[str] = []
+    inside = False
+    for line in lines:
+        if line.startswith("## "):
+            if inside:
+                break
+            inside = line[3:].split(" ", 1)[0] == version
+            continue
+        if inside:
+            body.append(line)
+    return "\n".join(body).strip()
+
+
 def prune_channel(dest: Path, current: str, keep: int) -> list[str]:
     """Keep only the newest `keep` binaries (the current one always survives).
 
@@ -97,6 +115,7 @@ def main() -> None:
         "sha256": digest,
         "size": len(content),
         "notes": args.notes,
+        "changelog": changelog_section(repo / "CHANGELOG.md", version),
         "target": args.target,
         "requires_server": args.requires_server,
         "published_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),

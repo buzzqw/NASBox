@@ -32,7 +32,7 @@ copra *almeno* le funzionalità Python prima di sostituirlo nel canale stabile.
 | Lock globale NAS + lease | sì | sì | owner file e handshake |
 | Conflitti (newest/manual, storm, keep-both) | sì | sì | + dettaglio versioni |
 | Storico locale (cestino) | sì | sì | lista, ripristino, prune |
-| Storico NAS | sì | parziale | ripristino remoto manuale; manca l'elenco unificato |
+| Storico NAS | sì | **sì (0.21.0)** | versioni del file unificate locale + NAS |
 | Browse NAS (lista/delete/rename/download) | sì | sì | stessi verbi |
 | Mirror locali | sì | sì | autoritativi, cancellabili |
 | Selettivo per cartelle | sì | sì | stesso formato |
@@ -50,29 +50,21 @@ copra *almeno* le funzionalità Python prima di sostituirlo nel canale stabile.
 | i18n it/en | sì | sì | stessa tabella |
 | X11 e Wayland | sì (Qt) | sì (Fyne) | selezione backend |
 
-## Funzioni ancora da completare (priorità)
+## Funzioni completate dopo l'audit (0.19.0 – 0.21.0)
 
-1. **Aggiornamento del server dal client.** Python scopre
-   `sync-daemon-server-<versione>.sh` accanto allo script attivo, lo copia,
-   riavvia e verifica (`discover_remote_server_update`,
-   `update_remote_server_script`). Il Go sa solo verificare la versione minima.
-   Oggi sul NAS non ci sono script versionati nuovi, quindi la funzione non è
-   operativa; va portata prima di distribuire server con aggiornamento in-place.
-2. **Storico NAS unificato.** Il Go espone il ripristino remoto manuale
-   (percorso + suffisso) e lo storico locale; manca il pannello che unisce
-   locale e remoto per file/cartella con ripristino multiplo.
-3. ~~Coda trasferimenti dettagliata~~ — **completata in 0.19.0**: file
-   corrente, file N di M, percentuale, velocità, ETA e storico dei file.
-4. **Grafici metriche.** Python disegna lo storico CPU/carico; il Go mostra solo
-   il campione corrente e i rate calcolati.
-5. **Accessibilità e tooltip.** Fyne 2.7 non ha tooltip nativi né
-   `SetAccessibleName`: il Go usa la barra suggerimenti e contrasto alto.
-6. **Click singolo sulla tray.** (0.19.0: menu tray completo con stato,
-   recenti e pausa; resta la distinzione click/destra non esposta da Fyne.) La preferenza `tray_single_click` è letta ma il
-   backend tray non espone la distinzione click/destra; il menu resta il
-   comportamento effettivo.
-7. **Note di rilascio nell'updater.** Il manifest Go non porta un changelog
-   strutturato; il client mostra solo le note testuali.
+1. Aggiornamento del server dal client — **0.21.0** (`FindServerUpdate`,
+   `InstallServerUpdate`, verifica `VERSION`/`RUNNING`, `.prev` per rollback).
+2. Storico versioni unificato locale + NAS per file — **0.21.0**
+   ("Versioni del file").
+3. Coda trasferimenti dettagliata — **0.19.0** (file N di M, velocità, ETA).
+4. Grafici metriche — **0.21.0** (CPU, carico, rete).
+5. Note di rilascio nell'updater — **0.21.0** (changelog nel manifest).
+6. Aggiornamento automatico del client — **0.21.0** (prima era solo manuale).
+7. Cancellazioni propagate agli altri PC e backup locale nei download —
+   **0.20.0** (bug di sicurezza dati rispetto al Python).
+
+Restano differenze minori dovute a Fyne 2.7: niente tooltip nativi e niente
+distinzione click sinistro/destro sull'icona della tray (il menu è completo).
 
 ## Scelte intenzionali diverse
 

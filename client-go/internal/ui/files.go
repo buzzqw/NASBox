@@ -58,6 +58,12 @@ func (c *clientApp) buildBrowsePane() fyne.CanvasObject {
 		tr("ui.file.rename_hint", nil), widget.LowImportance, c.onBrowseRename, c.setHint)
 	c.browseDownloadBtn = plainButton(tr("ui.action.download", nil), theme.DownloadIcon(),
 		tr("browse.download_tooltip", nil), widget.MediumImportance, c.onBrowseDownload, c.setHint)
+	c.browseVersionsBtn = plainButton(tr("ui.versions.button", nil), theme.HistoryIcon(),
+		tr("ui.versions.hint", nil), widget.LowImportance, func() {
+			if c.selectedBrowse != "" {
+				c.showFileVersions(c.joinBrowsePath(c.selectedBrowse))
+			}
+		}, c.setHint)
 	c.browseUpBtn = plainButton(tr("browse.up_btn", nil), theme.NavigateBackIcon(),
 		tr("ui.file.up_hint", nil), widget.LowImportance, c.onBrowseUp, c.setHint)
 
@@ -75,6 +81,7 @@ func (c *clientApp) buildBrowsePane() fyne.CanvasObject {
 				}, c.setHint),
 			c.browseDeleteBtn,
 			c.browseRenameBtn,
+			c.browseVersionsBtn,
 			c.browseDownloadBtn,
 		),
 		container.NewBorder(nil, nil,
@@ -193,6 +200,16 @@ func (c *clientApp) buildHistoryPane() fyne.CanvasObject {
 					c.refreshHistory()
 				}, c.setHint),
 			c.restoreBtn,
+			newHintButton(tr("ui.versions.button_file", nil), theme.HistoryIcon(),
+				tr("ui.versions.hint", nil), widget.MediumImportance, func() {
+					initial := ""
+					for _, version := range c.versions {
+						if version.TrashPath == c.selectedVersion {
+							initial = version.Original
+						}
+					}
+					c.promptFileVersions(initial)
+				}, c.setHint),
 			newHintButton(tr("ui.action.remote_restore", nil), theme.ContentRedoIcon(),
 				tr("ui.history.remote_hint", nil), widget.MediumImportance, c.onRemoteRestore, c.setHint),
 			newHintButton(tr("ui.action.prune", nil), theme.DeleteIcon(),
@@ -275,6 +292,12 @@ func (c *clientApp) updateBrowseSelection() {
 		c.browseRenameBtn.Disable()
 		if c.selectedBrowse != "" {
 			c.browseRenameBtn.Enable()
+		}
+	}
+	if c.browseVersionsBtn != nil {
+		c.browseVersionsBtn.Disable()
+		if c.selectedBrowse != "" && !strings.HasSuffix(c.selectedBrowse, "/") {
+			c.browseVersionsBtn.Enable()
 		}
 	}
 	if c.browseDownloadBtn != nil {

@@ -231,3 +231,30 @@ func (t *Transfer) UploadStaged(paths []string, device string, files []remote.St
 	}
 	return nil
 }
+
+// DownloadHistoryVersion copies a NAS history version (.sync-trash/<trashRel>)
+// onto the local file relative, through a temporary sibling and an atomic
+// rename. The caller saves the current local file first.
+func (t *Transfer) DownloadHistoryVersion(trashRel, relative string) error {
+	if strings.Contains(trashRel, "..") || strings.HasPrefix(trashRel, "/") || trashRel == "" {
+		return fmt.Errorf("percorso storico NAS non valido")
+	}
+	if err := t.client.ValidateHostKeyPin(context.Background()); err != nil {
+		return err
+	}
+	local, err := paths.SafeDestination(t.cfg.LocalRoot(), relative)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(local), 0o755); err != nil {
+		return err
+	}
+	temporary := filepath.Join(filepath.Dir(local), "."+filepath.Base(local)+".nasbox-restore")
+	remotePath := strings.TrimSuffix(t.cfg.RemotePrefix(), "/") + "/.sync-trash/" + trashRel
+	args := []string{"-a", "--protect-args", "-e", t.sshArgs(), t.remoteSpec(remotePath), temporary}
+	if _, err := runRsync(t.ctx, nil, args...); err != nil {
+		_ = os.Remove(temporary)
+		return err
+	}
+	return os.Rename(temporary, local)
+}

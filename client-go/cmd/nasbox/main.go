@@ -72,6 +72,10 @@ func main() {
 		updateCheck(args)
 	case "update-install":
 		updateInstall(args)
+	case "server-update-check":
+		serverUpdate(args, false)
+	case "server-update-install":
+		serverUpdate(args, true)
 	default:
 		usage()
 		os.Exit(2)
@@ -79,7 +83,7 @@ func main() {
 }
 
 func usage() {
-	fmt.Println("uso: nasbox <version|doctor|diagnostics-bundle|preview|sync|undo|confirm-delete|browse-download|remote-history|remote-restore|prune-trash|audit|server-check|bootstrap-check|gui|update-check|update-install> [opzioni]")
+	fmt.Println("uso: nasbox <version|doctor|diagnostics-bundle|preview|sync|undo|confirm-delete|browse-download|remote-history|remote-restore|prune-trash|audit|server-check|bootstrap-check|gui|update-check|update-install|server-update-check|server-update-install> [opzioni]")
 }
 
 func bootstrapConfig(cfg *config.Config) error {
@@ -945,4 +949,39 @@ func valueOr(value, fallback string) string {
 		return fallback
 	}
 	return value
+}
+
+// serverUpdate finds (and optionally installs) a newer server script
+// published on the NAS as sync-daemon-server-<version>.sh.
+func serverUpdate(args []string, install bool) {
+	cfg, err := loadConfig(args)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	client := remote.New(cfg)
+	values, err := client.PrintConfig()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	current := values["VERSION"]
+	update, err := client.FindServerUpdate(current)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	if update == nil {
+		fmt.Printf("server %s: nessun aggiornamento\n", current)
+		return
+	}
+	fmt.Printf("server %s: disponibile %s (%s)\n", current, update.Version, update.Path)
+	if !install {
+		return
+	}
+	if err := client.InstallServerUpdate(*update); err != nil {
+		fmt.Fprintln(os.Stderr, "aggiornamento server fallito:", err)
+		os.Exit(1)
+	}
+	fmt.Printf("server aggiornato a %s\n", update.Version)
 }

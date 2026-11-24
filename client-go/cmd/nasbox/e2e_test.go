@@ -11,6 +11,10 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"nasbox-go/internal/config"
+	"nasbox-go/internal/remote"
+	"nasbox-go/internal/transfer"
 )
 
 // End-to-end tests: the real nasbox CLI (this test binary re-executed), real
@@ -136,12 +140,14 @@ func (n *e2eNAS) client(name string, overrides ...map[string]any) *e2eClient {
 	return c
 }
 
-func (c *e2eClient) sync() string {
+func (c *e2eClient) sync() string { return c.run("sync") }
+
+func (c *e2eClient) run(command string) string {
 	c.n.t.Helper()
 	cmd := exec.Command(os.Args[0])
 	cmd.Env = append(os.Environ(),
 		"NASBOX_E2E_CHILD=1",
-		"NASBOX_E2E_ARGS=sync --config "+c.config,
+		"NASBOX_E2E_ARGS="+command+" --config "+c.config,
 		"PATH="+c.n.bin+string(os.PathListSeparator)+os.Getenv("PATH"),
 		"HOME="+c.home,
 		"XDG_STATE_HOME="+filepath.Join(c.home, "state"),
@@ -151,7 +157,7 @@ func (c *e2eClient) sync() string {
 	var out bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &out
 	if err := cmd.Run(); err != nil {
-		c.n.t.Fatalf("%s: sync fallito: %v\n%s", c.name, err, out.String())
+		c.n.t.Fatalf("%s: %s fallito: %v\n%s", c.name, command, err, out.String())
 	}
 	return out.String()
 }
@@ -357,5 +363,101 @@ func TestE2EOutOfBandNASEditConverges(t *testing.T) {
 	})
 	if !found {
 		t.Fatalf("la versione perdente %q non e' recuperabile\n%s", lost, out)
+	}
+}
+
+// Server self-update: a newer sync-daemon-server-<v>.sh beside the active
+// script is installed, the daemon restarted and the version verified.
+func TestE2EServerSelfUpdate(t *testing.T) {
+	nas := newE2ENAS(t)
+	a := nas.client("pc-a")
+	a.sync() // bootstrap
+	content, err := os.ReadFile(nas.script)
+	if err != nil {
+		t.Fatal(err)
+	}
+	newer := strings.Replace(string(content), "VERSION=\"3.26.0\"", "VERSION=\"9.9.9\"", 1)
+	if newer == string(content) {
+		t.Skip("versione del server non riconosciuta nello script")
+	}
+	dir := filepath.Dir(nas.script)
+	if err := os.WriteFile(filepath.Join(dir, "sync-daemon-server-9.9.9.sh"), []byte(newer), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// An older versioned script must never be offered.
+	if err := os.WriteFile(filepath.Join(dir, "sync-daemon-server-1.0.0.sh"), content, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = exec.Command(nas.script, "--stop").Run() })
+	if out := a.run("server-update-check"); !strings.Contains(out, "disponibile 9.9.9") {
+		t.Fatalf("aggiornamento non trovato:\n%s", out)
+	}
+	if out := a.run("server-update-install"); !strings.Contains(out, "server aggiornato a 9.9.9") {
+		t.Fatalf("installazione fallita:\n%s", out)
+	}
+	if out := a.run("server-update-check"); !strings.Contains(out, "nessun aggiornamento") {
+		t.Fatalf("dopo l'aggiornamento non deve proporre altro:\n%s", out)
+	}
+	if _, err := os.Stat(nas.script + ".prev"); err != nil {
+		t.Fatal("la versione precedente dello script deve restare per il rollback")
+	}
+	// Sync still works against the updated server.
+	a.write("dopo-update.txt", "ok")
+	a.sync()
+	if readOrEmpty(filepath.Join(nas.share, "dopo-update.txt")) != "ok" {
+		t.Fatal("sync non funzionante dopo l'aggiornamento del server")
+	}
+}
+
+// The NAS history lists previous versions and an old version can be brought
+// back onto the local file (used by "Versioni del file" when the file exists).
+func TestE2ERestoreVersionFromNASHistory(t *testing.T) {
+	nas := newE2ENAS(t)
+	a := nas.client("pc-a")
+	a.write("contratto.txt", "versione 1")
+	a.sync()
+	a.write("contratto.txt", "versione 2")
+	a.sync()
+
+	t.Setenv("PATH", nas.bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("XDG_STATE_HOME", filepath.Join(a.home, "state"))
+	t.Setenv("XDG_RUNTIME_DIR", filepath.Join(a.home, "run"))
+	cfg, err := config.LoadFrom(a.config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := remote.New(cfg)
+	versions, err := client.HistoryList()
+	if err != nil {
+		t.Fatal(err)
+	}
+	trash := ""
+	for _, version := range versions {
+		if version.Original == "contratto.txt" {
+			trash = version.TrashRel
+		}
+	}
+	if trash == "" {
+		t.Fatalf("lo storico NAS non elenca la versione precedente: %+v", versions)
+	}
+	if err := transfer.New(cfg, client).DownloadHistoryVersion(trash, "contratto.txt"); err != nil {
+		t.Fatal(err)
+	}
+	if got := readOrEmpty(filepath.Join(a.local, "contratto.txt")); got != "versione 1" {
+		t.Fatalf("versione ripristinata = %q", got)
+	}
+	// The restored bytes are a normal edit: the next sync publishes them and
+	// keeps "versione 2" in the NAS history.
+	a.sync()
+	if got := readOrEmpty(filepath.Join(nas.share, "contratto.txt")); got != "versione 1" {
+		t.Fatalf("il ripristino non e' arrivato sul NAS: %q", got)
+	}
+	kept := false
+	matches, _ := filepath.Glob(filepath.Join(nas.share, ".sync-trash", "contratto.txt-*"))
+	for _, match := range matches {
+		kept = kept || readOrEmpty(match) == "versione 2"
+	}
+	if !kept {
+		t.Fatal("la versione sostituita dal ripristino deve restare nello storico NAS")
 	}
 }
