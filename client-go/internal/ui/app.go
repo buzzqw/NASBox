@@ -6,6 +6,7 @@ import (
 	_ "embed"
 	"fmt"
 	"os"
+	"os/exec"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -147,6 +148,11 @@ type clientApp struct {
 	browseDownloadBtn   *widget.Button
 	browseUpBtn         *widget.Button
 	mirrorLabel         *widget.Label
+	mirrorList          *widget.List
+	mirrorEntries       []mirror.Mirror
+	selectedMirror      int
+	mirrorRemoveBtn     *widget.Button
+	mirrorToggleBtn     *widget.Button
 	selectiveDirs       []string
 	selectiveList       *widget.List
 	nasLabel            *widget.Label
@@ -499,6 +505,13 @@ func (c *clientApp) installTray() {
 		}),
 		fyne.NewMenuItem(tr("ui.tray.sync", nil), c.onSync),
 		fyne.NewMenuItem(tr("ui.tray.pause_resume", nil), c.onPause),
+		fyne.NewMenuItem(tr("tray.pause_for", nil), c.showPauseDialog),
+		fyne.NewMenuItem(tr("tray.open_folder", nil), func() {
+			if root := c.cfg.LocalRoot(); root != "" {
+				_ = exec.Command("xdg-open", root).Start()
+			}
+		}),
+		fyne.NewMenuItem(tr("ui.action.check_update", nil), c.onCheckUpdate),
 		fyne.NewMenuItem(tr("main_window.tab_conflicts", nil), func() {
 			c.window.Show()
 			c.navigate(sectionFiles, 1)
@@ -884,6 +897,30 @@ func (c *clientApp) updateDevicesLabel() {
 func (c *clientApp) settingsView() fyne.CanvasObject {
 	c.mirrorLabel = widget.NewLabel("")
 	c.mirrorLabel.Wrapping = fyne.TextWrapWord
+	c.mirrorEntries = mirror.Configured(c.cfg)
+	c.mirrorList = newRowList(
+		func() int { return len(c.mirrorEntries) }, 260, 140,
+		func(id int, row *listRow) {
+			entry := c.mirrorEntries[id]
+			row.icon.SetResource(theme.FolderIcon())
+			row.name.SetText(entry.Source)
+			state := tr("mirrors.state_idle", nil)
+			if !entry.Enabled {
+				state = tr("mirrors.state_disabled", nil)
+			}
+			row.meta.SetText(entry.Dest + " · " + state)
+		},
+	)
+	c.mirrorList.OnSelected = func(id widget.ListItemID) {
+		c.selectedMirror = int(id)
+		c.updateMirrorButtons()
+	}
+	c.mirrorRemoveBtn = newHintButton(tr("mirrors.remove_btn", nil), theme.DeleteIcon(),
+		tr("mirrors.remove_tooltip", nil), widget.DangerImportance, c.onRemoveMirror, c.setHint).Button
+	c.mirrorToggleBtn = newHintButton(tr("ui.mirror.disable", nil), theme.MediaPauseIcon(),
+		tr("mirrors.col_enabled_tooltip", nil), widget.LowImportance, c.onToggleMirror, c.setHint).Button
+	c.mirrorRemoveBtn.Disable()
+	c.mirrorToggleBtn.Disable()
 	c.selectiveList = newTextList(
 		func() int { return len(c.selectiveDirs) },
 		func(id int, label *widget.Label) {
@@ -912,11 +949,14 @@ func (c *clientApp) settingsView() fyne.CanvasObject {
 			widget.NewLabelWithStyle(tr("main_window.tab_mirrors", nil), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 			c.note(tr("ui.dialog.mirror_note", nil)),
 			c.mirrorLabel,
+			container.NewGridWrap(fyne.NewSize(1, 140), c.mirrorList),
 			container.NewHBox(
 				newHintButton(tr("ui.action.sync_folders", nil), theme.ViewRefreshIcon(),
 					tr("mirrors.sync_now_tooltip", nil), widget.MediumImportance, c.onMirrorSync, c.setHint),
 				newHintButton(tr("ui.action.add_mirror", nil), theme.ContentAddIcon(),
 					tr("ui.settings.add_mirror_hint", nil), widget.HighImportance, c.onAddMirror, c.setHint),
+				withHint(c.mirrorToggleBtn, tr("mirrors.col_enabled_tooltip", nil), c.setHint),
+				withHint(c.mirrorRemoveBtn, tr("mirrors.remove_tooltip", nil), c.setHint),
 			),
 		), ""),
 		c.surface(container.NewVBox(
@@ -1349,9 +1389,9 @@ func (c *clientApp) refreshSelective() {
 }
 
 func (c *clientApp) refreshMirrorLabel() {
-	mirrors := mirror.Configured(c.cfg)
+	c.mirrorEntries = mirror.Configured(c.cfg)
 	lines := []string{}
-	for _, item := range mirrors {
+	for _, item := range c.mirrorEntries {
 		state := tr("mirrors.last_sync_never", nil)
 		if item.Enabled {
 			state = tr("devices.active", nil)
@@ -1366,7 +1406,29 @@ func (c *clientApp) refreshMirrorLabel() {
 		if c.mirrorLabel != nil {
 			c.mirrorLabel.SetText(text)
 		}
+		if c.mirrorList != nil {
+			c.mirrorList.Refresh()
+		}
+		c.updateMirrorButtons()
 	})
+}
+
+func (c *clientApp) updateMirrorButtons() {
+	if c.mirrorRemoveBtn == nil || c.mirrorToggleBtn == nil {
+		return
+	}
+	if c.selectedMirror < 0 || c.selectedMirror >= len(c.mirrorEntries) {
+		c.mirrorRemoveBtn.Disable()
+		c.mirrorToggleBtn.Disable()
+		return
+	}
+	c.mirrorRemoveBtn.Enable()
+	c.mirrorToggleBtn.Enable()
+	label := tr("ui.mirror.disable", nil)
+	if !c.mirrorEntries[c.selectedMirror].Enabled {
+		label = tr("ui.mirror.enable", nil)
+	}
+	c.mirrorToggleBtn.SetText(label)
 }
 
 func (c *clientApp) refreshMonitor() {
@@ -1705,6 +1767,58 @@ func (c *clientApp) onAddMirror() {
 	)
 	confirm.Resize(fyne.NewSize(520, 220))
 	confirm.Show()
+}
+
+func (c *clientApp) onRemoveMirror() {
+	if c.selectedMirror < 0 || c.selectedMirror >= len(c.mirrorEntries) {
+		c.appendLog(tr("ui.mirror.invalid", nil))
+		return
+	}
+	entry := c.mirrorEntries[c.selectedMirror]
+	dialog.ShowConfirm(tr("mirrors.remove_confirm_title", nil),
+		tr("mirrors.remove_confirm_body", map[string]any{"source": entry.Source}),
+		func(ok bool) {
+			if !ok {
+				c.appendAction(tr("ui.action.cancelled", nil))
+				return
+			}
+			raw, _ := c.cfg.Get("mirrors").([]any)
+			kept := make([]any, 0, len(raw))
+			for _, item := range raw {
+				values, _ := item.(map[string]any)
+				if source, _ := values["source"].(string); source == entry.Source {
+					continue
+				}
+				kept = append(kept, item)
+			}
+			if c.persistSetting("mirrors", kept) {
+				c.selectedMirror = -1
+				c.appendAction(tr("mirrors.remove_btn", nil) + ": " + entry.Source)
+				c.refreshMirrorLabel()
+			}
+		}, c.window)
+}
+
+func (c *clientApp) onToggleMirror() {
+	if c.selectedMirror < 0 || c.selectedMirror >= len(c.mirrorEntries) {
+		c.appendLog(tr("ui.mirror.invalid", nil))
+		return
+	}
+	entry := c.mirrorEntries[c.selectedMirror]
+	raw, _ := c.cfg.Get("mirrors").([]any)
+	updated := make([]any, 0, len(raw))
+	for _, item := range raw {
+		values, _ := item.(map[string]any)
+		source, _ := values["source"].(string)
+		if source == entry.Source {
+			values["enabled"] = !entry.Enabled
+		}
+		updated = append(updated, item)
+	}
+	if c.persistSetting("mirrors", updated) {
+		c.appendAction(fmt.Sprintf("%s: %s", tr("mirrors.col_enabled", nil), entry.Source))
+		c.refreshMirrorLabel()
+	}
 }
 
 func (c *clientApp) onMirrorSync() {

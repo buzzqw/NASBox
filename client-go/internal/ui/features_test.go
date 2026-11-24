@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"nasbox-go/internal/classify"
+	"nasbox-go/internal/mirror"
 	"nasbox-go/internal/schedule"
 	"nasbox-go/internal/storage"
 )
@@ -85,6 +86,35 @@ func TestScheduleEditorAcceptsDaysAndOvernightWindow(t *testing.T) {
 		t.Fatal("schedule editor did not open")
 	}
 	_ = saved
+	if overlay, ok := c.window.Canvas().Overlays().Top().(interface{ Hide() }); ok {
+		overlay.Hide()
+	}
+}
+
+func TestMirrorToggleUpdatesConfig(t *testing.T) {
+	c := newTestClient(t)
+	source := t.TempDir()
+	_ = c.cfg.Set("mirrors", []any{map[string]any{
+		"source": source, "dest": "Work", "enabled": true,
+	}}, false)
+	c.refreshMirrorLabel()
+	if len(c.mirrorEntries) != 1 {
+		t.Fatalf("mirrors = %d", len(c.mirrorEntries))
+	}
+	c.mirrorList.OnSelected(0)
+	if c.mirrorToggleBtn.Disabled() {
+		t.Fatal("toggle button disabled with a selection")
+	}
+	c.onToggleMirror()
+	configured := mirror.Configured(c.cfg)
+	if len(configured) != 1 || configured[0].Enabled {
+		t.Fatalf("toggle did not persist: %+v", configured)
+	}
+	c.selectedMirror = 0
+	c.onRemoveMirror()
+	if c.window.Canvas().Overlays().Top() == nil {
+		t.Fatal("mirror removal did not ask for confirmation")
+	}
 	if overlay, ok := c.window.Canvas().Overlays().Top().(interface{ Hide() }); ok {
 		overlay.Hide()
 	}

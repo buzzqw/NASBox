@@ -5905,5 +5905,13 @@
   "ui.setup.script": {
     "it": "Script del server",
     "en": "Server script"
+  },
+  "ui.mirror.enable": {
+    "it": "Attiva mirror",
+    "en": "Enable mirror"
+  },
+  "ui.mirror.disable": {
+    "it": "Sospendi mirror",
+    "en": "Suspend mirror"
   }
 }
