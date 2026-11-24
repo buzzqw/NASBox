@@ -74,3 +74,32 @@ systemctl --user status sync-daemon-client.service
   client): è riproducibile sulla stessa macchina, non tra macchine diverse.
   Per questo la release si pubblica **solo da qui**, così manifest e archivio
   vengono generati insieme e restano coerenti.
+
+## Client Go (canale separato)
+
+Il NAS non ha Go installato: il binario si compila su un client con Go 1.27.
+
+```bash
+# su un client, nel repo (o in una copia sincronizzata del repo)
+cd client-go
+go vet ./...
+go test ./...
+go build -trimpath -ldflags='-s -w' -o /tmp/nasbox-go-<versione> ./cmd/nasbox
+
+# porta il binario sul NAS, poi pubblica dal NAS
+rsync -a /tmp/nasbox-go-<versione> andres@192.168.1.119:/volume1/Varie/sync-daemon/
+ssh andres@192.168.1.119
+cd /volume1/Varie/sync-daemon
+python3 tools/publish_go_client.py --binary ./nasbox-go-<versione> \
+        --dest-dir /volume1/NASBox/.nasbox-client-update-go \
+        --notes "<riassunto>"
+rm -f ./nasbox-go-<versione>
+```
+
+- La versione sta in `client-go/internal/version/version.go`; la matrice di
+  parità con il client Python e le lacune residue in `client-go/PARITY.md`.
+- Il canale Go è indipendente: `manifest-go.json` e `nasbox-go-<versione>` in
+  `.nasbox-client-update-go/`, mai `manifest.json` del Python.
+- Verifica: `nasbox-go update-check` sul client deve proporre la nuova versione;
+  il client Go in esecuzione va riavviato per applicarla.
+
