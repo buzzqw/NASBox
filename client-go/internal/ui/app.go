@@ -65,7 +65,6 @@ const (
 type navButton struct {
 	*hintButton
 	bg      *canvas.Rectangle
-	accent  *canvas.Rectangle
 	section sectionID
 }
 
