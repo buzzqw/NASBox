@@ -180,6 +180,132 @@ func newTextList(length func() int, update func(int, *widget.Label)) *widget.Lis
 	)
 }
 
+// listRow is a compact two-line row used by files, conflicts, history and
+// devices. Keeping the metadata in a trailing label avoids the old padded text
+// strings that became unreadable at narrow widths.
+type listRow struct {
+	icon *widget.Icon
+	name *widget.Label
+	meta *widget.Label
+}
+
+type listRowObject struct {
+	widget.BaseWidget
+	content fyne.CanvasObject
+	row     *listRow
+}
+
+type listRowRenderer struct {
+	*listRowObject
+}
+
+func (o *listRowObject) CreateRenderer() fyne.WidgetRenderer {
+	return &listRowRenderer{listRowObject: o}
+}
+
+func (r *listRowRenderer) Layout(size fyne.Size) {
+	r.content.Resize(size)
+	r.content.Move(fyne.NewPos(0, 0))
+}
+
+func (r *listRowRenderer) MinSize() fyne.Size           { return r.content.MinSize() }
+func (r *listRowRenderer) Objects() []fyne.CanvasObject { return []fyne.CanvasObject{r.content} }
+func (r *listRowRenderer) Refresh()                     { r.content.Refresh() }
+func (r *listRowRenderer) Destroy()                     {}
+
+func newRowList(length func() int, nameWidth, metaWidth float32, update func(int, *listRow)) *widget.List {
+	return widget.NewList(
+		length,
+		func() fyne.CanvasObject {
+			icon := widget.NewIcon(theme.FileIcon())
+			name := widget.NewLabel("")
+			name.Wrapping = fyne.TextTruncate
+			meta := widget.NewLabel("")
+			meta.Alignment = fyne.TextAlignTrailing
+			meta.Wrapping = fyne.TextTruncate
+			row := &listRow{icon: icon, name: name, meta: meta}
+			object := &listRowObject{
+				content: container.NewBorder(nil, nil, icon, minWidth(meta, metaWidth), minWidth(name, nameWidth)),
+				row:     row,
+			}
+			object.ExtendBaseWidget(object)
+			return object
+		},
+		func(id widget.ListItemID, object fyne.CanvasObject) {
+			row := findListRow(object)
+			if row != nil {
+				update(int(id), row)
+				row.icon.Refresh()
+			}
+		},
+	)
+}
+
+func findListRow(object fyne.CanvasObject) *listRow {
+	switch value := object.(type) {
+	case *listRowObject:
+		return value.row
+	case *fyne.Container:
+		for _, child := range value.Objects {
+			if row := findListRow(child); row != nil {
+				return row
+			}
+		}
+	case *hintArea:
+		return findListRow(value.Widget)
+	}
+	return nil
+}
+
+// widthWidget constrains a child's minimum width while keeping it in Fyne's
+// widget renderer tree. A plain CanvasObject wrapper is laid out but never
+// painted, which previously hid setting labels and header/footer text.
+type widthWidget struct {
+	widget.BaseWidget
+	content fyne.CanvasObject
+	width   float32
+	maximum bool
+}
+
+type widthRenderer struct {
+	*widthWidget
+}
+
+func (w *widthWidget) CreateRenderer() fyne.WidgetRenderer { return &widthRenderer{widthWidget: w} }
+
+func (w *widthWidget) MinSize() fyne.Size {
+	size := w.content.MinSize()
+	if w.maximum && size.Width > w.width {
+		size.Width = w.width
+	}
+	if !w.maximum && size.Width < w.width {
+		size.Width = w.width
+	}
+	return size
+}
+
+func (r *widthRenderer) Layout(size fyne.Size) {
+	r.content.Resize(size)
+	r.content.Move(fyne.NewPos(0, 0))
+}
+
+func (r *widthRenderer) MinSize() fyne.Size           { return r.widthWidget.MinSize() }
+func (r *widthRenderer) Objects() []fyne.CanvasObject { return []fyne.CanvasObject{r.content} }
+func (r *widthRenderer) Refresh()                     { r.content.Refresh() }
+func (r *widthRenderer) Destroy()                     {}
+
+func minWidth(object fyne.CanvasObject, width float32) fyne.CanvasObject {
+	constrained := &widthWidget{content: object, width: width}
+	constrained.ExtendBaseWidget(constrained)
+	return constrained
+}
+
+func maxWidth(object fyne.CanvasObject, width float32) fyne.CanvasObject {
+	constrained := &widthWidget{content: object, width: width, maximum: true}
+	constrained.ExtendBaseWidget(constrained)
+	return constrained
+}
+
 // note is a wrapping secondary label. Long notes must never blow up the
 // minimum window width at 900px.
 func (c *clientApp) note(text string) *widget.Label {

@@ -128,8 +128,8 @@ func TestStatusBannerSemantics(t *testing.T) {
 	if got := c.bannerBG.FillColor; got != c.bannerTint(theme.ColorNameSuccess) {
 		t.Fatalf("ok colour = %v, want light success tint", got)
 	}
-	if c.pillLabel.Text != tr("overview.banner_ok", nil) {
-		t.Fatalf("pill = %q", c.pillLabel.Text)
+	if c.headerStatus.Text != "● "+tr("overview.banner_ok", nil) {
+		t.Fatalf("header status = %q", c.headerStatus.Text)
 	}
 }
 
@@ -140,7 +140,7 @@ func TestBannerActionNavigatesToGuidance(t *testing.T) {
 	if c.active != sectionActivity {
 		t.Fatalf("active = %v, want activity", c.active)
 	}
-	if got := c.activityTabs.SelectedIndex(); got != 1 {
+	if got := c.activityTabs.SelectedIndex(); got != 2 {
 		t.Fatalf("selected activity tab = %d, want log", got)
 	}
 }

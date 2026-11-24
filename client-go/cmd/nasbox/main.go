@@ -745,7 +745,13 @@ func gui(args []string) {
 		os.Exit(1)
 	}
 	defer store.Close()
-	ui.Run(cfg, store)
+	logger, logErr := diagnostics.Open()
+	if logErr != nil {
+		fmt.Fprintln(os.Stderr, "diagnostica non disponibile:", logErr)
+	} else {
+		defer logger.Close()
+	}
+	ui.Run(cfg, store, logger)
 }
 
 func syncOnce(args []string) {

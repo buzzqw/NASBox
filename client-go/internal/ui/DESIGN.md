@@ -14,7 +14,7 @@
 | Area | Contenuto |
 |---|---|
 | **Stato** | Banner semantico + prossima azione; Sincronizza / Pausa-Riprendi / Audit / Anteprima / Annulla; KPI (file tracciati, conflitti, undo, audit); dettagli configurazione e backend |
-| **Attività** | Sotto-tab *Trasferimenti* (ultimi eventi di coda) e *Log* (cronologia eventi) |
+| **Attività** | Tre elenchi indipendenti: *Recenti* (azioni/decisioni), *Trasferimenti* (progressi ed esiti), *Log* (eventi tecnici completi) |
 | **File** | Sotto-tab *Sfoglia NAS* (navigazione, aggiorna, elimina, rinomina), *Conflitti* (elenco + risoluzione), *Storico* (ripristino) |
 | **NAS** | Sotto-tab *Monitor* (disco, carico, memoria, lock, coda) e *Dispositivi* |
 | **Impostazioni** | Sotto-tab *Generale* (lingua, tema, banda, percorsi), *Cartelle e mirror* (mirror + selettivo), *Informazioni* (versione, update-check) |

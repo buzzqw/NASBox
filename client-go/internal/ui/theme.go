@@ -59,7 +59,7 @@ func (t *nasTheme) loadLight() {
 		theme.ColorNamePressed:             color.NRGBA{R: 0x0f, G: 0x17, B: 0x2a, A: 0x1f},
 		theme.ColorNameScrollBar:           color.NRGBA{R: 0x0f, G: 0x17, B: 0x2a, A: 0x80},
 		theme.ColorNameScrollBarBackground: nr(0xf1, 0xf5, 0xf9),
-		theme.ColorNameSeparator:           nr(0x94, 0xa3, 0xb8),
+		theme.ColorNameSeparator:           nr(0xd8, 0xe0, 0xea),
 		theme.ColorNameShadow:              color.NRGBA{R: 0x0f, G: 0x17, B: 0x2a, A: 0x2e},
 		theme.ColorNameSuccess:             nr(0x05, 0x96, 0x69),
 		theme.ColorNameWarning:             nr(0xd9, 0x77, 0x06),
@@ -101,7 +101,7 @@ func (t *nasTheme) loadDark() {
 		theme.ColorNamePrimary:             nr(0x47, 0x55, 0x69),
 		theme.ColorNameHyperlink:           nr(0x60, 0xa5, 0xfa),
 		theme.ColorNameFocus:               color.NRGBA{R: 0x71, G: 0x85, B: 0x9c, A: 0x5c},
-		theme.ColorNameSelection:           nr(0x33, 0x41, 0x55),
+		theme.ColorNameSelection:           nr(0x2b, 0x41, 0x5e),
 	})
 }
 
@@ -117,9 +117,17 @@ func (t *nasTheme) Color(name fyne.ThemeColorName, _ fyne.ThemeVariant) color.Co
 func (t *nasTheme) Font(style fyne.TextStyle) fyne.Resource    { return t.base.Font(style) }
 func (t *nasTheme) Icon(name fyne.ThemeIconName) fyne.Resource { return t.base.Icon(name) }
 
-// Size keeps Fyne's metrics: custom sizes tend to break widget internals on
-// smaller windows (900x640 is a supported size).
-func (t *nasTheme) Size(name fyne.ThemeSizeName) float32 { return t.base.Size(name) }
+// Size keeps Fyne's font/icon metrics but tightens only spacing. This makes
+// settings rows and file lists compact without changing widget internals.
+func (t *nasTheme) Size(name fyne.ThemeSizeName) float32 {
+	switch name {
+	case theme.SizeNamePadding:
+		return 6
+	case theme.SizeNameInnerPadding:
+		return 4
+	}
+	return t.base.Size(name)
+}
 
 func (t *nasTheme) color(name fyne.ThemeColorName) color.Color {
 	return t.Color(name, t.variant)

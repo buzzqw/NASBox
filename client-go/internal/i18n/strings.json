@@ -2297,7 +2297,7 @@
   },
   "metrics.nasbox_title": {
     "en": "NASBox activity",
-    "it": "Attivita NASBox"
+    "it": "Attività NASBox"
   },
   "metrics.network_title": {
     "en": "Network",
@@ -4895,6 +4895,30 @@
     "en": "(via bastion)",
     "it": "(via bastione)"
   },
+  "ui.activity.log_note": {
+    "en": "Technical events, errors and diagnostics. Nothing is filtered here.",
+    "it": "Eventi tecnici, errori e diagnostica. Qui nulla viene filtrato."
+  },
+  "ui.activity.recent": {
+    "en": "Recent",
+    "it": "Recenti"
+  },
+  "ui.activity.recent_note": {
+    "en": "Completed syncs, user actions and decisions, newest first.",
+    "it": "Sincronizzazioni completate, azioni e decisioni, prima le più recenti."
+  },
+  "ui.activity.recent_title": {
+    "en": "Recent activity",
+    "it": "Attività recente"
+  },
+  "ui.activity.refreshed": {
+    "en": "View refreshed",
+    "it": "Vista aggiornata"
+  },
+  "ui.activity.transfers_note": {
+    "en": "Only sync progress, transfers, downloads and their outcomes.",
+    "it": "Solo avanzamento sync, trasferimenti, download e relativi esiti."
+  },
   "ui.action.add_mirror": {
     "en": "Add external folder",
     "it": "Aggiungi cartella esterna"
@@ -4902,6 +4926,10 @@
   "ui.action.assign_device": {
     "en": "Assign name/IP",
     "it": "Assegna nome/IP"
+  },
+  "ui.action.assign_device_hint": {
+    "en": "Set a readable computer name and IP address for the selected ID.",
+    "it": "Imposta un nome computer e un indirizzo IP leggibili per l'ID selezionato."
   },
   "ui.action.audit_short": {
     "en": "Audit",
@@ -4963,6 +4991,10 @@
     "en": "Check server",
     "it": "Controlla server"
   },
+  "ui.action.server_check_hint": {
+    "en": "Refresh NAS metrics and verify the server version.",
+    "it": "Aggiorna le metriche NAS e verifica la versione del server."
+  },
   "ui.action.sync_folders": {
     "en": "Sync external folders",
     "it": "Sincronizza cartelle esterne"
@@ -4981,6 +5013,7 @@
   },
   "ui.direction.sync": {"it": "sincronizzazione", "en": "sync"},
   "ui.action.download_path": {"it": "Scarica percorso", "en": "Download path"},
+  "ui.action.download_path_short": {"it": "Scarica", "en": "Download"},
   "ui.action.undo_short": {
     "en": "Undo",
     "it": "Annulla"
@@ -4988,6 +5021,78 @@
   "ui.action.update_install": {
     "en": "Install Go update",
     "it": "Installa aggiornamento Go"
+  },
+  "ui.conflict.choose_note": {
+    "en": "Choose the original or one alternative, then resolve. Nothing changes before confirmation.",
+    "it": "Scegli l'originale o un'alternativa, poi risolvi. Nulla cambia prima della conferma."
+  },
+  "ui.conflict.keep_both_done": {
+    "en": "Version kept as: {path}",
+    "it": "Versione conservata come: {path}"
+  },
+  "ui.conflict.keep_both_failed": {
+    "en": "Keep both failed: {detail}",
+    "it": "Conserva entrambe fallito: {detail}"
+  },
+  "ui.conflict.choose_title": {
+    "en": "Version to keep",
+    "it": "Versione da mantenere"
+  },
+  "ui.action.cancel_short": {
+    "en": "Cancel",
+    "it": "Annulla"
+  },
+  "ui.action.cancelled": {
+    "en": "Action cancelled; nothing changed.",
+    "it": "Azione annullata; nessuna modifica."
+  },
+  "ui.action.save": {
+    "en": "Save",
+    "it": "Salva"
+  },
+  "ui.confirm.mass_delete_body": {
+    "en": "Authorize NASBox to delete the pending files for the configured confirmation period? Review the Log first if the disappearance was not intentional.",
+    "it": "Autorizzi NASBox a cancellare i file in sospeso per il periodo di conferma configurato? Controlla prima il Log se la scomparsa non era intenzionale."
+  },
+  "ui.confirm.mass_delete_done": {
+    "en": "Mass deletion authorized until {time}.",
+    "it": "Cancellazioni di massa autorizzate fino alle {time}."
+  },
+  "ui.confirm.mass_delete_failed": {
+    "en": "Could not authorize mass deletion: {detail}",
+    "it": "Impossibile autorizzare le cancellazioni di massa: {detail}"
+  },
+  "ui.confirm.mass_delete_title": {
+    "en": "Confirm mass deletion",
+    "it": "Conferma cancellazioni di massa"
+  },
+  "ui.confirm.prune_body": {
+    "en": "Permanently remove local history versions older than the configured retention? This cannot be undone.",
+    "it": "Rimuovere definitivamente le versioni locali più vecchie della retention configurata? L'operazione non è reversibile."
+  },
+  "ui.confirm.prune_title": {
+    "en": "Prune local history?",
+    "it": "Pulisci storico locale?"
+  },
+  "ui.confirm.undo_body": {
+    "en": "Restore files deleted from the NAS trash in the last 24 hours? Current files may be overwritten.",
+    "it": "Ripristinare i file eliminati dal cestino NAS nelle ultime 24 ore? I file attuali potrebbero essere sovrascritti."
+  },
+  "ui.confirm.undo_title": {
+    "en": "Undo recent deletions?",
+    "it": "Annulla eliminazioni recenti?"
+  },
+  "ui.confirm.update_body": {
+    "en": "Download and install the available Go client update? The application may need a restart.",
+    "it": "Scaricare e installare l'aggiornamento Go disponibile? Potrebbe essere necessario riavviare l'applicazione."
+  },
+  "ui.confirm.update_title": {
+    "en": "Install client update?",
+    "it": "Installa aggiornamento client?"
+  },
+  "ui.device.saved": {
+    "en": "Device {id} name/IP saved.",
+    "it": "Nome/IP del dispositivo {id} salvato."
   },
   "ui.dialog.confirm_delete_body": {
     "en": "Permanently delete ‘{path}’ from the NAS? (recoverable from history)",
@@ -5000,6 +5105,94 @@
   "ui.dialog.new_name": {
     "en": "New name:",
     "it": "Nuovo nome:"
+  },
+  "ui.device.assign_note": {
+    "en": "Select a device to assign a readable name and IP address.",
+    "it": "Seleziona un dispositivo per assegnare un nome e un indirizzo IP leggibili."
+  },
+  "ui.device.default_name": {
+    "en": "Device",
+    "it": "Dispositivo"
+  },
+  "ui.device.id": {
+    "en": "ID",
+    "it": "ID"
+  },
+  "ui.device.none_selected": {
+    "en": "No device selected",
+    "it": "Nessun dispositivo selezionato"
+  },
+  "ui.device.operations": {
+    "en": "operations",
+    "it": "operazioni"
+  },
+  "ui.device.refresh_hint": {
+    "en": "Read the device journal again from the NAS.",
+    "it": "Rileggi il journal dei dispositivi dal NAS."
+  },
+  "ui.device.selected": {
+    "en": "Selected ID: {id}",
+    "it": "ID selezionato: {id}"
+  },
+  "ui.footer.hint": {
+    "en": "Hover a control for details",
+    "it": "Passa il mouse per i dettagli"
+  },
+  "ui.file.browse_note": {
+    "en": "Click a folder once to open it. Select a file to download, rename or move it to the NAS trash.",
+    "it": "Clicca una cartella una volta per aprirla. Seleziona un file per scaricarlo, rinominarlo o spostarlo nel cestino NAS."
+  },
+  "ui.file.download_done": {
+    "en": "Downloaded: {path}",
+    "it": "Scaricato: {path}"
+  },
+  "ui.file.download_empty": {
+    "en": "Enter a remote file or folder path.",
+    "it": "Inserisci un percorso remoto di file o cartella."
+  },
+  "ui.file.download_path": {
+    "en": "Remote path",
+    "it": "Percorso remoto"
+  },
+  "ui.file.download_path_hint": {
+    "en": "File or folder path relative to the NASBox root",
+    "it": "Percorso file o cartella relativo alla radice NASBox"
+  },
+  "ui.file.download_started": {
+    "en": "Download started: {path}",
+    "it": "Download avviato: {path}"
+  },
+  "ui.file.folder": {
+    "en": "Folder",
+    "it": "Cartella"
+  },
+  "ui.file.none_selected": {
+    "en": "No file selected",
+    "it": "Nessun file selezionato"
+  },
+  "ui.file.path_opened": {
+    "en": "Opened NAS path: {path}",
+    "it": "Aperto percorso NAS: {path}"
+  },
+  "ui.file.refresh_hint": {
+    "en": "Read the current contents again.",
+    "it": "Rileggi i contenuti attuali."
+  },
+  "ui.file.rename_hint": {
+    "en": "Rename the selected file on the NAS.",
+    "it": "Rinomina il file selezionato sul NAS."
+  },
+  "ui.file.root_hint": {
+    "en": "Go to the NASBox root",
+    "it": "Vai alla radice NASBox"
+  },
+  "ui.file.selected": {
+    "en": "Selected: {name}",
+    "it": "Selezionato: {name}"
+  },
+  "ui.file.up_hint": {
+    "en": "Go to the parent folder",
+    "it": "Vai alla cartella superiore"
   },
   "ui.group.about": {
     "en": "About",
@@ -5037,17 +5230,101 @@
     "en": "Click a folder: ☑ synced, ☐ excluded",
     "it": "Clic su una cartella: ☑ sincronizzata, ☐ esclusa"
   },
+  "ui.history.none_selected": {
+    "en": "Select a historical version to restore it.",
+    "it": "Seleziona una versione storica per ripristinarla."
+  },
+  "ui.history.note": {
+    "en": "Local versions can replace the current file. NAS versions can be restored by path and version suffix.",
+    "it": "Le versioni locali possono sostituire il file attuale. Le versioni NAS si ripristinano con percorso e suffisso."
+  },
+  "ui.history.prune_hint": {
+    "en": "Permanently remove local versions older than the configured retention.",
+    "it": "Rimuove definitivamente le versioni locali più vecchie della retention configurata."
+  },
+  "ui.history.prune_done": {
+    "en": "Removed {count} old local versions.",
+    "it": "Rimosse {count} vecchie versioni locali."
+  },
+  "ui.history.prune_failed": {
+    "en": "History prune failed: {detail}",
+    "it": "Pulizia storico fallita: {detail}"
+  },
+  "ui.history.remote_done": {
+    "en": "NAS restore: {status}",
+    "it": "Ripristino NAS: {status}"
+  },
+  "ui.history.remote_failed": {
+    "en": "NAS restore failed: {detail}",
+    "it": "Ripristino NAS fallito: {detail}"
+  },
+  "ui.history.remote_hint": {
+    "en": "Restore a NAS version using separate path and version fields.",
+    "it": "Ripristina una versione NAS usando campi separati per percorso e versione."
+  },
+  "ui.history.remote_invalid": {
+    "en": "Enter both the remote path and the version suffix.",
+    "it": "Inserisci sia il percorso remoto sia il suffisso della versione."
+  },
+  "ui.history.remote_path": {
+    "en": "Remote path",
+    "it": "Percorso remoto"
+  },
+  "ui.history.remote_path_hint": {
+    "en": "folder/file.pdf",
+    "it": "cartella/file.pdf"
+  },
+  "ui.history.remote_version": {
+    "en": "Version suffix",
+    "it": "Suffisso versione"
+  },
+  "ui.history.remote_version_hint": {
+    "en": "2026-11-24--07-00-00-000000Z",
+    "it": "2026-11-24--07-00-00-000000Z"
+  },
+  "ui.history.remote_warning": {
+    "en": "The selected NAS version will replace the current file. This cannot be undone.",
+    "it": "La versione NAS selezionata sostituirà il file attuale. L'operazione non è reversibile."
+  },
   "ui.log.mirror_done": {
     "en": "External folders synced: {count}",
     "it": "Cartelle esterne sincronizzate: {count}"
+  },
+  "ui.mirror.added": {
+    "en": "External folder added: {source} → {dest}",
+    "it": "Cartella esterna aggiunta: {source} → {dest}"
+  },
+  "ui.mirror.invalid": {
+    "en": "Enter both the local source and NAS destination.",
+    "it": "Inserisci sia la sorgente locale sia la destinazione NAS."
+  },
+  "ui.nas.available": {
+    "en": "available",
+    "it": "disponibili"
   },
   "ui.nas.config": {
     "en": "NAS %s — server %s, repository %s",
     "it": "NAS %s — server %s, repository %s"
   },
+  "ui.nas.metrics_unavailable": {
+    "en": "NAS metrics unavailable",
+    "it": "Metriche NAS non disponibili"
+  },
   "ui.nas.config_short": {
     "en": "NAS %s — %s %s",
     "it": "NAS %s — %s %s"
+  },
+  "ui.nas.updated": {
+    "en": "Updated at {time}",
+    "it": "Aggiornato alle {time}"
+  },
+  "ui.nas.free": {
+    "en": "free",
+    "it": "liberi"
+  },
+  "ui.nas.used": {
+    "en": "used",
+    "it": "usato"
   },
   "ui.nav.activity": {
     "en": "Activity",
@@ -5057,13 +5334,373 @@
     "en": "Files",
     "it": "File"
   },
+  "ui.nav.hint": {
+    "en": "Choose an area. Language and appearance are in Settings.",
+    "it": "Scegli un'area. Lingua e aspetto sono in Impostazioni."
+  },
   "ui.nav.nas": {
     "en": "NAS",
     "it": "NAS"
   },
+  "ui.server.check_failed": {
+    "en": "Server check failed: {detail}",
+    "it": "Controllo server fallito: {detail}"
+  },
+  "ui.server.ok": {
+    "en": "Server OK: {version}",
+    "it": "Server OK: {version}"
+  },
+  "ui.server.outdated": {
+    "en": "Server outdated: {current} (required {minimum})",
+    "it": "Server obsoleto: {current} (richiesto {minimum})"
+  },
+  "ui.settings.add_mirror_hint": {
+    "en": "Add a local folder copied one way to a NAS folder.",
+    "it": "Aggiungi una cartella locale copiata in una sola direzione sul NAS."
+  },
+  "ui.settings.advanced_note": {
+    "en": "Retention, bandwidth, tray, scheduled pause and update paths.",
+    "it": "Retention, banda, tray, pausa programmata e percorsi di aggiornamento."
+  },
+  "ui.settings.advanced_tab": {
+    "en": "Advanced",
+    "it": "Avanzate"
+  },
+  "ui.settings.advanced_title": {
+    "en": "Advanced options",
+    "it": "Opzioni avanzate"
+  },
+  "ui.settings.appearance_note": {
+    "en": "Language and appearance apply immediately. Text fields save when you press Enter.",
+    "it": "Lingua e aspetto si applicano subito. I campi di testo si salvano con Invio."
+  },
+  "ui.settings.audit_batch": {
+    "en": "Audit batch size",
+    "it": "Dimensione batch audit"
+  },
+  "ui.settings.audit_days": {
+    "en": "Full audit every (days)",
+    "it": "Audit completo ogni (giorni)"
+  },
+  "ui.settings.audit_startup_delay": {
+    "en": "Audit startup delay (s)",
+    "it": "Ritardo avvio audit (s)"
+  },
+  "ui.settings.backend": {
+    "en": "Display backend",
+    "it": "Backend display"
+  },
+  "ui.settings.backend_auto": {
+    "en": "Automatic (Wayland if available, otherwise X11)",
+    "it": "Automatico (Wayland se disponibile, altrimenti X11)"
+  },
+  "ui.settings.bandwidth_download": {
+    "en": "Download limit (kbps)",
+    "it": "Limite download (kbps)"
+  },
+  "ui.settings.bandwidth_total": {
+    "en": "Total limit (kbps, 0 = unlimited)",
+    "it": "Limite totale (kbps, 0 = illimitato)"
+  },
+  "ui.settings.bandwidth_upload": {
+    "en": "Upload limit (kbps)",
+    "it": "Limite upload (kbps)"
+  },
+  "ui.settings.change_feed_wait": {
+    "en": "Change feed wait (s)",
+    "it": "Attesa change feed (s)"
+  },
+  "ui.settings.compression": {
+    "en": "Compression",
+    "it": "Compressione"
+  },
+  "ui.settings.compression_auto": {
+    "en": "Automatic on LAN",
+    "it": "Automatica in LAN"
+  },
+  "ui.settings.conflict_limit": {
+    "en": "Conflict limit",
+    "it": "Limite conflitti"
+  },
+  "ui.settings.conflict_manual": {
+    "en": "Manual (keep a conflict copy)",
+    "it": "Manuale (conserva una copia in conflitto)"
+  },
+  "ui.settings.conflict_newest": {
+    "en": "Keep the newest version",
+    "it": "Mantieni la versione più recente"
+  },
+  "ui.settings.conflict_policy": {
+    "en": "Conflict policy",
+    "it": "Politica conflitti"
+  },
+  "ui.settings.conflict_window": {
+    "en": "Conflict window (s)",
+    "it": "Finestra conflitti (s)"
+  },
+  "ui.settings.connection_note": {
+    "en": "NAS address, SSH credentials and optional jump host.",
+    "it": "Indirizzo NAS, credenziali SSH e bastione opzionale."
+  },
+  "ui.settings.connection_title": {
+    "en": "NAS connection and SSH",
+    "it": "Connessione NAS e SSH"
+  },
+  "ui.settings.debounce": {
+    "en": "Debounce (s)",
+    "it": "Debounce (s)"
+  },
+  "ui.settings.delete_classify": {
+    "en": "Classify differences",
+    "it": "Classifica le differenze"
+  },
+  "ui.settings.delete_confirmation": {
+    "en": "Confirmation duration (s)",
+    "it": "Durata conferma (s)"
+  },
+  "ui.settings.delete_enabled": {
+    "en": "Enable remote deletions",
+    "it": "Abilita cancellazioni remote"
+  },
+  "ui.settings.delete_guard_min": {
+    "en": "Minimum files for anomaly",
+    "it": "Minimo file per anomalia"
+  },
+  "ui.settings.delete_guard_ratio": {
+    "en": "Folder anomaly threshold",
+    "it": "Soglia anomalia cartella"
+  },
+  "ui.settings.delete_sentinels": {
+    "en": "Required sentinels (comma-separated)",
+    "it": "Sentinelle obbligatorie (separate da virgola)"
+  },
+  "ui.settings.delete_window": {
+    "en": "Safety window (s)",
+    "it": "Finestra sicurezza (s)"
+  },
+  "ui.settings.device_labels": {
+    "en": "Device names",
+    "it": "Nomi dispositivi"
+  },
+  "ui.settings.device_labels_note": {
+    "en": "Assign readable names and IP addresses in NAS → Devices.",
+    "it": "Assegna nomi e indirizzi IP leggibili in NAS → Dispositivi."
+  },
   "ui.settings.display": {
     "en": "Display",
     "it": "Display"
+  },
+  "ui.settings.display_backend": {
+    "en": "Active backend",
+    "it": "Backend attivo"
+  },
+  "ui.settings.file_stability": {
+    "en": "File stability (s)",
+    "it": "Stabilità file (s)"
+  },
+  "ui.settings.full_pull": {
+    "en": "Full pull every (s)",
+    "it": "Pull completo ogni (s)"
+  },
+  "ui.settings.info_title": {
+    "en": "Configuration paths",
+    "it": "Percorsi di configurazione"
+  },
+  "ui.settings.install_update_hint": {
+    "en": "Download and install an available Go client update after confirmation.",
+    "it": "Scarica e installa un aggiornamento Go disponibile dopo la conferma."
+  },
+  "ui.settings.integrity_enabled": {
+    "en": "Verify integrity at startup",
+    "it": "Verifica integrità all'avvio"
+  },
+  "ui.settings.integrity_interval": {
+    "en": "Checksum interval (s)",
+    "it": "Intervallo checksum (s)"
+  },
+  "ui.settings.integrity_note": {
+    "en": "Checksum sampling and full audit scheduling.",
+    "it": "Campionamento checksum e pianificazione dell'audit completo."
+  },
+  "ui.settings.integrity_sample": {
+    "en": "Checksum sample (0 = all)",
+    "it": "Campione checksum (0 = tutti)"
+  },
+  "ui.settings.integrity_startup_delay": {
+    "en": "Checksum startup delay (s)",
+    "it": "Ritardo avvio checksum (s)"
+  },
+  "ui.settings.integrity_tab": {
+    "en": "Integrity",
+    "it": "Integrità"
+  },
+  "ui.settings.integrity_title": {
+    "en": "Integrity and audit",
+    "it": "Integrità e audit"
+  },
+  "ui.settings.invalid_number": {
+    "en": "Enter a valid number.",
+    "it": "Inserisci un numero valido."
+  },
+  "ui.settings.invalid_time": {
+    "en": "Enter a valid time in HH:MM format.",
+    "it": "Inserisci un orario valido nel formato HH:MM."
+  },
+  "ui.settings.jump_host": {
+    "en": "Jump host",
+    "it": "Jump host"
+  },
+  "ui.settings.jump_port": {
+    "en": "Jump host SSH port",
+    "it": "Porta SSH jump host"
+  },
+  "ui.settings.jump_user": {
+    "en": "Jump host user",
+    "it": "Utente jump host"
+  },
+  "ui.settings.known_hosts": {
+    "en": "Known hosts file",
+    "it": "File known hosts"
+  },
+  "ui.settings.max_delete_batch": {
+    "en": "Maximum files per batch",
+    "it": "Massimo file per batch"
+  },
+  "ui.settings.max_delete_window": {
+    "en": "Maximum files per window",
+    "it": "Massimo file per finestra"
+  },
+  "ui.settings.metrics_interval": {
+    "en": "NAS health interval (s)",
+    "it": "Intervallo salute NAS (s)"
+  },
+  "ui.settings.min_server": {
+    "en": "Minimum server version",
+    "it": "Versione minima server"
+  },
+  "ui.settings.nas_lan": {
+    "en": "NAS LAN host/IP",
+    "it": "NAS LAN (host/IP)"
+  },
+  "ui.settings.nas_user": {
+    "en": "SSH user",
+    "it": "Utente SSH"
+  },
+  "ui.settings.nas_wan": {
+    "en": "NAS WAN host/IP",
+    "it": "NAS WAN (host/IP)"
+  },
+  "ui.settings.notify_sync": {
+    "en": "Notify when sync completes",
+    "it": "Notifica a fine sincronizzazione"
+  },
+  "ui.settings.animate_tray": {
+    "en": "Animate tray icon",
+    "it": "Anima icona tray"
+  },
+  "ui.settings.off": {
+    "en": "Off",
+    "it": "Disattivato"
+  },
+  "ui.settings.on": {
+    "en": "On",
+    "it": "Attivato"
+  },
+  "ui.settings.open_devices": {
+    "en": "Open Devices",
+    "it": "Apri Dispositivi"
+  },
+  "ui.settings.open_devices_hint": {
+    "en": "Go to the NAS device list.",
+    "it": "Vai all'elenco dispositivi NAS."
+  },
+  "ui.settings.pause_enabled": {
+    "en": "Enable scheduled pause",
+    "it": "Abilita pausa programmata"
+  },
+  "ui.settings.poll_interval": {
+    "en": "Polling interval (s)",
+    "it": "Intervallo polling (s)"
+  },
+  "ui.settings.remote_prefix": {
+    "en": "Remote NASBox folder",
+    "it": "Cartella NASBox remota"
+  },
+  "ui.settings.remote_script": {
+    "en": "NAS server script path",
+    "it": "Percorso script server NAS"
+  },
+  "ui.settings.retention_local": {
+    "en": "Local retention (days)",
+    "it": "Retention locale (giorni)"
+  },
+  "ui.settings.retention_remote": {
+    "en": "NAS retention (days)",
+    "it": "Retention NAS (giorni)"
+  },
+  "ui.settings.safety_note": {
+    "en": "Numeric, folder and manual guards before remote deletion.",
+    "it": "Protezioni numeriche, per cartella e manuali prima della cancellazione remota."
+  },
+  "ui.settings.safety_tab": {
+    "en": "Safety",
+    "it": "Sicurezza"
+  },
+  "ui.settings.safety_title": {
+    "en": "Deletion safety",
+    "it": "Sicurezza cancellazioni"
+  },
+  "ui.settings.save_failed": {
+    "en": "Setting not saved: {detail}",
+    "it": "Impostazione non salvata: {detail}"
+  },
+  "ui.settings.save_schedule": {
+    "en": "Save window",
+    "it": "Salva fascia"
+  },
+  "ui.settings.save_schedule_hint": {
+    "en": "Save the selected start and end times.",
+    "it": "Salva gli orari di inizio e fine selezionati."
+  },
+  "ui.settings.schedule_label": {
+    "en": "Pause window",
+    "it": "Fascia di pausa"
+  },
+  "ui.settings.shortcuts": {
+    "en": "Keyboard shortcuts",
+    "it": "Scorciatoie da tastiera"
+  },
+  "ui.settings.shortcuts_value": {
+    "en": "Ctrl+S sync · Ctrl+P pause · F5 refresh · Ctrl+1…5 areas · Ctrl+L log · Ctrl+, settings",
+    "it": "Ctrl+S sincronizza · Ctrl+P pausa · F5 aggiorna · Ctrl+1…5 aree · Ctrl+L log · Ctrl+, impostazioni"
+  },
+  "ui.settings.ssh_port": {
+    "en": "SSH port",
+    "it": "Porta SSH"
+  },
+  "ui.settings.sync_mode": {
+    "en": "Sync mode",
+    "it": "Modalità sincronizzazione"
+  },
+  "ui.settings.sync_note": {
+    "en": "Direction, timing, compression and conflict handling.",
+    "it": "Direzione, tempi, compressione e gestione conflitti."
+  },
+  "ui.settings.sync_title": {
+    "en": "Synchronization",
+    "it": "Sincronizzazione"
+  },
+  "ui.settings.tray_click": {
+    "en": "Tray click",
+    "it": "Click tray"
+  },
+  "ui.settings.update_go": {
+    "en": "Go update path",
+    "it": "Percorso aggiornamento Go"
+  },
+  "ui.settings.update_python": {
+    "en": "Python update path",
+    "it": "Percorso aggiornamento Python"
   },
   "ui.stat.undo": {
     "en": "Undoable",
@@ -5092,6 +5729,14 @@
   "ui.status.progress_next": {
     "en": "Keep the client open: a transfer is in progress.",
     "it": "Lascia il client aperto: il trasferimento è in corso."
+  },
+  "ui.update.install_failed": {
+    "en": "Update installation failed: {detail}",
+    "it": "Installazione aggiornamento fallita: {detail}"
+  },
+  "ui.update.installed": {
+    "en": "Updated to {version}; restart the client.",
+    "it": "Aggiornato a {version}; riavvia il client."
   },
   "ui.tray.pause_resume": {
     "en": "Pause / Resume",
