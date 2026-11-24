@@ -91,12 +91,12 @@ func TestStatusBannerSemantics(t *testing.T) {
 	if c.bannerReason.Text != "motivo blocco" {
 		t.Fatalf("reason = %q", c.bannerReason.Text)
 	}
-	if got := c.bannerBG.FillColor; got != c.tint(theme.ColorNameError) {
-		t.Fatalf("blocked colour = %v, want error colour", got)
+	if got := c.bannerBG.FillColor; got != c.bannerTint(theme.ColorNameError) {
+		t.Fatalf("blocked colour = %v, want light error tint", got)
 	}
 	c.applyStatusUI(statusOK, "tutto bene")
-	if got := c.bannerBG.FillColor; got != c.tint(theme.ColorNameSuccess) {
-		t.Fatalf("ok colour = %v, want success colour", got)
+	if got := c.bannerBG.FillColor; got != c.bannerTint(theme.ColorNameSuccess) {
+		t.Fatalf("ok colour = %v, want light success tint", got)
 	}
 	if c.pillLabel.Text != tr("overview.banner_ok", nil) {
 		t.Fatalf("pill = %q", c.pillLabel.Text)

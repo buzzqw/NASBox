@@ -35,6 +35,23 @@ func (c *clientApp) tint(name fyne.ThemeColorName) color.Color {
 	return c.uiTheme.color(name)
 }
 
+// bannerTint returns a light semantic wash instead of a saturated fill, so the
+// status colour is recognisable without drowning the text in colour.
+func (c *clientApp) bannerTint(name fyne.ThemeColorName) color.Color {
+	switch name {
+	case theme.ColorNameError:
+		return nr(0xfe, 0xe2, 0xe2)
+	case theme.ColorNameWarning:
+		return nr(0xfe, 0xf3, 0xc7)
+	case theme.ColorNameSuccess:
+		return nr(0xdc, 0xfc, 0xe7)
+	case theme.ColorNamePrimary:
+		return nr(0xe2, 0xe8, 0xf0)
+	default:
+		return c.tint(name)
+	}
+}
+
 // sectionTitle builds a consistent heading with a hairline separator.
 func (c *clientApp) sectionTitle(title, subtitle string) fyne.CanvasObject {
 	heading := widget.NewLabelWithStyle(title, fyne.TextAlignLeading, fyne.TextStyle{Bold: true})

@@ -496,7 +496,7 @@ func (c *clientApp) buildBanner() fyne.CanvasObject {
 	c.bannerReason.Wrapping = fyne.TextWrapWord
 	c.bannerNext = widget.NewLabelWithStyle("", fyne.TextAlignLeading, fyne.TextStyle{Italic: true})
 	c.bannerNext.Wrapping = fyne.TextWrapWord
-	c.bannerBG = canvas.NewRectangle(c.tint(theme.ColorNamePrimary))
+	c.bannerBG = canvas.NewRectangle(c.bannerTint(theme.ColorNamePrimary))
 	c.bannerBG.CornerRadius = 12
 	content := container.NewVBox(
 		c.bannerTitle,
@@ -773,7 +773,7 @@ func (c *clientApp) applyStatusUI(level statusLevel, reason string) {
 		title, next, colour = tr("status.starting", nil), tr("status.sync_state_starting", nil), theme.ColorNamePrimary
 		action, goFn = tr("main_window.tab_status", nil), func() { c.showSection(sectionStatus) }
 	}
-	c.bannerBG.FillColor = c.tint(colour)
+	c.bannerBG.FillColor = c.bannerTint(colour)
 	c.bannerBG.Refresh()
 	c.bannerTitle.SetText(title)
 	c.bannerReason.SetText(reason)

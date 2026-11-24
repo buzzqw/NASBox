@@ -4,5 +4,5 @@ package version
 
 const (
 	AppName    = "NASBox Go"
-	AppVersion = "0.5.1"
+	AppVersion = "0.5.2"
 )
