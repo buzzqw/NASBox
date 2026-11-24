@@ -24,6 +24,8 @@ def main() -> None:
     parser.add_argument("--binary", required=True, help="binario Go da pubblicare")
     parser.add_argument("--dest-dir", required=True)
     parser.add_argument("--notes", default="")
+    parser.add_argument("--target", default="linux-amd64", help="es. linux-amd64 o linux-arm64")
+    parser.add_argument("--requires-server", default="3.26.0")
     parser.add_argument(
         "--version-file",
         default="client-go/internal/version/version.go",
@@ -54,6 +56,8 @@ def main() -> None:
         "sha256": digest,
         "size": len(content),
         "notes": args.notes,
+        "target": args.target,
+        "requires_server": args.requires_server,
         "published_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
     }
     manifest_tmp = dest / "manifest-go.json.tmp"
