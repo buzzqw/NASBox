@@ -68,7 +68,7 @@ func (t *nasTheme) loadLight() {
 		theme.ColorNamePrimary:   nr(0x33, 0x41, 0x55),
 		theme.ColorNameHyperlink: nr(0x25, 0x63, 0xeb),
 		theme.ColorNameFocus:     color.NRGBA{R: 0x33, G: 0x41, B: 0x55, A: 0x45},
-		theme.ColorNameSelection: nr(0xdb, 0xea, 0xfe),
+		theme.ColorNameSelection: nr(0x93, 0xc5, 0xfd),
 	})
 }
 

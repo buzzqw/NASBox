@@ -1,5 +1,5 @@
 {
-  "animate_sync_icon": false,
+  "animate_sync_icon": true,
   "bandwidth_download_kbps": 0,
   "bandwidth_upload_kbps": 0,
   "change_feed_wait_seconds": 55,

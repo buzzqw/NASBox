@@ -34,6 +34,7 @@ binario.
 | 7 | UI ricostruita su funzioni complete: navigazione nativa con selezione visibile, contrasto, tutte le azioni collegate (conferma, cancel, download, keep-both, storico remoto, audit, server-check, update) | completata (0.7.0) |
 | 7b | Fix UX: tooltip nel footer, tre liste attività distinte, chiave repository locale corretta (file tracciati), form rename grande, dispositivi con nome/IP, aggiunta mirror guidata, bordi visibili | completata (0.8.0) |
 | 7c | Icona tray storica + animazione, zero sfondi grigi, evidenziazione navigazione con marcatore, browse a doppio clic sulle cartelle, storico filtrabile, hint non troncato | completata (0.9.0) |
+| 7d | Banner semantico theme-aware (legibile anche in dark), selezione navigazione più forte, download per percorso digitato, elenco file con icone e dimensioni | completata (0.10.0) |
 | 8 | Rollout graduale e rimozione del client Python | da fare |
 
 Il documento di design dell'interfaccia è in `internal/ui/DESIGN.md`.

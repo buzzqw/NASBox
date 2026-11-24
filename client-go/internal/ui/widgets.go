@@ -40,6 +40,21 @@ func (c *clientApp) tint(name fyne.ThemeColorName) color.Color {
 // bannerTint returns a light semantic wash instead of a saturated fill, so the
 // status colour is recognisable without drowning the text in colour.
 func (c *clientApp) bannerTint(name fyne.ThemeColorName) color.Color {
+	dark := c.uiTheme != nil && c.uiTheme.variant == theme.VariantDark
+	if dark {
+		switch name {
+		case theme.ColorNameError:
+			return nr(0x4a, 0x1d, 0x1d)
+		case theme.ColorNameWarning:
+			return nr(0x4a, 0x38, 0x12)
+		case theme.ColorNameSuccess:
+			return nr(0x12, 0x3a, 0x28)
+		case theme.ColorNamePrimary:
+			return nr(0x1f, 0x29, 0x37)
+		default:
+			return c.tint(name)
+		}
+	}
 	switch name {
 	case theme.ColorNameError:
 		return nr(0xfe, 0xe2, 0xe2)

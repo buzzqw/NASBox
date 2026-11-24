@@ -125,6 +125,8 @@ type clientApp struct {
 
 	browsePath          string
 	browsePathLabel     *widget.Label
+	browseSelectedLabel *widget.Label
+	downloadPathEntry   *widget.Entry
 	browseEntries       []remote.BrowseEntry
 	browseList          *widget.List
 	mirrorLabel         *widget.Label
@@ -668,7 +670,11 @@ func (c *clientApp) filesView() fyne.CanvasObject {
 		func() int { return len(c.browseEntries) },
 		func(id int, label *widget.Label) {
 			entry := c.browseEntries[id]
-			label.SetText(fmt.Sprintf("%s   %s   %d B", entry.Name, entry.Kind, entry.Size))
+			icon := "📄"
+			if entry.Kind == "DIR" {
+				icon = "📁"
+			}
+			label.SetText(fmt.Sprintf("%s %s   %s   %s", icon, entry.Name, entry.Kind, humanBytes(entry.Size)))
 		},
 	)
 	c.browseList.OnSelected = func(id widget.ListItemID) {
@@ -687,8 +693,14 @@ func (c *clientApp) filesView() fyne.CanvasObject {
 			return
 		}
 		c.selectedBrowse = entry.Name
+		if c.browseSelectedLabel != nil {
+			c.browseSelectedLabel.SetText("Selezionato: " + entry.Name)
+		}
 	}
 	c.browsePathLabel = widget.NewLabel("Percorso: /")
+	c.browseSelectedLabel = widget.NewLabel("Nessun file selezionato")
+	c.downloadPathEntry = widget.NewEntry()
+	c.downloadPathEntry.SetPlaceHolder("Percorso remoto (es. cartella/file.pdf)")
 	c.deleteBtn = newHintButton(tr("browse.delete_btn", nil), theme.DeleteIcon(),
 		tr("browse.confirm_delete_title", nil), widget.DangerImportance, c.onBrowseDelete, c.setHint).Button
 	c.renameBtn = newHintButton(tr("browse.rename_btn", nil), theme.DocumentCreateIcon(),
@@ -696,8 +708,9 @@ func (c *clientApp) filesView() fyne.CanvasObject {
 
 	browsePane := container.NewBorder(
 		container.NewVBox(
-			c.sectionTitle(tr("main_window.tab_browse", nil), tr("browse.note", nil)),
+			c.sectionTitle(tr("main_window.tab_browse", nil), "Clic su una cartella per entrarci; seleziona un file per le azioni"),
 			c.browsePathLabel,
+			c.browseSelectedLabel,
 			container.NewHBox(
 				newHintButton(tr("browse.up_btn", nil), theme.NavigateBackIcon(),
 					tr("main_window.tab_browse_tooltip", nil), widget.LowImportance, c.onBrowseUp, c.setHint),
@@ -707,6 +720,11 @@ func (c *clientApp) filesView() fyne.CanvasObject {
 				c.renameBtn,
 				newHintButton(tr("ui.action.download", nil), theme.DownloadIcon(),
 					"", widget.MediumImportance, c.onBrowseDownload, c.setHint),
+			),
+			container.NewHBox(
+				c.downloadPathEntry,
+				newHintButton(tr("ui.action.download", nil), theme.DownloadIcon(),
+					"Scarica il percorso digitato", widget.HighImportance, c.onDownloadPath, c.setHint),
 			),
 		),
 		nil, nil, nil, container.NewVScroll(c.browseList),
@@ -1581,6 +1599,25 @@ func (c *clientApp) onConfirmDelete() {
 
 func (c *clientApp) onCancel() {
 	c.runner.Cancel()
+}
+
+func (c *clientApp) onDownloadPath() {
+	if c.downloadPathEntry == nil {
+		return
+	}
+	relative := strings.TrimSpace(c.downloadPathEntry.Text)
+	if relative == "" {
+		c.appendLog("Inserisci un percorso remoto")
+		return
+	}
+	c.appendLog("Download avviato: " + relative)
+	go func() {
+		if err := c.transfers.DownloadPath(relative); err != nil {
+			c.appendLog("Download non riuscito: " + err.Error())
+			return
+		}
+		c.appendLog("Scaricato: " + relative)
+	}()
 }
 
 func (c *clientApp) onBrowseDownload() {
