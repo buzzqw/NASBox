@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from . import paths
+from .i18n import t
 
 DEFAULT_WINDOW_SECONDS = 3600
 DEFAULT_MAX_DELETES_PER_WINDOW = 1000
@@ -97,11 +98,9 @@ class DeleteSafety:
                 return
             from .repository_safety import RepositorySafetyError
 
-            raise RepositorySafetyError(
-                f"operazione bloccata: {total} cancellazioni nell'ultima ora, "
-                f"limite cumulativo {limit}. Se l'eliminazione di massa e' intenzionale, "
-                f"confermala dalla scheda Stato prima di riprovare"
-            )
+            raise RepositorySafetyError(t(
+                "safety.blocked_cumulative", count=total, limit=limit,
+            ))
 
     def record(self, cfg: Any, count: int, direction: str) -> None:
         if count <= 0 or not cfg.get("delete_enabled"):

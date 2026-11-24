@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import sys
 import time
 from datetime import datetime, timedelta
@@ -35,6 +36,12 @@ RECENT_PROBLEM_SECONDS = 24 * 60 * 60
 # decisions the user has to see, so they keep the long window.
 RECENT_TRANSIENT_SECONDS = 15 * 60
 RECENT_EVENT_SCAN_LIMIT = 20_000
+
+
+def _safety_count(detail: str) -> str:
+    """Read the blocked-file count out of a SAFETY_BLOCK detail string."""
+    match = re.search(r"\d+", str(detail or ""))
+    return match.group(0) if match else "?"
 
 
 def _clock_after(seconds) -> str:
@@ -96,6 +103,7 @@ class StatusTab(QWidget):
         self._recent_problem_events: dict[str, tuple[float, str]] = {}
         self.attention_problems: list[tuple[str, str, str]] = []
         self._conflict_count = 0
+        self._last_assurance: dict = {}
         # True once the card rows have been stacked vertically because the
         # window became too narrow for two ~360px columns side by side.
         self._single_column = False
@@ -130,6 +138,24 @@ class StatusTab(QWidget):
         self.assurance_proof.setObjectName("assuranceProof")
         self.assurance_proof.setWordWrap(True)
         assurance_layout.addWidget(self.assurance_proof)
+        # One explicit "what to do now" step. The checkmarks below describe the
+        # state; this row tells the user which button to press and why.
+        self.guidance_row = QHBoxLayout()
+        self.guidance_row.setContentsMargins(0, 0, 0, 0)
+        self.guidance_row.setSpacing(4)
+        self.assurance_guidance = QLabel("")
+        self.assurance_guidance.setObjectName("assuranceGuidance")
+        self.assurance_guidance.setWordWrap(True)
+        self.assurance_guidance.setAccessibleName(t("assurance.guidance_title"))
+        self.guidance_row.addWidget(self.assurance_guidance, 1)
+        self.guidance_btn = QPushButton(t("assurance.guidance_action_log"))
+        self.guidance_btn.setObjectName("assuranceGuidanceAction")
+        self.guidance_btn.clicked.connect(self._guidance_action)
+        self.guidance_row.addWidget(self.guidance_btn)
+        assurance_layout.addLayout(self.guidance_row)
+        self._guidance_destination = ""
+        self.assurance_guidance.hide()
+        self.guidance_btn.hide()
         self.assurance_checks = QLabel("")
         self.assurance_checks.setObjectName("assuranceChecks")
         self.assurance_checks.setWordWrap(True)
@@ -233,6 +259,9 @@ class StatusTab(QWidget):
         self.confirm_deletes_btn.setToolTip(t("status.confirm_deletes_tooltip"))
         self.confirm_deletes_btn.setAccessibleName(t("a11y.confirm_deletes_btn"))
         self.confirm_deletes_btn.clicked.connect(self._confirm_deletions)
+        # Only useful while a mass deletion is actually blocked: showing it all
+        # the time invites the user to bypass a safety guard by accident.
+        self.confirm_deletes_btn.hide()
         status_layout.addWidget(self.confirm_deletes_btn)
         self.watcher_label = QLabel(t("status.watcher_starting"))
         self.watcher_label.setObjectName("statusWatcher")
@@ -639,9 +668,62 @@ class StatusTab(QWidget):
         self.engine.verify_integrity_now()
         QTimer.singleShot(1500, lambda: self.verify_now_btn.setEnabled(True))
 
+    def _recent_safety(self):
+        """A safety block is a decision, not a transient error: keep it visible."""
+        event = self._recent_problem_events.get("SAFETY_BLOCK")
+        if event is None or time.time() - event[0] > RECENT_PROBLEM_SECONDS:
+            return None
+        return event
+
+    def _assurance_guide(self, data: dict) -> tuple[str, str, str]:
+        """Return (short reason, what to do next, button destination)."""
+        safety = self._recent_safety()
+        if safety is not None:
+            return (
+                t("assurance.reason_safety"),
+                t("assurance.guidance_safety", count=_safety_count(safety[1])),
+                "log",
+            )
+        if self._conflict_count:
+            return (
+                t("assurance.reason_conflicts"),
+                t("assurance.guidance_conflicts"),
+                "conflicts",
+            )
+        if not self._connected:
+            return (t("assurance.reason_offline"), t("assurance.guidance_offline"), "settings")
+        queued = data.get("queue_count", 0) or 0
+        pending = data.get("pending_count", 0) or 0
+        if queued:
+            return (
+                t("assurance.reason_queue"),
+                t("assurance.guidance_queue", count=queued),
+                "transfers",
+            )
+        if pending:
+            return (
+                t("assurance.reason_pending"),
+                t("assurance.guidance_queue", count=pending),
+                "transfers",
+            )
+        if not data.get("last_integrity_check_ts"):
+            return (
+                t("assurance.reason_integrity"),
+                t("assurance.guidance_integrity"),
+                "verify",
+            )
+        return ("", "", "")
+
+    def _guidance_action(self) -> None:
+        if self._guidance_destination == "verify":
+            self._verify_now()
+        elif self._guidance_destination:
+            self.attention_action_requested.emit(self._guidance_destination)
+
     def _refresh_assurance(self, data: dict) -> None:
         if not isinstance(data, dict) or not data:
             return
+        self._last_assurance = data
         pending = data.get("pending_count", 0)
         queued = data.get("queue_count", 0)
         conflicts = self._conflict_count
@@ -653,7 +735,11 @@ class StatusTab(QWidget):
             self._connected and data.get("server_health") == "ok"
             and data.get("repository_ready") and data.get("journal_ready")
         )
-        clean = healthy and not pending and not queued and not conflicts and not mismatch
+        reason, guidance, action = self._assurance_guide(data)
+        clean = (
+            healthy and not pending and not queued and not conflicts
+            and not mismatch and not reason
+        )
         if active and not clean:
             headline = t("assurance.in_progress", kind=active)
             state = "active"
@@ -661,7 +747,10 @@ class StatusTab(QWidget):
             headline = t("assurance.all_synced")
             state = "ok"
         elif self._connected:
-            headline = t("assurance.needs_attention")
+            headline = (
+                t("assurance.needs_attention_detail", reason=reason)
+                if reason else t("assurance.needs_attention")
+            )
             state = "warning"
         else:
             headline = t("assurance.offline")
@@ -670,6 +759,25 @@ class StatusTab(QWidget):
         self.assurance_headline.setProperty("state", state)
         self.assurance_headline.style().unpolish(self.assurance_headline)
         self.assurance_headline.style().polish(self.assurance_headline)
+
+        if guidance:
+            self.assurance_guidance.setText(
+                f"{t('assurance.guidance_title')}: {guidance}"
+            )
+            self._guidance_destination = action
+            button_text = (
+                t("assurance.verify_now") if action == "verify"
+                else t(f"assurance.guidance_action_{action}")
+            )
+            self.guidance_btn.setText(button_text)
+            self.assurance_guidance.show()
+            self.guidance_btn.show()
+        else:
+            self.assurance_guidance.clear()
+            self.assurance_guidance.hide()
+            self.guidance_btn.hide()
+        # The override is only meaningful while a deletion is actually blocked.
+        self.confirm_deletes_btn.setVisible(self._recent_safety() is not None)
 
         if last:
             age = max(0, int(time.time() - last))
@@ -709,7 +817,10 @@ class StatusTab(QWidget):
         }
         for key, value in values.items():
             self.assurance_stats[key].setText(value)
-        self.assurance_status.emit(headline, self.assurance_proof.text())
+        tooltip = self.assurance_proof.text()
+        if guidance:
+            tooltip = f"{tooltip}\n{guidance}"
+        self.assurance_status.emit(headline, tooltip)
 
     def on_status_changed(self, status: dict) -> None:
         paused = status.get("paused", False)
@@ -1182,6 +1293,8 @@ class StatusTab(QWidget):
         self._recent_problem_events[action] = (now, detail)
         self.last_problem_label.setText(self._last_problem_text())
         self._refresh_attention()
+        if self._last_assurance:
+            self._refresh_assurance(self._last_assurance)
 
     def _load_recent_events(self, events) -> None:
         now = time.time()
@@ -1335,15 +1448,18 @@ class StatusTab(QWidget):
             # A persisted journal error already carries the same actionable fact.
             if action == "JOURNAL_BLOCK" and journal_error:
                 continue
-            problems.append((
-                f"event_{action.lower()}",
-                t(
+            if action == "SAFETY_BLOCK":
+                message = t(
+                    "status.problem_safety_block",
+                    detail=self._compact_detail(event[1]),
+                )
+            else:
+                message = t(
                     "status.problem_recent_event",
                     action=self._problem_category(action, event[1]),
                     detail=self._compact_detail(event[1]),
-                ),
-                "log",
-            ))
+                )
+            problems.append((f"event_{action.lower()}", message, "log"))
 
         if (
             self._diagnostics_available and self._nas_available_bytes is not None

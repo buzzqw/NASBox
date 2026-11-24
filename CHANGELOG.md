@@ -4,6 +4,20 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 1.32.0 - 2026-11-24
+
+- Messaggi di stato guidati: il banner dice il motivo specifico (blocco di
+  sicurezza, coda, conflitti, checksum mai verificato) e mostra "Cosa fare ora"
+  con il pulsante per aprire Log, Trasferimenti o Conflitti, oppure per avviare
+  la verifica dei checksum.
+- I blocchi di sicurezza ora indicano quanti file verrebbero cancellati, che
+  nessun file è stato modificato e come distinguere un errore da una
+  cancellazione intenzionale; i messaggi seguono la lingua dell'interfaccia.
+- "Conferma cancellazioni di massa" compare solo quando una cancellazione è
+  realmente bloccata e il suo tooltip avvisa che i file verranno rimossi anche
+  dal NAS.
+- La Panoramica aggiunge una riga "Cosa fare" sotto il motivo dell'attenzione.
+
 ## 1.31.0 - 2026-11-23
 
 - Audit esteso ai problemi di sincronizzazione: coda pending con voci stale,

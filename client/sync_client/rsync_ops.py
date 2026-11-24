@@ -33,6 +33,7 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from .config import Config
+from .i18n import t
 from .reconcile import RemoteKind, RemoteState
 from .repository_safety import RepositorySafetyError, validate_local_root
 from .sync_state import CausalVersion, Fingerprint
@@ -2193,10 +2194,9 @@ def validate_transfer_safety(
         except (TypeError, ValueError):
             max_deletes = 1000
         if len(deletions) > max_deletes:
-            raise RepositorySafetyError(
-                f"operazione bloccata: {len(deletions)} cancellazioni proposte, "
-                f"limite di sicurezza {max_deletes}; controlla il volume e la cartella NASBox"
-            )
+            raise RepositorySafetyError(t(
+                "safety.blocked_proposed", count=len(deletions), limit=max_deletes,
+            ))
         # A sequence of smaller batches can stay under the per-batch limit and
         # still delete the whole tree. Check the rolling window as well.
         from . import delete_safety

@@ -248,6 +248,36 @@ STRINGS: dict[str, dict[str, str]] = {
     "assurance.in_progress": {"it": "Sincronizzazione in corso ({kind})…", "en": "Syncing ({kind})…"},
     "assurance.all_synced": {"it": "Tutto sincronizzato. Nessuna modifica in sospeso.", "en": "Everything is synced. No pending changes."},
     "assurance.needs_attention": {"it": "Attenzione: qualcosa richiede il tuo intervento.", "en": "Attention: something needs your action."},
+    "assurance.needs_attention_detail": {"it": "Attenzione: {reason}", "en": "Attention: {reason}"},
+    "assurance.reason_safety": {"it": "cancellazioni di massa bloccate", "en": "mass deletion blocked"},
+    "assurance.reason_conflicts": {"it": "conflitti da risolvere", "en": "conflicts to resolve"},
+    "assurance.reason_integrity": {"it": "verifica checksum da eseguire", "en": "checksum check to run"},
+    "assurance.reason_queue": {"it": "operazioni in coda", "en": "operations queued"},
+    "assurance.reason_pending": {"it": "modifiche locali in sospeso", "en": "local changes pending"},
+    "assurance.reason_offline": {"it": "NAS non raggiungibile", "en": "NAS unreachable"},
+    "assurance.guidance_title": {"it": "Cosa fare ora", "en": "What to do now"},
+    "assurance.guidance_safety": {
+        "it": "Un trasferimento è stato bloccato prima di cancellare {count} file. Nessun file è stato modificato. Controlla il Log: se i file sono spariti per errore (unità non montata o cartella cancellata), ripristinali. Solo se la cancellazione è intenzionale, premi «Conferma cancellazioni di massa» e poi «Sincronizza adesso».",
+        "en": "A transfer was blocked before deleting {count} files. Nothing was changed. Open the Log: if the files disappeared by mistake (unmounted drive or deleted folder), restore them. Only if the deletion is intentional, press 'Confirm mass deletion' and then 'Sync everything now'.",
+    },
+    "assurance.guidance_queue": {
+        "it": "{count} operazioni in coda: NASBox riprova da solo. Se restano bloccate, apri il Log per leggere il motivo, oppure controlla la scheda Trasferimenti.",
+        "en": "{count} operations queued: NASBox retries on its own. If they stay stuck, open the Log for the reason or check the Transfers tab.",
+    },
+    "assurance.guidance_integrity": {
+        "it": "La verifica dei checksum non è mai stata eseguita. Premi «Verifica adesso»: confronta i file senza modificarli.",
+        "en": "The checksum verification has never run. Press 'Verify now': it compares files without changing them.",
+    },
+    "assurance.guidance_conflicts": {
+        "it": "Apri la scheda Conflitti e scegli quale versione tenere per ogni file, poi sincronizza di nuovo.",
+        "en": "Open the Conflicts tab and choose which version to keep for each file, then sync again.",
+    },
+    "assurance.guidance_offline": {
+        "it": "Controlla che il NAS sia acceso e raggiungibile, poi verifica la configurazione di connessione.",
+        "en": "Check that the NAS is on and reachable, then review the connection settings.",
+    },
+    "assurance.guidance_action_log": {"it": "Apri Log", "en": "Open Log"},
+    "assurance.guidance_action_conflicts": {"it": "Apri Conflitti", "en": "Open Conflicts"},
     "assurance.offline": {"it": "NAS non raggiungibile: impossibile garantire la sincronizzazione.", "en": "NAS unreachable: cannot verify sync state."},
     "assurance.seconds_ago": {"it": "{seconds} secondi fa", "en": "{seconds} seconds ago"},
     "assurance.minutes_ago": {"it": "{minutes} minuti fa", "en": "{minutes} minutes ago"},
@@ -309,6 +339,17 @@ STRINGS: dict[str, dict[str, str]] = {
     "overview.age_hours": {"it": "{count} ore fa", "en": "{count} hours ago"},
     "overview.age_days": {"it": "{count} giorni fa", "en": "{count} days ago"},
     "overview.reason": {"it": "Motivo: {detail}", "en": "Reason: {detail}"},
+    "overview.guidance": {"it": "Cosa fare: {detail}", "en": "Next step: {detail}"},
+    "overview.step_queue": {
+        "it": "controlla il Log se le operazioni restano in coda",
+        "en": "check the Log if operations stay queued",
+    },
+    "overview.step_pending": {"it": "lascia finire il prossimo invio al NAS", "en": "let the next upload to the NAS finish"},
+    "overview.step_conflicts": {"it": "risolvi i conflitti nella scheda Conflitti", "en": "resolve conflicts in the Conflicts tab"},
+    "overview.step_checksum": {"it": "apri lo Stato e premi «Verifica adesso»", "en": "open Status and press 'Verify now'"},
+    "overview.step_audit": {"it": "apri lo Stato e avvia l'audit completo", "en": "open Status and run the full audit"},
+    "overview.step_paused": {"it": "riattiva la sincronizzazione dallo Stato", "en": "resume sync from Status"},
+    "overview.step_unreachable": {"it": "controlla rete e impostazioni del NAS", "en": "check network and NAS settings"},
     "overview.reason_paused": {"it": "sincronizzazione in pausa", "en": "sync paused"},
     "overview.reason_pending": {"it": "{count} modifiche locali in sospeso", "en": "{count} local changes pending"},
     "overview.reason_queued": {"it": "{count} operazioni in coda", "en": "{count} queued operations"},
@@ -503,7 +544,10 @@ STRINGS: dict[str, dict[str, str]] = {
     "settings.export_failed_title": {"it": "Esportazione non riuscita", "en": "Export failed"},
     "settings.export_failed_body": {"it": "Impossibile scrivere il bundle: {detail}", "en": "Could not write the bundle: {detail}"},
     "status.confirm_deletes_btn": {"it": "Conferma cancellazioni di massa", "en": "Confirm mass deletion"},
-    "status.confirm_deletes_tooltip": {"it": "Consente per 10 minuti una cancellazione che supera il limite cumulativo di sicurezza", "en": "Allow a deletion above the cumulative safety limit for 10 minutes"},
+    "status.confirm_deletes_tooltip": {
+        "it": "Autorizza per 10 minuti le cancellazioni oltre il limite di sicurezza. Usalo SOLO dopo aver controllato nel Log quali file verrebbero rimossi: i file spariranno anche dal NAS.",
+        "en": "Allows deletions above the safety limit for 10 minutes. Use it ONLY after checking the Log for the files involved: they will be removed from the NAS as well.",
+    },
     "a11y.confirm_deletes_btn": {"it": "Conferma cancellazioni di massa", "en": "Confirm mass deletion"},
     "status.remote_lock_held": {
         "it": "Lock NAS: occupato da circa {age}; proprietario {owner}.",
@@ -589,6 +633,14 @@ STRINGS: dict[str, dict[str, str]] = {
     "status.problem_category_connection": {"it": "connessione SSH", "en": "SSH connection"},
     "status.problem_category_transfer": {"it": "trasferimento rsync", "en": "rsync transfer"},
     "status.problem_category_safety_block": {"it": "blocco di sicurezza", "en": "safety block"},
+    "safety.blocked_proposed": {
+        "it": "Operazione bloccata: verrebbero cancellati {count} file (limite di sicurezza {limit}). Nessun file è stato modificato. Controlla il Log e la cartella NASBox: di solito significa che file presenti sul NAS non ci sono più in locale. Se è un errore, ripristinali; se è intenzionale, usa «Conferma cancellazioni di massa» nella scheda Stato e riprova.",
+        "en": "Operation blocked: {count} files would be deleted (safety limit {limit}). Nothing was changed. Check the Log and the NASBox folder: usually files on the NAS are missing locally. If it is a mistake, restore them; if intentional, use 'Confirm mass deletion' in the Status tab and retry.",
+    },
+    "safety.blocked_cumulative": {
+        "it": "Operazione bloccata: {count} cancellazioni nell'ultima ora, limite cumulativo {limit}. Nessun file è stato modificato. Controlla il Log per capire quali file verrebbero rimossi; se l'eliminazione è intenzionale, premi «Conferma cancellazioni di massa» nella scheda Stato prima di riprovare.",
+        "en": "Operation blocked: {count} deletions in the last hour, cumulative limit {limit}. Nothing was changed. Check the Log to see which files would be removed; if the deletion is intentional, press 'Confirm mass deletion' in the Status tab before retrying.",
+    },
     "status.problem_category_journal_block": {"it": "journal", "en": "journal"},
     "status.problem_category_generic": {"it": "errore {action}", "en": "{action} error"},
     "status.problem_no_detail": {"it": "nessun dettaglio", "en": "no details"},
@@ -691,6 +743,10 @@ STRINGS: dict[str, dict[str, str]] = {
     "status.problem_recent_event": {
         "it": "{action} di recente: {detail}. NASBox riprova da solo: apri il Log per il dettaglio.",
         "en": "Recent {action}: {detail}. NASBox retries on its own: open the Log for details.",
+    },
+    "status.problem_safety_block": {
+        "it": "Blocco di sicurezza: {detail}. Nessun file è stato modificato. Controlla il Log e ripristina i file locali mancanti; conferma la cancellazione solo se è intenzionale.",
+        "en": "Safety block: {detail}. Nothing was changed. Check the Log and restore any missing local files; confirm the deletion only if it is intentional.",
     },
     "status.problem_low_space": {"it": "Spazio disponibile sul NAS basso: {free}. Controlla lo storico e libera spazio.", "en": "Low available NAS space: {free}. Review history and free space."},
 

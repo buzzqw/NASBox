@@ -76,6 +76,13 @@ class OverviewTab(QWidget):
         self.reason_label.setWordWrap(True)
         self.reason_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         root.addWidget(self.reason_label)
+        # The reason alone tells users *what* happened; this line tells them
+        # *what to do next* without making the banner change height.
+        self.guidance_label = QLabel("")
+        self.guidance_label.setObjectName("overviewGuidance")
+        self.guidance_label.setWordWrap(True)
+        self.guidance_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        root.addWidget(self.guidance_label)
 
         # --- four numeric tiles in a single fixed-height row ---
         tiles = QHBoxLayout()
@@ -231,6 +238,25 @@ class OverviewTab(QWidget):
             reasons.append(t("overview.reason_journal"))
         self.reason_label.setText(
             t("overview.reason", detail=" · ".join(reasons)) if reasons else ""
+        )
+
+        step = ""
+        if not connected:
+            step = t("overview.step_unreachable")
+        elif paused:
+            step = t("overview.step_paused")
+        elif conflicts:
+            step = t("overview.step_conflicts")
+        elif queued:
+            step = t("overview.step_queue")
+        elif pending:
+            step = t("overview.step_pending")
+        elif mismatches:
+            step = t("overview.step_checksum")
+        elif audit_differences:
+            step = t("overview.step_audit")
+        self.guidance_label.setText(
+            t("overview.guidance", detail=step) if step else ""
         )
 
         if audit_running:
