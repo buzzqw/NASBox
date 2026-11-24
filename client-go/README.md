@@ -37,6 +37,7 @@ binario.
 | 7d | Banner semantico theme-aware (legibile anche in dark), selezione navigazione più forte, download per percorso digitato, elenco file compatto | completata (0.10.0) |
 | 7e | Stato sempre scritto nel banner, placeholder {direction} corretto, impostazioni complete (bastione/jump host e tutti i parametri Python), footer non troncato | completata (0.11.0) |
 | 7f | Fix layout verificato: righe impostazioni a due colonne (non più 1 carattere per riga), footer a larghezza piena, avvio diretto su sezione per diagnostica | completata (0.12.0) |
+| 7g | Impostazioni con dropdown per tutte le scelte, pulsanti `?` con spiegazione (es. Sentinelle), fascia pausa strutturata invece di JSON, nomi dispositivi gestiti dal tab NAS | completata (0.13.0) |
 | 8 | Rollout graduale e rimozione del client Python | da fare |
 
 Il documento di design dell'interfaccia è in `internal/ui/DESIGN.md`.

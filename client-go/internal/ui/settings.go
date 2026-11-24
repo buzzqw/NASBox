@@ -1,28 +1,77 @@
 package ui
 
 import (
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/widget"
+
+	"nasbox-go/internal/i18n"
 )
 
-func (c *clientApp) settingRow(label string, object fyne.CanvasObject) fyne.CanvasObject {
+type helpText struct{ it, en string }
+
+var settingHelp = map[string]helpText{
+	"nas_lan":                     {"Indirizzo IP o hostname del NAS nella rete locale. È la destinazione predefinita di SSH e rsync.", "LAN IP or hostname of the NAS. Default target for SSH and rsync."},
+	"nas_wan":                     {"Indirizzo pubblico del NAS, usato quando non sei in LAN. Lascia vuoto se non serve.", "Public address of the NAS when outside the LAN. Leave empty if unused."},
+	"jump_host":                   {"Bastione SSH: un server raggiungibile da internet che può a sua volta raggiungere il NAS. Le connessioni passano da qui.", "SSH jump host: a publicly reachable server that can reach the NAS. Connections are proxied through it."},
+	"jump_port":                   {"Porta SSH del bastione.", "SSH port of the jump host."},
+	"jump_user":                   {"Utente SSH sul bastione.", "SSH user on the jump host."},
+	"remote_prefix":               {"Cartella sul NAS che viene sincronizzata con la cartella locale.", "Folder on the NAS that mirrors the local folder."},
+	"delete_sentinels":            {"Percorsi di file che devono esistere in locale. Se mancano, il client si rifiuta di cancellare: serve a rilevare un volume non montato o la cartella sbagliata. Separa più percorsi con una virgola.", "Local files that must exist. If missing, destructive sync is refused (unmounted volume / wrong folder). Separate multiple paths with a comma."},
+	"sync_mode":                   {"bidirectional: invia e riceve. pull_only: scarica solo dal NAS. push_only: invia solo al NAS. archive: invia senza mai cancellare nulla sul NAS.", "bidirectional: send and receive. pull_only: download only. push_only: upload only. archive: upload without ever deleting on the NAS."},
+	"compression_mode":            {"auto disattiva la compressione in LAN; on la forza; off la disattiva sempre.", "auto disables compression on LAN; on forces it; off disables it."},
+	"conflict_policy":             {"newest: vince la versione più recente e那 perdente finisce nello storico. manual: crea una copia conflitto da risolvere a mano.", "newest: the newer version wins and the loser goes to history. manual: creates a conflict copy to resolve by hand."},
+	"pause_schedule":              {"Intervallo orario in cui la sincronizzazione resta in pausa.", "Daily time window during which synchronization pauses."},
+	"device_labels":               {"Nomi leggibili associati agli ID dispositivo del journal NAS. Si configurano dal tab NAS → Dispositivi.", "Friendly names for NAS journal device IDs. Configure them in the NAS → Devices tab."},
+	"delete_enabled":              {"Se disattivato, il client non cancellerà mai file sul NAS.", "When off, the client will never delete files on the NAS."},
+	"max_delete_files":            {"Blocco di sicurezza: oltre questo numero di cancellazioni in un batch l'operazione viene rifiutata.", "Safety stop: batches deleting more than this many files are refused."},
+	"max_delete_files_per_window": {"Limite cumulativo di cancellazioni in un'ora, anche spezzate in più batch.", "Cumulative deletion limit per hour, even across multiple batches."},
+	"integrity_check_sample_size": {"Quanti file confrontare per ogni verifica periodica dei checksum. 0 = tutti i file (costoso).", "How many files to compare in each periodic checksum check. 0 = all files (expensive)."},
+	"bandwidth_kbps":              {"Velocità massima in kilobyte al secondo. 0 = senza limite.", "Maximum speed in KB/s. 0 = unlimited."},
+	"min_server_version":          {"Versione minima dello script server richiesta dal client.", "Minimum NAS server script version required by this client."},
+	"go_display_backend":          {"Backend grafico: auto sceglie Wayland se disponibile, altrimenti X11.", "Display backend: auto picks Wayland when available, otherwise X11."},
+	"tray_single_click":           {"Cosa fa un clic sull'icona nella barra di sistema: apre il menu o la finestra.", "What a single click on the tray icon does: open the menu or the window."},
+	"retention_days_local":        {"Quanti giorni conservare le versioni nel cestino locale.", "How many days to keep versions in the local trash."},
+	"retention_days_remote":       {"Quanti giorni conservare le versioni nel cestino sul NAS.", "How many days to keep versions in the NAS trash."},
+}
+
+func (c *clientApp) helpButton(key string) fyne.CanvasObject {
+	info := settingHelp[key]
+	button := widget.NewButton("?", func() {
+		text := info.it
+		if i18n.Language == "en" || strings.ToLower(i18n.Language) == "en" {
+			text = info.en
+		}
+		if text == "" {
+			text = "Nessuna descrizione disponibile per questa impostazione."
+		}
+		dialog.ShowInformation("Informazioni", text, c.window)
+	})
+	button.Importance = widget.LowImportance
+	return withHint(button, "Che cosa significa questa impostazione?", c.setHint)
+}
+
+func (c *clientApp) settingRow(label string, object fyne.CanvasObject, helpKey string) fyne.CanvasObject {
 	name := widget.NewLabel(label)
 	name.Wrapping = fyne.TextWrapWord
-	// Border with an unwrapped label gives it a 1px column and the text wraps
-	// one character per line. An explicit two-column grid keeps labels readable.
-	return container.NewGridWithColumns(2, name, object)
+	// Wrap the label itself, not the HBox: an HBox gives its children a 1px
+	// column and long labels wrap one character per line.
+	nameWrap := container.NewGridWrap(fyne.NewSize(270, 60), name)
+	head := container.NewHBox(nameWrap, c.helpButton(helpKey))
+	return container.NewBorder(nil, nil, head, nil, object)
 }
 
 func (c *clientApp) stringSetting(label, key string) fyne.CanvasObject {
 	entry := widget.NewEntry()
 	entry.SetText(c.cfg.String(key))
 	entry.OnChanged = func(value string) { c.cfg.Set(key, value, true) }
-	return c.settingRow(label, entry)
+	return c.settingRow(label, entry, key)
 }
 
 func (c *clientApp) intSetting(label, key string) fyne.CanvasObject {
@@ -33,7 +82,7 @@ func (c *clientApp) intSetting(label, key string) fyne.CanvasObject {
 			c.cfg.Set(key, parsed, true)
 		}
 	}
-	return c.settingRow(label, entry)
+	return c.settingRow(label, entry, key)
 }
 
 func (c *clientApp) floatSetting(label, key string, fallback float64) fyne.CanvasObject {
@@ -48,21 +97,56 @@ func (c *clientApp) floatSetting(label, key string, fallback float64) fyne.Canva
 			c.cfg.Set(key, parsed, true)
 		}
 	}
-	return c.settingRow(label, entry)
+	return c.settingRow(label, entry, key)
+}
+
+func (c *clientApp) choiceSetting(label, key string, options []string) fyne.CanvasObject {
+	selectWidget := widget.NewSelect(options, func(value string) { c.cfg.Set(key, value, true) })
+	current := c.cfg.String(key)
+	for _, option := range options {
+		if strings.EqualFold(option, current) {
+			current = option
+			break
+		}
+	}
+	selectWidget.SetSelected(current)
+	return c.settingRow(label, selectWidget, key)
 }
 
 func (c *clientApp) boolSetting(label, key string) fyne.CanvasObject {
 	check := widget.NewCheck("", func(value bool) { c.cfg.Set(key, value, true) })
 	check.SetChecked(c.cfg.Bool(key))
-	return c.settingRow(label, check)
+	return c.settingRow(label, check, key)
 }
 
-func (c *clientApp) textSetting(label, key string) fyne.CanvasObject {
-	entry := widget.NewMultiLineEntry()
-	entry.SetText(fmt.Sprint(c.cfg.Get(key)))
-	entry.Wrapping = fyne.TextWrapWord
-	entry.OnChanged = func(value string) { c.cfg.Set(key, value, true) }
-	return container.NewVBox(widget.NewLabel(label), entry)
+func (c *clientApp) scheduleSetting() fyne.CanvasObject {
+	start, end := "09:00", "18:00"
+	var entries []map[string]any
+	if raw, err := json.Marshal(c.cfg.Get("pause_schedule")); err == nil {
+		_ = json.Unmarshal(raw, &entries)
+	}
+	if len(entries) > 0 {
+		start = fmt.Sprint(entries[0]["start"])
+		end = fmt.Sprint(entries[0]["end"])
+	}
+	startEntry := widget.NewEntry()
+	startEntry.SetText(start)
+	endEntry := widget.NewEntry()
+	endEntry.SetText(end)
+	save := widget.NewButton("Salva fascia oraria", func() {
+		c.cfg.Set("pause_schedule", []any{map[string]any{
+			"start": strings.TrimSpace(startEntry.Text), "end": strings.TrimSpace(endEntry.Text),
+		}}, true)
+		c.appendLog("Fascia di pausa aggiornata")
+	})
+	return c.settingRow("Fascia pausa (HH:MM)", container.NewHBox(startEntry, endEntry, save), "pause_schedule")
+}
+
+func (c *clientApp) deviceLabelsSetting() fyne.CanvasObject {
+	label := widget.NewLabel("I nomi dei dispositivi si assegnano dal tab NAS → Dispositivi.")
+	label.Wrapping = fyne.TextWrapWord
+	button := widget.NewButton("Apri Dispositivi", func() { c.navigate(sectionNAS, 1) })
+	return c.settingRow("Nomi dispositivi", container.NewVBox(label, button), "device_labels")
 }
 
 func (c *clientApp) settingsConnection() fyne.CanvasObject {
@@ -84,14 +168,14 @@ func (c *clientApp) settingsConnection() fyne.CanvasObject {
 func (c *clientApp) settingsSync() fyne.CanvasObject {
 	return container.NewVBox(
 		c.sectionTitle("Sincronizzazione", "Modalità, tempi e risoluzione conflitti"),
-		c.stringSetting("Modalità (bidirectional/pull_only/push_only/archive)", "sync_mode"),
+		c.choiceSetting("Modalità", "sync_mode", []string{"bidirectional", "pull_only", "push_only", "archive"}),
 		c.intSetting("Intervallo polling (s)", "poll_interval"),
 		c.intSetting("Attesa change feed (s)", "change_feed_wait_seconds"),
 		c.intSetting("Debounce (s)", "debounce_seconds"),
 		c.floatSetting("Stabilità file (s)", "file_stability_seconds", 0.75),
-		c.stringSetting("Compressione (auto/on/off)", "compression_mode"),
+		c.choiceSetting("Compressione", "compression_mode", []string{"auto", "on", "off"}),
 		c.intSetting("Pull completo ogni (s)", "full_pull_interval_seconds"),
-		c.stringSetting("Politica conflitti (newest/manual)", "conflict_policy"),
+		c.choiceSetting("Politica conflitti", "conflict_policy", []string{"newest", "manual"}),
 		c.intSetting("Limite conflitti", "conflict_storm_limit"),
 		c.intSetting("Finestra conflitti (s)", "conflict_storm_window_seconds"),
 		c.floatSetting("Intervallo salute NAS (s)", "metrics_refresh_seconds", 60),
@@ -136,13 +220,13 @@ func (c *clientApp) settingsAdvanced() fyne.CanvasObject {
 		c.intSetting("Banda download (kbps)", "bandwidth_download_kbps"),
 		c.boolSetting("Notifica a fine sync", "notify_sync_completion"),
 		c.boolSetting("Animazione icona tray", "animate_sync_icon"),
-		c.stringSetting("Click tray (menu/window)", "tray_single_click"),
-		c.stringSetting("Backend display (auto/x11/wayland)", "go_display_backend"),
+		c.choiceSetting("Click tray", "tray_single_click", []string{"menu", "window"}),
+		c.choiceSetting("Backend display", "go_display_backend", []string{"auto", "x11", "wayland"}),
 		c.boolSetting("Pausa programmata", "pause_schedule_enabled"),
-		c.textSetting("Schedule pausa (JSON)", "pause_schedule"),
+		c.scheduleSetting(),
 		c.stringSetting("Percorso update Python", "client_update_remote_path"),
 		c.stringSetting("Percorso update Go", "client_update_remote_path_go"),
 		c.stringSetting("Versione minima server", "min_server_version"),
-		c.textSetting("Nomi dispositivi (JSON)", "device_labels"),
+		c.deviceLabelsSetting(),
 	)
 }

@@ -906,6 +906,10 @@ func (c *clientApp) settingsView() fyne.CanvasObject {
 		container.NewTabItem("Avanzate", container.NewVScroll(c.surface(c.settingsAdvanced(), ""))),
 		container.NewTabItem(tr("ui.group.about", nil), container.NewVScroll(about)),
 	)
+	if index, err := strconv.Atoi(os.Getenv("NASBOX_SETTINGS_TAB")); err == nil &&
+		index >= 0 && index < len(c.settingsTabs.Items) {
+		c.settingsTabs.SelectIndex(index)
+	}
 	return c.settingsTabs
 }
 
