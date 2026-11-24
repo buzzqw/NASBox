@@ -357,6 +357,77 @@ class SyncEngine(QThread):
     def delete_safety_snapshot(self) -> dict:
         return delete_safety.shared().snapshot(self.cfg)
 
+    def preview_changes(self) -> dict:
+        """Build an on-demand, read-only preview of what a sync would change.
+
+        This is the same classification used by the safety guard, exposed to
+        the UI so the user sees *why* a batch was blocked and which folders are
+        involved before deciding. It never transfers or modifies anything.
+        """
+        from pathlib import Path
+
+        from . import change_classifier
+
+        manifest = rsync_ops.cached_manifest(self.cfg, max_age_seconds=3600)
+        if manifest is None:
+            if self._conn is None:
+                return {"ok": False, "detail": "NAS non connesso"}
+            try:
+                snapshot = rsync_ops.remote_manifest_snapshot(self.cfg, self._conn, -1)
+            except (OSError, RuntimeError):
+                snapshot = None
+            if snapshot is None or not snapshot[1]:
+                return {"ok": False, "detail": "manifest NAS non disponibile"}
+            manifest = snapshot[1]
+        try:
+            identity = self.sync_state.identity_snapshot()
+        except (AttributeError, OSError, RuntimeError, TypeError):
+            identity = {}
+        root = Path(self.cfg.local_root())
+        missing = [
+            path for path, state in manifest.items()
+            if state.kind == rsync_ops.RemoteKind.FILE
+            and not rsync_ops.path_is_excluded(self.cfg, path)
+            and not (root / path).exists()
+        ]
+        try:
+            ratio = float(self.cfg.get("delete_dir_guard_ratio") or 0.5)
+            minimum = int(self.cfg.get("delete_dir_guard_min_files") or 20)
+        except (TypeError, ValueError):
+            ratio, minimum = 0.5, 20
+        report = change_classifier.classify(
+            missing, manifest, identity, dir_ratio=ratio, min_files=minimum,
+        )
+        return {
+            "ok": True,
+            "summary": report.summary(),
+            "missing_total": report.missing_total,
+            "rename_count": len(report.renames),
+            "unexplained_count": report.effective_deletions,
+            "anomalies": [
+                {
+                    "directory": item.directory,
+                    "missing": item.missing,
+                    "remote": item.remote,
+                    "ratio": round(item.ratio, 3),
+                }
+                for item in report.anomalies
+            ],
+            "top_dirs": [
+                {
+                    "directory": directory,
+                    "missing": count,
+                    "remote": report.remote_by_dir.get(directory, 0),
+                }
+                for directory, count in report.missing_by_dir.most_common(10)
+            ],
+            "renames": [
+                f"{item.missing_path} → {item.local_path}"
+                for item in report.renames[:5]
+            ],
+            "deletions": report.unexplained[:5],
+        }
+
     def undo_deletions(self, hours: float = 24, limit: int = 500) -> dict:
         """Restore recent NAS deletions from the trash, batch by batch.
 

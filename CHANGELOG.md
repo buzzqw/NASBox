@@ -4,6 +4,15 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 1.35.0 - 2026-11-24
+
+- **Anteprima modifiche**: quando una cancellazione viene bloccata, lo Stato
+  mostra il pulsante "Anteprima modifiche" con una tabella per cartella (file
+  coinvolti e presenti sul NAS), le cartelle anomale evidenziate, esempi di
+  spostamenti e cancellazioni, e pulsanti per aprire il Log o confermare.
+- L'anteprima è calcolata sul PC, in sola lettura: nessun nuovo lavoro per il
+  NAS ARM.
+
 ## 1.34.1 - 2026-11-24
 
 - Timer `PERF` nelle operazioni che possono causare picchi CPU (scan completa,

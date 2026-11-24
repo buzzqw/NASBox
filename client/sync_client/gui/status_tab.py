@@ -23,6 +23,7 @@ from ..repository_safety import RepositorySafetyError, initialize_local_root
 from ..version import APP_NAME, APP_VERSION
 from .. import updater
 from .dialogs import FolderSetupDialog, PauseForDialog
+from .preview_dialog import ChangePreviewDialog
 from .async_utils import run_in_background
 from .format_utils import human_size
 from .style import SHORTCUT_SYNC_NOW, set_status_text
@@ -156,6 +157,11 @@ class StatusTab(QWidget):
         self._guidance_destination = ""
         self.assurance_guidance.hide()
         self.guidance_btn.hide()
+        self.preview_btn = QPushButton(t("preview.title"))
+        self.preview_btn.setObjectName("previewChanges")
+        self.preview_btn.clicked.connect(self._show_preview)
+        self.preview_btn.hide()
+        assurance_layout.addWidget(self.preview_btn)
         self.assurance_checks = QLabel("")
         self.assurance_checks.setObjectName("assuranceChecks")
         self.assurance_checks.setWordWrap(True)
@@ -727,6 +733,20 @@ class StatusTab(QWidget):
         elif self._guidance_destination:
             self.attention_action_requested.emit(self._guidance_destination)
 
+    def _show_preview(self) -> None:
+        data = self.engine.preview_changes()
+        if not isinstance(data, dict) or not data.get("ok"):
+            detail = data.get("detail") if isinstance(data, dict) else ""
+            self.sync_feedback_label.setText(detail or t("preview.empty"))
+            self.sync_feedback_label.show()
+            return
+        dialog = ChangePreviewDialog(data, self)
+        dialog.open_log_requested.connect(
+            lambda: self.attention_action_requested.emit("log")
+        )
+        dialog.confirm_requested.connect(self._confirm_deletions)
+        dialog.exec()
+
     def _refresh_assurance(self, data: dict) -> None:
         if not isinstance(data, dict) or not data:
             return
@@ -785,6 +805,7 @@ class StatusTab(QWidget):
             self.guidance_btn.hide()
         # The override is only meaningful while a deletion is actually blocked.
         self.confirm_deletes_btn.setVisible(self._recent_safety() is not None)
+        self.preview_btn.setVisible(self._recent_safety() is not None)
         # Undo appears only while there is something recent to restore.
         try:
             undo_count = int(data.get("undo_count") or 0)
