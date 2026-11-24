@@ -36,6 +36,7 @@ binario.
 | 7c | Icona tray storica + animazione, zero sfondi grigi, evidenziazione navigazione con marcatore, browse a doppio clic sulle cartelle, storico filtrabile, hint non troncato | completata (0.9.0) |
 | 7d | Banner semantico theme-aware (legibile anche in dark), selezione navigazione più forte, download per percorso digitato, elenco file compatto | completata (0.10.0) |
 | 7e | Stato sempre scritto nel banner, placeholder {direction} corretto, impostazioni complete (bastione/jump host e tutti i parametri Python), footer non troncato | completata (0.11.0) |
+| 7f | Fix layout verificato: righe impostazioni a due colonne (non più 1 carattere per riga), footer a larghezza piena, avvio diretto su sezione per diagnostica | completata (0.12.0) |
 | 8 | Rollout graduale e rimozione del client Python | da fare |
 
 Il documento di design dell'interfaccia è in `internal/ui/DESIGN.md`.

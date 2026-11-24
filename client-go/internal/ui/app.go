@@ -181,6 +181,17 @@ func Run(cfg *config.Config, store *state.Store) {
 	c.setHint = c.setHintText
 	window.SetContent(c.buildRoot())
 	c.showSection(sectionStatus)
+	// Useful for support/diagnostics: open directly on a section.
+	switch strings.ToLower(os.Getenv("NASBOX_START_SECTION")) {
+	case "activity":
+		c.showSection(sectionActivity)
+	case "files":
+		c.showSection(sectionFiles)
+	case "nas":
+		c.showSection(sectionNAS)
+	case "settings":
+		c.showSection(sectionSettings)
+	}
 	window.SetCloseIntercept(func() { window.Hide() })
 	c.installTray()
 
@@ -382,7 +393,10 @@ func (c *clientApp) buildFooter() fyne.CanvasObject {
 	c.hintLabel = widget.NewLabelWithStyle("", fyne.TextAlignLeading, fyne.TextStyle{Italic: true})
 	line := canvas.NewRectangle(c.tint(theme.ColorNameSeparator))
 	line.SetMinSize(fyne.NewSize(1, 1))
-	return container.NewVBox(line, container.NewHBox(c.eventLabel, layout.NewSpacer(), c.hintLabel))
+	// HBox gave the event label a 1px column and wrapped it vertically.
+	return container.NewVBox(line, container.NewBorder(
+		nil, nil, nil, c.hintLabel, c.eventLabel,
+	))
 }
 
 func (c *clientApp) installTray() {

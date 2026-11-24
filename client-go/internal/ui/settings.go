@@ -13,7 +13,9 @@ import (
 func (c *clientApp) settingRow(label string, object fyne.CanvasObject) fyne.CanvasObject {
 	name := widget.NewLabel(label)
 	name.Wrapping = fyne.TextWrapWord
-	return container.NewBorder(nil, nil, name, nil, object)
+	// Border with an unwrapped label gives it a 1px column and the text wraps
+	// one character per line. An explicit two-column grid keeps labels readable.
+	return container.NewGridWithColumns(2, name, object)
 }
 
 func (c *clientApp) stringSetting(label, key string) fyne.CanvasObject {
