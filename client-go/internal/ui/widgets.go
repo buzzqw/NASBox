@@ -18,19 +18,59 @@ func tr(key string, vars map[string]any) string { return i18n.T(key, vars) }
 
 var colorTransparent = color.Transparent
 
-// surface draws a rounded panel behind content. Fyne 2.7 has no card with
-// configurable corners, so this is built from a canvas.Rectangle and a Stack.
+// surface draws a rounded card behind content. It is a widget (not a bare
+// Stack) so the border is drawn only once the card has a real size: a
+// stroked rounded rectangle smaller than its radius breaks the software
+// painter used for captures and tests.
 func (c *clientApp) surface(content fyne.CanvasObject, accent fyne.ThemeColorName) fyne.CanvasObject {
-	bg := canvas.NewRectangle(c.tint(theme.ColorNameHeaderBackground))
+	bg := canvas.NewRectangle(c.tint(colorNameSurface))
 	bg.CornerRadius = 12
 	bg.StrokeColor = c.tint(theme.ColorNameSeparator)
-	bg.StrokeWidth = 1
+	stroke := float32(1)
 	if accent != "" {
 		bg.StrokeColor = c.tint(accent)
-		bg.StrokeWidth = 2
+		stroke = 2
 	}
-	return container.NewStack(bg, container.NewPadded(content))
+	panel := &surfacePanel{bg: bg, stroke: stroke, content: container.NewPadded(content)}
+	panel.ExtendBaseWidget(panel)
+	return panel
 }
+
+type surfacePanel struct {
+	widget.BaseWidget
+	bg      *canvas.Rectangle
+	stroke  float32
+	content fyne.CanvasObject
+}
+
+func (p *surfacePanel) CreateRenderer() fyne.WidgetRenderer {
+	r := &surfaceRenderer{p: p}
+	r.Layout(p.Size())
+	return r
+}
+
+type surfaceRenderer struct{ p *surfacePanel }
+
+func (r *surfaceRenderer) Layout(size fyne.Size) {
+	limit := 2*r.p.bg.CornerRadius + 2*r.p.stroke + 2
+	if size.Width < limit || size.Height < limit {
+		r.p.bg.StrokeWidth = 0
+	} else {
+		r.p.bg.StrokeWidth = r.p.stroke
+	}
+	r.p.bg.Resize(size)
+	r.p.content.Resize(size)
+}
+func (r *surfaceRenderer) MinSize() fyne.Size { return r.p.content.MinSize() }
+func (r *surfaceRenderer) Objects() []fyne.CanvasObject {
+	return []fyne.CanvasObject{r.p.bg, r.p.content}
+}
+func (r *surfaceRenderer) Refresh() {
+	r.Layout(r.p.Size())
+	r.p.bg.Refresh()
+	r.p.content.Refresh()
+}
+func (r *surfaceRenderer) Destroy() {}
 
 // tint resolves a semantic colour from the active palette.
 func (c *clientApp) tint(name fyne.ThemeColorName) color.Color {
@@ -91,43 +131,23 @@ func (c *clientApp) statTile(value, caption string) (*widget.Label, fyne.CanvasO
 	return number, c.surface(container.NewVBox(number, label), "")
 }
 
-// hintButton is a Button that reports a short explanation in the window's
-// hint strip on hover. Fyne 2.7 has no tooltip widget, so this is the closest
-// equivalent and keeps the interface discoverable without popups.
-// hintArea adds hover descriptions to any widget without hiding its Tapped
-// callback (Fyne 2.7 has no native tooltip).
+// hintArea is kept only for compatibility with older call sites: wrapping a
+// widget in another widget without its own renderer broke drawing (labels
+// clipped, buttons without background). withHint now returns the widget as is.
 type hintArea struct {
 	fyne.Widget
 	hint    string
 	setHint func(string)
 }
 
-func (h *hintArea) MouseIn(*desktop.MouseEvent) {
-	if h.setHint != nil {
-		h.setHint(h.hint)
-	}
+func withHint(object fyne.Widget, _ string, _ func(string)) fyne.CanvasObject {
+	return object
 }
 
-func (h *hintArea) MouseMoved(*desktop.MouseEvent) {}
-
-func (h *hintArea) MouseOut() {
-	if h.setHint != nil {
-		h.setHint("")
-	}
-}
-
-func (h *hintArea) Tapped(event *fyne.PointEvent) {
-	if target, ok := h.Widget.(fyne.Tappable); ok {
-		target.Tapped(event)
-	}
-}
-
-func withHint(object fyne.Widget, hint string, setHint func(string)) fyne.CanvasObject {
-	return &hintArea{Widget: object, hint: hint, setHint: setHint}
-}
-
+// hintButton is a real widget.Button (ExtendBaseWidget) that also reports a
+// short explanation on hover. Fyne 2.7 has no tooltip widget.
 type hintButton struct {
-	*widget.Button
+	widget.Button
 	hint    string
 	setHint func(string)
 }
@@ -138,16 +158,30 @@ func newHintButton(
 	if hint == "" {
 		hint = label
 	}
-	var button *widget.Button
+	b := &hintButton{hint: hint, setHint: setHint}
+	b.Text = label
+	b.Icon = icon
+	b.OnTapped = onTap
+	b.Importance = importance
+	b.ExtendBaseWidget(b)
+	return b
+}
+
+// plainButton returns a standalone *widget.Button for fields that are both
+// referenced (SetText/Disable) and placed in containers. The embedded Button
+// of a hintButton must never be added to a container on its own: its
+// renderer belongs to the outer widget and it would draw without background.
+func plainButton(label string, icon fyne.Resource, _ string, importance widget.Importance, onTap func(), _ func(string)) *widget.Button {
+	button := widget.NewButtonWithIcon(label, icon, onTap)
 	if icon == nil {
 		button = widget.NewButton(label, onTap)
-	} else {
-		button = widget.NewButtonWithIcon(label, icon, onTap)
 	}
 	button.Importance = importance
-	button.Refresh()
-	return &hintButton{Button: button, hint: hint, setHint: setHint}
+	return button
 }
+
+// Btn exposes the underlying button for SetText/Enable/Disable.
+func (b *hintButton) Btn() *widget.Button { return &b.Button }
 
 func (b *hintButton) MouseIn(event *desktop.MouseEvent) {
 	b.Button.MouseIn(event)

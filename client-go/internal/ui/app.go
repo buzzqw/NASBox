@@ -6,9 +6,9 @@ import (
 	_ "embed"
 	"fmt"
 	"os"
-	"os/exec"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -18,7 +18,6 @@ import (
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/driver/desktop"
-	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
@@ -66,15 +65,6 @@ const (
 	statusOffline
 	statusPaused
 )
-
-type navButton struct {
-	Button     *widget.Button
-	bg         *canvas.Rectangle
-	accent     *canvas.Rectangle
-	buttonView fyne.CanvasObject
-	label      string
-	section    sectionID
-}
 
 type clientApp struct {
 	cfg       *config.Config
@@ -204,6 +194,42 @@ type clientApp struct {
 	selectedGroup    string
 	selectedVersion  string
 	selectedBrowse   string
+
+	// Redesigned shell (0.19): sidebar status, hero, live transfers, tray.
+	statusDot        *canvas.Circle
+	lastSyncLabel    *widget.Label
+	lastSyncAt       time.Time
+	heroCircle       *canvas.Circle
+	heroIcon         *widget.Icon
+	transferCard     *fyne.Container
+	homeBox          *fyne.Container
+	transferIcon     *widget.Icon
+	transferTitle    *widget.Label
+	transferPercent  *widget.Label
+	transferFile     *widget.Label
+	transferBar      *widget.ProgressBar
+	transferMeta     *widget.Label
+	transferNowLabel *widget.Label
+	transferHistory  *widget.List
+	confirmDeleteBtn *widget.Button
+	recentBox        *fyne.Container
+	recent           []recentItem
+	homeNASLabel     *widget.Label
+	homeDiskLabel    *widget.Label
+	homeDiskBar      *widget.ProgressBar
+	homeDevicesLabel *widget.Label
+
+	progressMu    sync.Mutex
+	progress      transfer.Progress
+	progressShown time.Time
+
+	trayMenu      *fyne.Menu
+	trayStatus    *fyne.MenuItem
+	trayRecent    *fyne.MenuItem
+	trayConflicts *fyne.MenuItem
+	trayPause     *fyne.MenuItem
+	notifyMu      sync.Mutex
+	lastNotify    map[string]time.Time
 }
 
 // Run starts the native client. It blocks until the window/tray exits. When
@@ -259,6 +285,7 @@ func startClient(
 		c.logger = loggers[0]
 	}
 	c.storageInsights = storage.Insights{TopFolders: []storage.FolderSize{}, Duplicates: []storage.DuplicateGroup{}}
+	c.installTransferObservers()
 	c.setTrayIcon("unconfigured")
 	c.bannerGo = func() { c.onSync() }
 	fyneApp.Settings().SetTheme(c.uiTheme)
@@ -304,7 +331,27 @@ func startClient(
 	c.refreshStats()
 	go c.refreshMonitor()
 	c.appendLog(tr("main_window.brand_tagline", nil) + " — " + version.AppVersion)
+	go c.seedRecent()
+	go c.tickRelativeTimes(ctx)
 	return c
+}
+
+// tickRelativeTimes keeps "2 min fa" style labels current.
+func (c *clientApp) tickRelativeTimes(ctx context.Context) {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			fyne.Do(func() {
+				c.updateLastSync()
+				c.renderRecent()
+				c.refreshTransfersPane()
+			})
+		}
+	}
 }
 
 // detectLanguage honours the configured language; "auto" follows the session
@@ -360,106 +407,13 @@ func (c *clientApp) buildRoot() fyne.CanvasObject {
 	c.navs = make(map[sectionID]*navButton)
 	c.content = container.NewStack()
 
-	header := c.buildHeader()
 	sidebar := c.buildSidebar()
-	footer := c.buildFooter()
+	header := c.buildHeader()
 	c.buildSections()
 	c.showSection(c.active)
 	c.installShortcuts()
-	return container.NewBorder(header, footer, sidebar, nil, c.content)
-}
-
-func (c *clientApp) buildHeader() fyne.CanvasObject {
-	brand := widget.NewLabelWithStyle(version.AppName, fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
-	c.headerTitle = widget.NewLabelWithStyle(tr("main_window.tab_status", nil),
-		fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
-	c.headerTitle.Wrapping = fyne.TextTruncate
-	separator := widget.NewLabel("·")
-	left := container.NewHBox(brand, separator, minWidth(c.headerTitle, 180))
-	c.headerStatus = widget.NewLabelWithStyle("", fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
-	c.headerStatus.Wrapping = fyne.TextTruncate
-
-	syncButton := newHintButton("", theme.MediaReplayIcon(),
-		tr("status.sync_now_tooltip", nil), widget.HighImportance, c.onSync, c.setHint)
-	c.pauseBtn = newHintButton("", theme.MediaPauseIcon(),
-		tr("status.pause_tooltip", nil), widget.MediumImportance, c.onPause, c.setHint).Button
-	right := container.NewHBox(minWidth(c.headerStatus, 220), syncButton,
-		withHint(c.pauseBtn, tr("status.pause_tooltip", nil), c.setHint))
-	return c.surface(container.NewBorder(nil, nil, left, right, nil), "")
-}
-
-func labelPause(paused bool) string {
-	if paused {
-		return tr("status.resume_btn", nil)
-	}
-	return tr("status.pause_btn", nil)
-}
-
-func (c *clientApp) buildSidebar() fyne.CanvasObject {
-	// A transparent object fixes the rail width so the layout stays stable
-	// from 900x640 up to 1280x800 and beyond.
-	spacer := canvas.NewRectangle(colorTransparent)
-	spacer.SetMinSize(fyne.NewSize(206, 1))
-	bg := canvas.NewRectangle(c.tint(theme.ColorNameHeaderBackground))
-	line := canvas.NewRectangle(c.tint(theme.ColorNameSeparator))
-	line.SetMinSize(fyne.NewSize(1, 1))
-
-	items := []fyne.CanvasObject{
-		c.makeNav(sectionStatus, tr("main_window.tab_status", nil), theme.HomeIcon(),
-			tr("main_window.tab_status_tooltip", nil)).buttonView,
-		c.makeNav(sectionActivity, tr("ui.nav.activity", nil), theme.ListIcon(),
-			tr("main_window.tab_transfers_tooltip", nil)).buttonView,
-		c.makeNav(sectionFiles, tr("ui.nav.files", nil), theme.FolderOpenIcon(),
-			tr("main_window.tab_browse_tooltip", nil)).buttonView,
-		c.makeNav(sectionNAS, tr("ui.nav.nas", nil), theme.ComputerIcon(),
-			tr("main_window.tab_metrics_tooltip", nil)).buttonView,
-		c.makeNav(sectionSettings, tr("main_window.tab_settings", nil), theme.SettingsIcon(),
-			tr("main_window.tab_settings_tooltip", nil)).buttonView,
-	}
-	body := container.NewVBox(
-		widget.NewLabelWithStyle("NASBOX", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-		line,
-		container.NewVBox(items...),
-		layout.NewSpacer(),
-		c.note(tr("ui.nav.hint", nil)),
-	)
-	return container.NewStack(spacer, bg, container.NewPadded(body))
-}
-
-func (c *clientApp) makeNav(id sectionID, label string, icon fyne.Resource, hint string) *navButton {
-	bg := canvas.NewRectangle(colorTransparent)
-	bg.CornerRadius = 8
-	accent := canvas.NewRectangle(colorTransparent)
-	accent.SetMinSize(fyne.NewSize(4, 32))
-	// Navigation uses a native Button: Fyne routes taps to it directly, without
-	// a wrapper that could swallow the Tapped callback.
-	button := widget.NewButtonWithIcon(label, icon, func() { c.showSection(id) })
-	button.Importance = widget.LowImportance
-	button.SetText(label)
-	item := &navButton{
-		Button: button, bg: bg, accent: accent, section: id, label: label,
-	}
-	// Background, accent bar and marker are all part of the same layout unit.
-	// Previously the background rectangle was created but never inserted.
-	item.buttonView = container.NewStack(bg, container.NewBorder(
-		nil, nil, accent, nil, container.NewPadded(withHint(button, hint, c.setHint)),
-	))
-	c.navs[id] = item
-	return item
-}
-
-func (c *clientApp) buildFooter() fyne.CanvasObject {
-	c.eventLabel = widget.NewLabel("")
-	c.eventLabel.Wrapping = fyne.TextTruncate
-	c.hintLabel = widget.NewLabelWithStyle("", fyne.TextAlignTrailing, fyne.TextStyle{Italic: true})
-	c.hintLabel.Wrapping = fyne.TextTruncate
-	line := canvas.NewRectangle(c.tint(theme.ColorNameSeparator))
-	line.SetMinSize(fyne.NewSize(1, 1))
-	// Both footer cells stay on one line: long events are elided instead of
-	// stealing width from the hint and wrapping into a vertical strip.
-	return container.NewVBox(line, container.NewBorder(
-		nil, nil, nil, minWidth(c.hintLabel, 300), minWidth(c.eventLabel, 540),
-	))
+	main := container.NewBorder(header, nil, nil, nil, container.NewPadded(c.content))
+	return container.NewBorder(nil, nil, sidebar, nil, main)
 }
 
 func (c *clientApp) installShortcuts() {
@@ -497,46 +451,6 @@ func (c *clientApp) refreshCurrentSection() {
 	}
 }
 
-func (c *clientApp) installTray() {
-	tray := fyne.NewMenu(version.AppName,
-		fyne.NewMenuItem(tr("ui.tray.show", nil), func() {
-			c.window.Show()
-			c.window.RequestFocus()
-		}),
-		fyne.NewMenuItem(tr("ui.tray.sync", nil), c.onSync),
-		fyne.NewMenuItem(tr("ui.tray.pause_resume", nil), c.onPause),
-		fyne.NewMenuItem(tr("tray.pause_for", nil), c.showPauseDialog),
-		fyne.NewMenuItem(tr("tray.open_folder", nil), func() {
-			if root := c.cfg.LocalRoot(); root != "" {
-				_ = exec.Command("xdg-open", root).Start()
-			}
-		}),
-		fyne.NewMenuItem(tr("ui.action.check_update", nil), c.onCheckUpdate),
-		fyne.NewMenuItem(tr("main_window.tab_conflicts", nil), func() {
-			c.window.Show()
-			c.navigate(sectionFiles, 1)
-		}),
-		fyne.NewMenuItem(tr("main_window.tab_history", nil), func() {
-			c.window.Show()
-			c.navigate(sectionFiles, 2)
-		}),
-		fyne.NewMenuItem(tr("main_window.tab_log", nil), func() {
-			c.window.Show()
-			c.navigate(sectionActivity, 2)
-		}),
-		fyne.NewMenuItem(tr("main_window.tab_settings", nil), func() {
-			c.window.Show()
-			c.navigate(sectionSettings, 0)
-		}),
-		fyne.NewMenuItem(tr("ui.tray.undo", nil), c.onUndo),
-		fyne.NewMenuItemSeparator(),
-		fyne.NewMenuItem(tr("ui.tray.quit", nil), func() { c.cancel(); c.fyneApp.Quit() }),
-	)
-	if trayApp, ok := c.fyneApp.(interface{ SetSystemTrayMenu(*fyne.Menu) }); ok {
-		trayApp.SetSystemTrayMenu(tray)
-	}
-}
-
 func (c *clientApp) sectionLabel(id sectionID) string {
 	switch id {
 	case sectionStatus:
@@ -568,20 +482,7 @@ func (c *clientApp) showSection(id sectionID) {
 		c.eventLabel.SetText(c.sectionLabel(id))
 	}
 	for section, item := range c.navs {
-		if section == id {
-			item.bg.FillColor = c.tint(theme.ColorNameSelection)
-			item.accent.FillColor = c.tint(theme.ColorNamePrimary)
-			item.Button.Importance = widget.LowImportance
-			item.Button.SetText("▸ " + item.label)
-		} else {
-			item.bg.FillColor = colorTransparent
-			item.accent.FillColor = colorTransparent
-			item.Button.Importance = widget.LowImportance
-			item.Button.SetText(item.label)
-		}
-		item.bg.Refresh()
-		item.accent.Refresh()
-		item.Button.Refresh()
+		item.setSelected(section == id)
 	}
 }
 
@@ -614,59 +515,6 @@ func (c *clientApp) buildSections() {
 	c.views[sectionFiles] = c.filesView()
 	c.views[sectionNAS] = container.NewVScroll(c.nasView())
 	c.views[sectionSettings] = c.settingsView()
-}
-
-func (c *clientApp) statusView() fyne.CanvasObject {
-	c.pauseBtnStatus = newHintButton(labelPause(c.runner.Paused()), theme.MediaPauseIcon(),
-		tr("status.pause_tooltip", nil), widget.MediumImportance, c.onPause, c.setHint).Button
-	c.detailsBtn = newHintButton(tr("ui.action.details", nil), theme.NavigateNextIcon(),
-		tr("ui.action.details_hint", nil), widget.MediumImportance, func() {
-			if c.bannerGo != nil {
-				c.bannerGo()
-			}
-		}, c.setHint)
-	banner := c.buildBanner()
-	actions := container.NewGridWithColumns(4,
-		newHintButton(tr("ui.action.sync_short", nil), theme.MediaReplayIcon(),
-			tr("status.sync_now_tooltip", nil), widget.HighImportance, c.onSync, c.setHint),
-		c.pauseBtnStatus,
-		newHintButton(tr("ui.action.audit_short", nil), theme.ConfirmIcon(),
-			tr("audit.run_now_tooltip", nil), widget.MediumImportance, c.onAudit, c.setHint),
-		newHintButton(tr("ui.action.preview_short", nil), theme.VisibilityIcon(),
-			tr("transfers.queue_note", nil), widget.MediumImportance, c.onPreview, c.setHint),
-		newHintButton(tr("ui.action.undo_short", nil), theme.ContentUndoIcon(),
-			tr("ui.action.undo_hint", nil), widget.MediumImportance, c.onUndo, c.setHint),
-		newHintButton(tr("ui.action.confirm_delete", nil), theme.ConfirmIcon(),
-			tr("status.confirm_deletes_tooltip", nil), widget.DangerImportance, c.onConfirmDelete, c.setHint),
-		newHintButton(tr("ui.action.cancel", nil), theme.CancelIcon(),
-			tr("status.cancel_tooltip", nil), widget.LowImportance, c.onCancel, c.setHint),
-	)
-
-	numberTracked, trackedTile := c.statTile("—", tr("assurance.stat_tracked", nil))
-	numberConflicts, conflictsTile := c.statTile("—", tr("assurance.stat_conflicts", nil))
-	numberUndo, undoTile := c.statTile("—", tr("ui.stat.undo", nil))
-	numberAudit, auditTile := c.statTile("—", tr("overview.stat_audit", nil))
-	c.statTracked, c.statConflicts, c.statUndo, c.statAudit = numberTracked, numberConflicts, numberUndo, numberAudit
-
-	stats := container.NewGridWithColumns(4, trackedTile, conflictsTile, undoTile, auditTile)
-
-	detail := widget.NewLabel(fmt.Sprintf("%s: %s\n%s: %s\n%s: %s",
-		tr("status.config_nas_host", nil), valueOrDash(c.cfg.String("nas_lan")),
-		tr("status.config_local_folder", nil), valueOrDash(c.cfg.LocalRoot()),
-		tr("status.config_nas_user", nil), valueOrDash(c.cfg.String("nas_user")),
-	))
-	detail.Wrapping = fyne.TextWrapWord
-	backend := c.note(fmt.Sprintf("%s: %s · %s %s",
-		tr("main_window.tab_settings", nil), displayBackend(c.cfg),
-		tr("settings.info_version_label", nil), version.AppVersion))
-
-	return container.NewVBox(
-		c.sectionTitle(tr("assurance.title", nil), tr("main_window.brand_tagline", nil)),
-		banner,
-		container.NewPadded(actions),
-		stats,
-		c.surface(container.NewVBox(detail, backend), ""),
-	)
 }
 
 func (c *clientApp) filteredVersions() []history.Version {
@@ -713,22 +561,6 @@ func valueOrDash(value string) string {
 	return value
 }
 
-func (c *clientApp) buildBanner() fyne.CanvasObject {
-	c.bannerTitle = widget.NewLabelWithStyle("", fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
-	c.bannerReason = widget.NewLabel("")
-	c.bannerReason.Wrapping = fyne.TextWrapWord
-	c.bannerNext = widget.NewLabelWithStyle("", fyne.TextAlignLeading, fyne.TextStyle{Italic: true})
-	c.bannerNext.Wrapping = fyne.TextWrapWord
-	c.bannerBG = canvas.NewRectangle(c.bannerTint(theme.ColorNamePrimary))
-	c.bannerBG.CornerRadius = 12
-	content := container.NewVBox(
-		c.bannerTitle,
-		c.bannerReason,
-		container.NewBorder(nil, nil, nil, c.detailsBtn, c.bannerNext),
-	)
-	return container.NewStack(c.bannerBG, container.NewPadded(content))
-}
-
 func (c *clientApp) activityView() fyne.CanvasObject {
 	c.activityList = newTextList(
 		func() int { return len(c.activityLines) },
@@ -765,12 +597,7 @@ func (c *clientApp) activityView() fyne.CanvasObject {
 		container.NewVBox(c.sectionTitle(tr("ui.activity.recent_title", nil), tr("ui.activity.recent_note", nil))),
 		nil, nil, nil, container.NewVScroll(c.activityList),
 	)
-	transfers := container.NewBorder(
-		container.NewVBox(
-			c.sectionTitle(tr("main_window.tab_transfers", nil), tr("ui.activity.transfers_note", nil)),
-		),
-		nil, nil, nil, container.NewVScroll(c.transferList),
-	)
+	transfers := c.buildTransfersPane()
 	logPane := container.NewBorder(
 		container.NewVBox(
 			c.sectionTitle(tr("main_window.tab_log", nil), tr("ui.activity.log_note", nil)),
@@ -915,10 +742,10 @@ func (c *clientApp) settingsView() fyne.CanvasObject {
 		c.selectedMirror = int(id)
 		c.updateMirrorButtons()
 	}
-	c.mirrorRemoveBtn = newHintButton(tr("mirrors.remove_btn", nil), theme.DeleteIcon(),
-		tr("mirrors.remove_tooltip", nil), widget.DangerImportance, c.onRemoveMirror, c.setHint).Button
-	c.mirrorToggleBtn = newHintButton(tr("ui.mirror.disable", nil), theme.MediaPauseIcon(),
-		tr("mirrors.col_enabled_tooltip", nil), widget.LowImportance, c.onToggleMirror, c.setHint).Button
+	c.mirrorRemoveBtn = plainButton(tr("mirrors.remove_btn", nil), theme.DeleteIcon(),
+		tr("mirrors.remove_tooltip", nil), widget.DangerImportance, c.onRemoveMirror, c.setHint)
+	c.mirrorToggleBtn = plainButton(tr("ui.mirror.disable", nil), theme.MediaPauseIcon(),
+		tr("mirrors.col_enabled_tooltip", nil), widget.LowImportance, c.onToggleMirror, c.setHint)
 	c.mirrorRemoveBtn.Disable()
 	c.mirrorToggleBtn.Disable()
 	c.selectiveList = newTextList(
@@ -1051,13 +878,44 @@ func (c *clientApp) applyStatusUI(level statusLevel, reason string) {
 	}
 	c.bannerBG.FillColor = c.bannerTint(colour)
 	c.bannerBG.Refresh()
-	c.bannerTitle.SetText(title)
+	if c.heroCircle != nil {
+		icon, heroColour := heroStyle(level)
+		c.heroCircle.FillColor = c.tint(heroColour)
+		c.heroCircle.Refresh()
+		c.heroIcon.SetResource(theme.NewColoredResource(icon, theme.ColorNameForegroundOnPrimary))
+	}
+	if c.statusDot != nil {
+		_, dotColour := heroStyle(level)
+		c.statusDot.FillColor = c.tint(dotColour)
+		c.statusDot.Refresh()
+	}
+	if c.confirmDeleteBtn != nil {
+		if level == statusBlocked {
+			c.confirmDeleteBtn.Show()
+		} else {
+			c.confirmDeleteBtn.Hide()
+		}
+	}
+	if level == statusOK {
+		c.lastSyncAt = time.Now()
+	}
+	c.updateLastSync()
+	switch level {
+	case statusBlocked:
+		c.notify("blocked:"+reason, title, reason, 30*time.Minute)
+	case statusOffline:
+		c.notify("offline", title, reason, 2*time.Hour)
+	case statusAttention:
+		c.notify("attention:"+reason, title, reason, time.Hour)
+	}
+	c.bannerTitle.SetText(plainTitle(title))
 	c.bannerReason.SetText(reason)
 	c.bannerNext.SetText(fmt.Sprintf("%s: %s", tr("assurance.guidance_title", nil), next))
 	c.bannerGo = goFn
 	if c.headerStatus != nil {
-		c.headerStatus.SetText("● " + title)
+		c.headerStatus.SetText(plainTitle(title))
 	}
+	c.refreshTray()
 	if c.detailsBtn != nil {
 		c.detailsBtn.SetText(action)
 		c.detailsBtn.hint = fmt.Sprintf("%s — %s", action, next)
@@ -1307,7 +1165,14 @@ func (c *clientApp) refreshConflicts() {
 		return
 	}
 	fyne.Do(func() {
+		previous := len(c.confGroups)
 		c.confGroups = groups
+		if len(groups) > previous {
+			c.notify(fmt.Sprintf("conflicts:%d", len(groups)), tr("ui.notify.conflicts_title", nil),
+				tr("ui.tray.conflicts", map[string]any{"count": len(groups)}), 10*time.Minute)
+		}
+		c.updateNavBadges()
+		c.refreshTray()
 		found := false
 		for _, group := range groups {
 			if group.Original == c.selectedGroup {

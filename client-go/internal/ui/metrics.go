@@ -117,6 +117,12 @@ func (c *clientApp) updateMetricsUI(values map[string]string) {
 	if c.diskBar != nil {
 		c.diskBar.SetValue(sample.DiskUsagePercent / 100)
 	}
+	if c.homeDiskBar != nil {
+		c.homeDiskBar.SetValue(sample.DiskUsagePercent / 100)
+		c.homeDiskLabel.SetText(diskText)
+		c.homeNASLabel.SetText(fmt.Sprintf("%s · %s %s", valueOrDash(c.cfg.String("nas_lan")),
+			tr("ui.home.server", nil), metricText(values["VERSION"])))
+	}
 	if c.loadValue != nil {
 		c.loadValue.SetText(fmt.Sprintf("%.2f / %.2f / %.2f", sample.Load1, sample.Load5, sample.Load15))
 	}
@@ -239,6 +245,9 @@ func (c *clientApp) updateDevicesUI(raw []string) {
 	}
 	if c.deviceList != nil {
 		c.deviceList.Refresh()
+	}
+	if c.homeDevicesLabel != nil {
+		c.homeDevicesLabel.SetText(tr("ui.home.devices", map[string]any{"count": len(c.deviceEntries)}))
 	}
 	if c.selectedDevice != "" {
 		found := false

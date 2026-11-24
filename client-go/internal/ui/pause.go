@@ -3,7 +3,6 @@ package ui
 import (
 	"strconv"
 	"strings"
-	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
@@ -71,13 +70,7 @@ func (c *clientApp) showPauseDialog() {
 				}
 				seconds = int64(minutes) * 60
 			}
-			until := time.Now().Unix() + seconds
-			_ = c.cfg.Set("paused", false, true)
-			_ = c.cfg.Set("pause_until", float64(until), true)
-			c.runner.SetPaused(false)
-			c.pauseBtnStatus.SetText(tr("status.resume_btn", nil))
-			c.applyStatus(statusPaused, tr("status.sync_state_paused", nil))
-			c.appendAction(tr("status.pause_btn", nil) + " · " + selectWidget.Selected)
+			c.pauseFor(seconds, selectWidget.Selected)
 		}, c.setHint)
 	content.Add(pause)
 	pauseDialog := dialog.NewCustom(tr("dialogs.pause.title", nil), tr("dupclean.cancel", nil), content, c.window)

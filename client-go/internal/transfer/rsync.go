@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"nasbox-go/internal/config"
@@ -40,6 +41,10 @@ type Transfer struct {
 
 	// replaceClient overrides the NAS calls of UploadReplace in tests.
 	replaceClient replaceRemote
+
+	observerMu sync.Mutex
+	onProgress ProgressHandler
+	onFile     FileHandler
 }
 
 func New(cfg *config.Config, client *remote.Client) *Transfer {
@@ -112,7 +117,7 @@ func (t *Transfer) DownloadPath(relative string) error {
 	if t.shouldCompress() {
 		args = append(args, "--compress")
 	}
-	_, err = runRsync(t.ctx, nil, args...)
+	_, err = t.runObserved(t.ctx, nil, false, 1, args)
 	return err
 }
 
@@ -155,7 +160,7 @@ func (t *Transfer) run(paths []string, upload bool) error {
 		return err
 	}
 	args, payload := t.BuildCommand(paths, upload)
-	_, err := runRsync(t.ctx, payload, args...)
+	_, err := t.runObserved(t.ctx, payload, upload, len(paths), args)
 	return err
 }
 
@@ -179,7 +184,7 @@ func (t *Transfer) UploadStaged(paths []string, device string, files []remote.St
 	defer t.client.CleanupRemoteStaging(stagingDir)
 	args, payload := t.BuildCommand(paths, true)
 	args[len(args)-1] = t.remoteSpec(stagingDir)
-	stderr, err := runRsync(t.ctx, payload, args...)
+	stderr, err := t.runObserved(t.ctx, payload, true, len(paths), args)
 	if err != nil {
 		return fmt.Errorf("rsync staging: %w: %s", err, strings.TrimSpace(string(stderr)))
 	}

@@ -73,7 +73,7 @@ func (t *Transfer) UploadReplace(files []remote.ReplaceFile, device, repositoryI
 	backup := []string{"--backup", "--backup-dir=" + backupDir, "--suffix=-" + runTS}
 	// Backup options go before the endpoints (the last two arguments).
 	args = append(args[:len(args)-2:len(args)-2], append(backup, args[len(args)-2:]...)...)
-	if _, err := runRsync(t.ctx, payload, args...); err != nil {
+	if _, err := t.runObserved(t.ctx, payload, true, len(readyPaths), args); err != nil {
 		return result, err
 	}
 

@@ -5913,5 +5913,129 @@
   "ui.mirror.disable": {
     "it": "Sospendi mirror",
     "en": "Suspend mirror"
+  },
+  "ui.brand.subtitle": {
+    "en": "Your cloud, on your NAS",
+    "it": "Il tuo cloud, sul tuo NAS"
+  },
+  "ui.status.never_synced": {
+    "en": "Not synced yet",
+    "it": "Nessuna sincronizzazione ancora"
+  },
+  "ui.status.last_sync": {
+    "en": "Last sync: {when}",
+    "it": "Ultima sincronizzazione: {when}"
+  },
+  "ui.status.paused_until": {
+    "en": "Paused until {time}",
+    "it": "In pausa fino a {time}"
+  },
+  "ui.home.more_actions": {
+    "en": "More actions",
+    "it": "Altre azioni"
+  },
+  "ui.home.see_all": {
+    "en": "See all",
+    "it": "Vedi tutto"
+  },
+  "ui.home.recent_title": {
+    "en": "Recent activity",
+    "it": "Attività recente"
+  },
+  "ui.home.recent_empty": {
+    "en": "Files uploaded and downloaded by NASBox will appear here.",
+    "it": "Qui compariranno i file caricati e scaricati da NASBox."
+  },
+  "ui.home.recent_empty_short": {
+    "en": "No recent files",
+    "it": "Nessun file recente"
+  },
+  "ui.home.nas_title": {
+    "en": "Your NAS",
+    "it": "Il tuo NAS"
+  },
+  "ui.home.nas_details": {
+    "en": "Details",
+    "it": "Dettagli"
+  },
+  "ui.home.server": {
+    "en": "server",
+    "it": "server"
+  },
+  "ui.home.devices": {
+    "en": "{count} devices connected to the NAS",
+    "it": "{count} dispositivi collegati al NAS"
+  },
+  "ui.transfer.idle": {
+    "en": "No transfer in progress",
+    "it": "Nessun trasferimento in corso"
+  },
+  "ui.transfer.uploading": {
+    "en": "Uploading",
+    "it": "Caricamento"
+  },
+  "ui.transfer.downloading": {
+    "en": "Downloading",
+    "it": "Scaricamento"
+  },
+  "ui.transfer.title": {
+    "en": "{direction} · file {current} of {total}",
+    "it": "{direction} · file {current} di {total}"
+  },
+  "ui.transfer.eta": {
+    "en": "{eta} left",
+    "it": "{eta} rimanenti"
+  },
+  "ui.recent.uploaded": {
+    "en": "Uploaded",
+    "it": "Caricato"
+  },
+  "ui.recent.downloaded": {
+    "en": "Downloaded",
+    "it": "Scaricato"
+  },
+  "ui.recent.deleted": {
+    "en": "Deleted",
+    "it": "Eliminato"
+  },
+  "ui.recent.conflict": {
+    "en": "Conflict",
+    "it": "Conflitto"
+  },
+  "ui.time.now": {
+    "en": "just now",
+    "it": "adesso"
+  },
+  "ui.time.minutes": {
+    "en": "{n} min ago",
+    "it": "{n} min fa"
+  },
+  "ui.time.yesterday": {
+    "en": "yesterday {time}",
+    "it": "ieri {time}"
+  },
+  "ui.tray.recent": {
+    "en": "Recent files",
+    "it": "File recenti"
+  },
+  "ui.tray.pause_menu": {
+    "en": "Pause syncing",
+    "it": "Metti in pausa"
+  },
+  "ui.tray.pause_tomorrow": {
+    "en": "Until tomorrow morning",
+    "it": "Fino a domani mattina"
+  },
+  "ui.tray.conflicts": {
+    "en": "Conflicts to review: {count}",
+    "it": "Conflitti da rivedere: {count}"
+  },
+  "ui.tray.no_conflicts": {
+    "en": "No conflicts",
+    "it": "Nessun conflitto"
+  },
+  "ui.notify.conflicts_title": {
+    "en": "NASBox: conflicts to review",
+    "it": "NASBox: conflitti da rivedere"
   }
 }

@@ -61,14 +61,14 @@ copra *almeno* le funzionalità Python prima di sostituirlo nel canale stabile.
 2. **Storico NAS unificato.** Il Go espone il ripristino remoto manuale
    (percorso + suffisso) e lo storico locale; manca il pannello che unisce
    locale e remoto per file/cartella con ripristino multiplo.
-3. **Coda trasferimenti dettagliata.** Python mostra file correnti, ETA,
-   velocità e retry per singolo elemento; il Go emette eventi aggregati. La
-   logica di sync è equivalente, la UI è meno granulare.
+3. ~~Coda trasferimenti dettagliata~~ — **completata in 0.19.0**: file
+   corrente, file N di M, percentuale, velocità, ETA e storico dei file.
 4. **Grafici metriche.** Python disegna lo storico CPU/carico; il Go mostra solo
    il campione corrente e i rate calcolati.
 5. **Accessibilità e tooltip.** Fyne 2.7 non ha tooltip nativi né
    `SetAccessibleName`: il Go usa la barra suggerimenti e contrasto alto.
-6. **Click singolo sulla tray.** La preferenza `tray_single_click` è letta ma il
+6. **Click singolo sulla tray.** (0.19.0: menu tray completo con stato,
+   recenti e pausa; resta la distinzione click/destra non esposta da Fyne.) La preferenza `tray_single_click` è letta ma il
    backend tray non espone la distinzione click/destra; il menu resta il
    comportamento effettivo.
 7. **Note di rilascio nell'updater.** Il manifest Go non porta un changelog

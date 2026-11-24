@@ -4,6 +4,35 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 0.19.0 - 2026-11-24
+
+Client Go, nuova interfaccia e feedback in tempo reale:
+
+- **Interfaccia ridisegnata.** Barra laterale con icone ed evidenziazione,
+  colore d'accento blu, schede pulite, tema chiaro e scuro coerenti. Corretto
+  alla radice il difetto che disegnava pulsanti senza sfondo (testo bianco su
+  bianco) e voci di menu tagliate: `hintButton` ora è un vero pulsante Fyne.
+- **Home in stile client di sync:** grande stato con icona semantica e azione
+  suggerita, riquadri numerici cliccabili, "Attività recente" con i file
+  caricati/scaricati e scheda "Il tuo NAS" (disco, server, dispositivi).
+  Le azioni rare sono raccolte in "Altre azioni"; "Conferma cancellazioni"
+  compare solo quando una guardia ha bloccato la sync.
+- **Trasferimenti in tempo reale:** file corrente, "file 3 di 12",
+  percentuale, velocità e tempo stimato, letti da rsync
+  (`--info=progress2,name1`, solo opzioni di output locali, compatibili con
+  rsync 3.1.2 del NAS). La scheda Attività › Trasferimenti mostra lo storico
+  dettagliato; clic su un file apre la sua cartella.
+- **Tray completa:** stato in tempo reale in cima al menu, file recenti,
+  pausa 15 min/30 min/1 h/4 h/8 h/fino a domani e riprendi, conflitti da
+  rivedere, collegamenti rapidi. Notifiche per blocchi, NAS non raggiungibile
+  e nuovi conflitti, senza ripetizioni.
+- Barra laterale con stato e "Ultima sincronizzazione: 2 min fa"; badge con
+  il numero di conflitti sulla voce File.
+- I file trasferiti vengono registrati in `events.jsonl`, così la cronologia
+  sopravvive ai riavvii ed è condivisa con il client Python.
+- Le schermate si possono renderizzare senza display (renderer software di
+  Fyne) per la revisione grafica: `NASBOX_UI_CAPTURE=<dir>`.
+
 ## 0.18.1 - 2026-11-24
 
 Client Go, correzione urgente:

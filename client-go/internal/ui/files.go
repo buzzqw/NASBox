@@ -52,14 +52,14 @@ func (c *clientApp) buildBrowsePane() fyne.CanvasObject {
 	c.downloadPathEntry.SetPlaceHolder(tr("ui.file.download_path_hint", nil))
 	c.downloadPathEntry.OnSubmitted = func(string) { c.onDownloadPath() }
 
-	c.browseDeleteBtn = newHintButton(tr("browse.delete_btn", nil), theme.DeleteIcon(),
-		tr("browse.delete_tooltip", nil), widget.DangerImportance, c.onBrowseDelete, c.setHint).Button
-	c.browseRenameBtn = newHintButton(tr("browse.rename_btn", nil), theme.DocumentCreateIcon(),
-		tr("ui.file.rename_hint", nil), widget.LowImportance, c.onBrowseRename, c.setHint).Button
-	c.browseDownloadBtn = newHintButton(tr("ui.action.download", nil), theme.DownloadIcon(),
-		tr("browse.download_tooltip", nil), widget.MediumImportance, c.onBrowseDownload, c.setHint).Button
-	c.browseUpBtn = newHintButton(tr("browse.up_btn", nil), theme.NavigateBackIcon(),
-		tr("ui.file.up_hint", nil), widget.LowImportance, c.onBrowseUp, c.setHint).Button
+	c.browseDeleteBtn = plainButton(tr("browse.delete_btn", nil), theme.DeleteIcon(),
+		tr("browse.delete_tooltip", nil), widget.DangerImportance, c.onBrowseDelete, c.setHint)
+	c.browseRenameBtn = plainButton(tr("browse.rename_btn", nil), theme.DocumentCreateIcon(),
+		tr("ui.file.rename_hint", nil), widget.LowImportance, c.onBrowseRename, c.setHint)
+	c.browseDownloadBtn = plainButton(tr("ui.action.download", nil), theme.DownloadIcon(),
+		tr("browse.download_tooltip", nil), widget.MediumImportance, c.onBrowseDownload, c.setHint)
+	c.browseUpBtn = plainButton(tr("browse.up_btn", nil), theme.NavigateBackIcon(),
+		tr("ui.file.up_hint", nil), widget.LowImportance, c.onBrowseUp, c.setHint)
 
 	header := container.NewVBox(
 		c.sectionTitle(tr("main_window.tab_browse", nil), tr("ui.file.browse_note", nil)),
@@ -125,10 +125,10 @@ func (c *clientApp) buildConflictPane() fyne.CanvasObject {
 	}
 	c.confDetail = widget.NewLabel(tr("conflicts.no_selection", nil))
 	c.confDetail.Wrapping = fyne.TextWrapWord
-	c.resolveBtn = newHintButton(tr("ui.action.resolve", nil), theme.ConfirmIcon(),
-		tr("conflicts.confirm_title", nil), widget.HighImportance, c.onResolveConflict, c.setHint).Button
-	c.keepBothBtn = newHintButton(tr("ui.action.keep_both", nil), theme.ContentCopyIcon(),
-		tr("conflicts.keep_both_tooltip", nil), widget.MediumImportance, c.onKeepBoth, c.setHint).Button
+	c.resolveBtn = plainButton(tr("ui.action.resolve", nil), theme.ConfirmIcon(),
+		tr("conflicts.confirm_title", nil), widget.HighImportance, c.onResolveConflict, c.setHint)
+	c.keepBothBtn = plainButton(tr("ui.action.keep_both", nil), theme.ContentCopyIcon(),
+		tr("conflicts.keep_both_tooltip", nil), widget.MediumImportance, c.onKeepBoth, c.setHint)
 
 	groups := container.NewBorder(
 		container.NewVBox(c.sectionTitle(tr("conflicts.list_title", nil), tr("conflicts.notice", nil))),
@@ -180,8 +180,8 @@ func (c *clientApp) buildHistoryPane() fyne.CanvasObject {
 	}
 	c.histDetail = widget.NewLabel(tr("ui.history.none_selected", nil))
 	c.histDetail.Wrapping = fyne.TextWrapWord
-	c.restoreBtn = newHintButton(tr("ui.action.restore", nil), theme.ContentRedoIcon(),
-		tr("history.restore_tooltip", nil), widget.HighImportance, c.onRestoreVersion, c.setHint).Button
+	c.restoreBtn = plainButton(tr("ui.action.restore", nil), theme.ContentRedoIcon(),
+		tr("history.restore_tooltip", nil), widget.HighImportance, c.onRestoreVersion, c.setHint)
 	header := container.NewVBox(
 		c.sectionTitle(tr("main_window.tab_history", nil), tr("ui.history.note", nil)),
 		c.historyFilter,

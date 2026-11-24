@@ -35,10 +35,14 @@ func walkUI(root fyne.CanvasObject, visit func(fyne.CanvasObject)) {
 	case *listRowObject:
 		walkUI(value.content, visit)
 	case *hintButton:
-		walkUI(value.Button, visit)
+		walkUI(&value.Button, visit)
 	case *hintArea:
 		walkUI(value.Widget, visit)
 	case *widthWidget:
+		walkUI(value.content, visit)
+	case *surfacePanel:
+		walkUI(value.content, visit)
+	case *tapCard:
 		walkUI(value.content, visit)
 	}
 }
@@ -63,16 +67,16 @@ func TestNavigationSelectionHasBackgroundBarAndMarker(t *testing.T) {
 	if selected.accent.FillColor != c.tint(theme.ColorNamePrimary) {
 		t.Fatal("selected navigation accent bar is not visible")
 	}
-	if !strings.HasPrefix(selected.Button.Text, "▸") {
-		t.Fatalf("selected marker missing: %q", selected.Button.Text)
+	if !selected.selected || !selected.text.TextStyle.Bold || selected.text.Color != c.tint(theme.ColorNamePrimary) {
+		t.Fatal("selected item must be bold and use the accent colour")
 	}
 	foundBackground, foundAccent := false, false
-	walkUI(selected.buttonView, func(object fyne.CanvasObject) {
+	for _, object := range test.WidgetRenderer(selected).Objects() {
 		foundBackground = foundBackground || object == selected.bg
 		foundAccent = foundAccent || object == selected.accent
-	})
+	}
 	if !foundBackground || !foundAccent {
-		t.Fatal("navigation visuals are not part of the layout tree")
+		t.Fatal("navigation visuals are not part of the renderer")
 	}
 	if c.navs[sectionStatus].bg.FillColor != colorTransparent {
 		t.Fatal("inactive navigation item still has a selection background")
@@ -82,11 +86,11 @@ func TestNavigationSelectionHasBackgroundBarAndMarker(t *testing.T) {
 func TestHeaderStatusIsSingleLine(t *testing.T) {
 	c := newTestClient(t)
 	c.applyStatusUI(statusBlocked, strings.Repeat("motivo molto lungo ", 20))
-	if c.headerStatus.Wrapping != fyne.TextTruncate {
-		t.Fatal("header status may wrap into a vertical pill")
+	if c.headerStatus.Truncation != fyne.TextTruncateEllipsis {
+		t.Fatal("sidebar status may wrap into a vertical strip")
 	}
-	if !strings.HasPrefix(c.headerStatus.Text, "●") {
-		t.Fatalf("header status marker missing: %q", c.headerStatus.Text)
+	if c.statusDot.FillColor != c.tint(theme.ColorNameError) {
+		t.Fatal("status dot must use the semantic colour")
 	}
 	if c.bannerTitle == c.bannerReason || c.bannerReason == c.bannerNext || c.bannerTitle == c.bannerNext {
 		t.Fatal("banner state, reason and next action must be separate labels")

@@ -29,10 +29,10 @@ func (c *clientApp) buildStoragePane() fyne.CanvasObject {
 	c.storageTrash.Wrapping = fyne.TextWrapWord
 	c.storageProgress = widget.NewProgressBar()
 	c.storageProgress.SetValue(0)
-	c.storageAnalyzeBtn = newHintButton(tr("storage.analyze_btn", nil), theme.ViewRefreshIcon(),
-		tr("storage.title", nil), widget.HighImportance, c.onAnalyzeStorage, c.setHint).Button
-	c.storageCleanupBtn = newHintButton(tr("storage.cleanup_btn", nil), theme.DeleteIcon(),
-		tr("storage.cleanup_tooltip", nil), widget.MediumImportance, c.onCleanupDuplicates, c.setHint).Button
+	c.storageAnalyzeBtn = plainButton(tr("storage.analyze_btn", nil), theme.ViewRefreshIcon(),
+		tr("storage.title", nil), widget.HighImportance, c.onAnalyzeStorage, c.setHint)
+	c.storageCleanupBtn = plainButton(tr("storage.cleanup_btn", nil), theme.DeleteIcon(),
+		tr("storage.cleanup_tooltip", nil), widget.MediumImportance, c.onCleanupDuplicates, c.setHint)
 	c.storageCleanupBtn.Disable()
 
 	return container.NewVScroll(container.NewVBox(
