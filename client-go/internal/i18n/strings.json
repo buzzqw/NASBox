@@ -1,0 +1,4918 @@
+{
+  "a11y.assurance_headline": {
+    "en": "Sync status",
+    "it": "Stato sincronizzazione"
+  },
+  "a11y.audit_summary": {
+    "en": "Last full audit result",
+    "it": "Risultato dell'ultimo audit completo"
+  },
+  "a11y.batch_progress": {
+    "en": "Transfer batch progress",
+    "it": "Avanzamento batch di trasferimento"
+  },
+  "a11y.confirm_deletes_btn": {
+    "en": "Confirm mass deletion",
+    "it": "Conferma cancellazioni di massa"
+  },
+  "a11y.conflict_badge": {
+    "en": "Conflicts to review",
+    "it": "Conflitti da rivedere"
+  },
+  "a11y.conflict_copy_name": {
+    "en": "Conflict copy name preview",
+    "it": "Anteprima del nome della copia di conflitto"
+  },
+  "a11y.conflict_merge_editor": {
+    "en": "Three-way merge result editor",
+    "it": "Editor del risultato dell'unione a tre vie"
+  },
+  "a11y.conflict_preview": {
+    "en": "Version comparison preview",
+    "it": "Anteprima confronto versioni"
+  },
+  "a11y.conflict_preview_alternative": {
+    "en": "Alternative version in the side-by-side comparison",
+    "it": "Versione alternativa nel confronto affiancato"
+  },
+  "a11y.conflict_preview_original": {
+    "en": "Original version in the side-by-side comparison",
+    "it": "Versione originale nel confronto affiancato"
+  },
+  "a11y.conflict_search": {
+    "en": "Filter conflicts by path",
+    "it": "Filtra conflitti per percorso"
+  },
+  "a11y.conflict_tree": {
+    "en": "Conflict list",
+    "it": "Elenco conflitti"
+  },
+  "a11y.details_toggle": {
+    "en": "Show technical details",
+    "it": "Mostra dettagli tecnici"
+  },
+  "a11y.devices_label": {
+    "en": "Devices that synced recently",
+    "it": "Dispositivi che hanno sincronizzato di recente"
+  },
+  "a11y.diagnostics_status": {
+    "en": "NAS diagnostics status",
+    "it": "Stato diagnostica NAS"
+  },
+  "a11y.folder_path": {
+    "en": "NASBox folder path",
+    "it": "Percorso cartella NASBox"
+  },
+  "a11y.hash_progress": {
+    "en": "Local file check progress",
+    "it": "Avanzamento verifica file locali"
+  },
+  "a11y.integrity_status": {
+    "en": "Integrity check status",
+    "it": "Stato verifica integrità"
+  },
+  "a11y.main_tabs": {
+    "en": "Main tabs",
+    "it": "Schede principali"
+  },
+  "a11y.nas_activity": {
+    "en": "NAS activity",
+    "it": "Attività NAS"
+  },
+  "a11y.nas_connection": {
+    "en": "NAS connection status",
+    "it": "Stato connessione NAS"
+  },
+  "a11y.nas_storage": {
+    "en": "NAS disk space",
+    "it": "Spazio disco NAS"
+  },
+  "a11y.nas_storage_bar": {
+    "en": "NAS disk usage",
+    "it": "Utilizzo spazio disco NAS"
+  },
+  "a11y.status_message": {
+    "en": "Status message",
+    "it": "Messaggio di stato"
+  },
+  "a11y.sync_feedback": {
+    "en": "Synchronization feedback",
+    "it": "Feedback sincronizzazione"
+  },
+  "a11y.sync_progress": {
+    "en": "File sync progress",
+    "it": "Avanzamento sincronizzazione file"
+  },
+  "a11y.sync_state": {
+    "en": "Synchronization status",
+    "it": "Stato sincronizzazione"
+  },
+  "a11y.update_status": {
+    "en": "Client update status",
+    "it": "Stato aggiornamenti client"
+  },
+  "a11y.version_badge": {
+    "en": "Client version, click to check for updates",
+    "it": "Versione client, clicca per cercare aggiornamenti"
+  },
+  "assurance.activity": {
+    "en": "Last 24h: ↑ {uploads} uploads · ↓ {downloads} downloads · ✕ {deletes} deletions",
+    "it": "Ultime 24h: ↑ {uploads} caricamenti · ↓ {downloads} download · ✕ {deletes} eliminazioni"
+  },
+  "assurance.activity_empty": {
+    "en": "No recent activity.",
+    "it": "Nessuna attività recente."
+  },
+  "assurance.all_synced": {
+    "en": "Everything is synced. No pending changes.",
+    "it": "Tutto sincronizzato. Nessuna modifica in sospeso."
+  },
+  "assurance.check_conflicts": {
+    "en": "No conflicts",
+    "it": "Nessun conflitto"
+  },
+  "assurance.check_connected": {
+    "en": "NAS reachable",
+    "it": "NAS raggiungibile"
+  },
+  "assurance.check_errors": {
+    "en": "No recent errors",
+    "it": "Nessun errore recente"
+  },
+  "assurance.check_integrity": {
+    "en": "Integrity verified",
+    "it": "Integrità verificata"
+  },
+  "assurance.check_journal": {
+    "en": "Journal ready",
+    "it": "Journal pronto"
+  },
+  "assurance.check_line": {
+    "en": "{mark} {text}",
+    "it": "{mark} {text}"
+  },
+  "assurance.check_queue": {
+    "en": "Queue empty",
+    "it": "Coda vuota"
+  },
+  "assurance.check_repository": {
+    "en": "Repository verified",
+    "it": "Repository verificato"
+  },
+  "assurance.checking": {
+    "en": "Checking sync status…",
+    "it": "Verifica dello stato di sincronizzazione…"
+  },
+  "assurance.guidance_action_conflicts": {
+    "en": "Open Conflicts",
+    "it": "Apri Conflitti"
+  },
+  "assurance.guidance_action_log": {
+    "en": "Open Log",
+    "it": "Apri Log"
+  },
+  "assurance.guidance_conflicts": {
+    "en": "Open the Conflicts tab and choose which version to keep for each file, then sync again.",
+    "it": "Apri la scheda Conflitti e scegli quale versione tenere per ogni file, poi sincronizza di nuovo."
+  },
+  "assurance.guidance_integrity": {
+    "en": "The checksum verification has never run. Press 'Verify now': it compares files without changing them.",
+    "it": "La verifica dei checksum non è mai stata eseguita. Premi «Verifica adesso»: confronta i file senza modificarli."
+  },
+  "assurance.guidance_offline": {
+    "en": "Check that the NAS is on and reachable, then review the connection settings.",
+    "it": "Controlla che il NAS sia acceso e raggiungibile, poi verifica la configurazione di connessione."
+  },
+  "assurance.guidance_queue": {
+    "en": "{count} operations queued: NASBox retries on its own. If they stay stuck, open the Log for the reason or check the Transfers tab.",
+    "it": "{count} operazioni in coda: NASBox riprova da solo. Se restano bloccate, apri il Log per leggere il motivo, oppure controlla la scheda Trasferimenti."
+  },
+  "assurance.guidance_safety": {
+    "en": "A transfer was blocked before deleting {count} files. Nothing was changed. Open the Log: if the files disappeared by mistake (unmounted drive or deleted folder), restore them. Only if the deletion is intentional, press 'Confirm mass deletion' and then 'Sync everything now'.",
+    "it": "Un trasferimento è stato bloccato prima di cancellare {count} file. Nessun file è stato modificato. Controlla il Log: se i file sono spariti per errore (unità non montata o cartella cancellata), ripristinali. Solo se la cancellazione è intenzionale, premi «Conferma cancellazioni di massa» e poi «Sincronizza adesso»."
+  },
+  "assurance.guidance_title": {
+    "en": "What to do now",
+    "it": "Cosa fare ora"
+  },
+  "assurance.in_progress": {
+    "en": "Syncing ({kind})…",
+    "it": "Sincronizzazione in corso ({kind})…"
+  },
+  "assurance.minutes_ago": {
+    "en": "{minutes} minutes ago",
+    "it": "{minutes} minuti fa"
+  },
+  "assurance.needs_attention": {
+    "en": "Attention: something needs your action.",
+    "it": "Attenzione: qualcosa richiede il tuo intervento."
+  },
+  "assurance.needs_attention_detail": {
+    "en": "Attention: {reason}",
+    "it": "Attenzione: {reason}"
+  },
+  "assurance.offline": {
+    "en": "NAS unreachable: cannot verify sync state.",
+    "it": "NAS non raggiungibile: impossibile garantire la sincronizzazione."
+  },
+  "assurance.proof": {
+    "en": "Last check: {when} · {files} files compared · {mismatches} differences",
+    "it": "Ultima verifica: {when} · {files} file confrontati · {mismatches} differenze"
+  },
+  "assurance.reason_conflicts": {
+    "en": "conflicts to resolve",
+    "it": "conflitti da risolvere"
+  },
+  "assurance.reason_integrity": {
+    "en": "checksum check to run",
+    "it": "verifica checksum da eseguire"
+  },
+  "assurance.reason_offline": {
+    "en": "NAS unreachable",
+    "it": "NAS non raggiungibile"
+  },
+  "assurance.reason_pending": {
+    "en": "local changes pending",
+    "it": "modifiche locali in sospeso"
+  },
+  "assurance.reason_queue": {
+    "en": "operations queued",
+    "it": "operazioni in coda"
+  },
+  "assurance.reason_safety": {
+    "en": "mass deletion blocked",
+    "it": "cancellazioni di massa bloccate"
+  },
+  "assurance.sample_suffix": {
+    "en": " (sample)",
+    "it": " (campione)"
+  },
+  "assurance.seconds_ago": {
+    "en": "{seconds} seconds ago",
+    "it": "{seconds} secondi fa"
+  },
+  "assurance.stat_conflicts": {
+    "en": "Conflicts",
+    "it": "Conflitti"
+  },
+  "assurance.stat_lastcheck": {
+    "en": "Last check",
+    "it": "Ultimo controllo"
+  },
+  "assurance.stat_pending": {
+    "en": "Pending",
+    "it": "In sospeso"
+  },
+  "assurance.stat_queue": {
+    "en": "Queued",
+    "it": "In coda"
+  },
+  "assurance.stat_revision": {
+    "en": "Revision",
+    "it": "Revisione"
+  },
+  "assurance.stat_tracked": {
+    "en": "Tracked files",
+    "it": "File tracciati"
+  },
+  "assurance.title": {
+    "en": "✅ Sync assurance",
+    "it": "✅ Garanzia di sincronizzazione"
+  },
+  "assurance.unknown_short": {
+    "en": "—",
+    "it": "—"
+  },
+  "assurance.verify_now": {
+    "en": "Verify now",
+    "it": "Verifica adesso"
+  },
+  "assurance.verify_now_tooltip": {
+    "en": "Compare checksums of all synced files without changing them",
+    "it": "Confronta i checksum di tutti i file sincronizzati senza modificarli"
+  },
+  "assurance.verifying": {
+    "en": "Checksum verification in progress…",
+    "it": "Verifica dei checksum in corso…"
+  },
+  "assurance.waiting_proof": {
+    "en": "Waiting for the first checksum verification: use the button below to run it now.",
+    "it": "In attesa della prima verifica dei checksum: il pulsante qui sotto la avvia subito."
+  },
+  "audit.busy": {
+    "en": "Audit not started: a sync is in progress.",
+    "it": "Audit non avviato: sincronizzazione in corso."
+  },
+  "audit.differences": {
+    "en": "Full audit: {when} · {count} differences found",
+    "it": "Audit completo: {when} · {count} differenze trovate"
+  },
+  "audit.error": {
+    "en": "Full audit failed: {detail}",
+    "it": "Audit completo non riuscito: {detail}"
+  },
+  "audit.never": {
+    "en": "Full audit: never run.",
+    "it": "Audit completo: mai eseguito."
+  },
+  "audit.ok": {
+    "en": "Full audit: {when} · {files} files · 0 differences ({duration}s)",
+    "it": "Audit completo: {when} · {files} file · 0 differenze ({duration}s)"
+  },
+  "audit.run_now": {
+    "en": "Full audit now",
+    "it": "Audit completo ora"
+  },
+  "audit.run_now_tooltip": {
+    "en": "Compare every tracked file with the NAS manifest without blocking sync",
+    "it": "Confronta tutti i file tracciati con il manifest NAS, senza bloccare la sincronizzazione"
+  },
+  "audit.running": {
+    "en": "Full audit in progress…",
+    "it": "Audit completo in corso…"
+  },
+  "browse.col_modified": {
+    "en": "Modified",
+    "it": "Modificato"
+  },
+  "browse.col_name": {
+    "en": "Name",
+    "it": "Nome"
+  },
+  "browse.col_size": {
+    "en": "Size",
+    "it": "Dimensione"
+  },
+  "browse.confirm_delete_body": {
+    "en": "{names}\n\nThis will move into the NAS trash, recoverable from the History tab {retention}. Proceed?",
+    "it": "{names}\n\nVerrà spostato nel cestino del NAS, recuperabile dal tab Storico {retention}. Procedere?"
+  },
+  "browse.confirm_delete_title": {
+    "en": "Confirm deletion?",
+    "it": "Confermi l'eliminazione?"
+  },
+  "browse.delete_btn": {
+    "en": "Delete",
+    "it": "Elimina"
+  },
+  "browse.delete_failed_title": {
+    "en": "Deletion failed",
+    "it": "Eliminazione fallita"
+  },
+  "browse.delete_partial_body": {
+    "en": "Deletion failed for: {names}",
+    "it": "Eliminazione fallita per: {names}"
+  },
+  "browse.delete_tooltip": {
+    "en": "Moves into the NAS trash (same retention as sync), never a direct deletion.",
+    "it": "Sposta nel cestino del NAS (stessa retention della sincronizzazione), mai una cancellazione diretta."
+  },
+  "browse.deleting": {
+    "en": "Deleting…",
+    "it": "Eliminazione in corso…"
+  },
+  "browse.download_btn": {
+    "en": "Download",
+    "it": "Scarica"
+  },
+  "browse.download_done_body": {
+    "en": "{count} files downloaded.",
+    "it": "{count} file scaricati."
+  },
+  "browse.download_done_title": {
+    "en": "Download complete",
+    "it": "Scaricamento completato"
+  },
+  "browse.download_failed_title": {
+    "en": "Download failed",
+    "it": "Scaricamento fallito"
+  },
+  "browse.download_one_done_body": {
+    "en": "Saved to: {path}",
+    "it": "Salvato in: {path}"
+  },
+  "browse.download_partial_body": {
+    "en": "Download failed for: {names}",
+    "it": "Scaricamento fallito per: {names}"
+  },
+  "browse.download_pick_file": {
+    "en": "Select at least one file (not a folder) to download.",
+    "it": "Seleziona almeno un file (non una cartella) da scaricare."
+  },
+  "browse.download_tooltip": {
+    "en": "Download the selected file without touching sync state.",
+    "it": "Scarica il file selezionato senza toccare la sincronizzazione."
+  },
+  "browse.downloading": {
+    "en": "Downloading…",
+    "it": "Scaricamento…"
+  },
+  "browse.empty_filtered_hint": {
+    "en": "No items match the search.",
+    "it": "Nessun elemento corrisponde alla ricerca."
+  },
+  "browse.empty_hint": {
+    "en": "This folder is empty. Drag files here from your computer to upload them to the NAS.",
+    "it": "Questa cartella è vuota. Trascina qui file dal computer per caricarli sul NAS."
+  },
+  "browse.entry_count": {
+    "en": "{count} items",
+    "it": "{count} elementi"
+  },
+  "browse.exclude_done": {
+    "en": "'{path}' excluded from sync.",
+    "it": "'{path}' escluso dalla sincronizzazione."
+  },
+  "browse.filtered_count": {
+    "en": "{shown} of {total} items",
+    "it": "{shown} di {total} elementi"
+  },
+  "browse.include_done": {
+    "en": "'{path}' included in sync.",
+    "it": "'{path}' incluso nella sincronizzazione."
+  },
+  "browse.list_failed": {
+    "en": "Couldn't read this folder on the NAS.",
+    "it": "Impossibile leggere questa cartella sul NAS."
+  },
+  "browse.loading": {
+    "en": "Loading…",
+    "it": "Caricamento…"
+  },
+  "browse.local_path_copied": {
+    "en": "Local path copied: {path}",
+    "it": "Percorso locale copiato: {path}"
+  },
+  "browse.menu_copy_local_path": {
+    "en": "Copy local path",
+    "it": "Copia percorso locale"
+  },
+  "browse.menu_copy_remote_path": {
+    "en": "Copy remote path",
+    "it": "Copia percorso remoto"
+  },
+  "browse.menu_create_mirror": {
+    "en": "Create mirror from this folder",
+    "it": "Crea mirror da questa cartella"
+  },
+  "browse.menu_exclude_folder": {
+    "en": "Exclude this folder",
+    "it": "Escludi questa cartella"
+  },
+  "browse.menu_include_folder": {
+    "en": "Include this folder",
+    "it": "Includi questa cartella"
+  },
+  "browse.menu_open_local_folder": {
+    "en": "Open corresponding local folder",
+    "it": "Apri cartella locale corrispondente"
+  },
+  "browse.menu_sync_archive": {
+    "en": "Archive",
+    "it": "Archivio"
+  },
+  "browse.menu_sync_bidirectional": {
+    "en": "Bidirectional",
+    "it": "Bidirezionale"
+  },
+  "browse.menu_sync_local_only": {
+    "en": "Local only",
+    "it": "Solo locale"
+  },
+  "browse.menu_sync_nas_only": {
+    "en": "NAS only",
+    "it": "Solo NAS"
+  },
+  "browse.mirror_created": {
+    "en": "Mirror configured for {dest}.",
+    "it": "Mirror configurato per {dest}."
+  },
+  "browse.mirror_error_title": {
+    "en": "Couldn't create the mirror",
+    "it": "Impossibile creare il mirror"
+  },
+  "browse.mirror_source_prompt": {
+    "en": "Source folder (outside NASBox):",
+    "it": "Cartella sorgente (fuori da NASBox):"
+  },
+  "browse.nas_unreachable": {
+    "en": "NAS not reachable right now.",
+    "it": "NAS non raggiungibile al momento."
+  },
+  "browse.nas_unreachable_title": {
+    "en": "NAS unreachable",
+    "it": "NAS non raggiungibile"
+  },
+  "browse.note": {
+    "en": "This is the NAS folder as it is right now, not necessarily what you've synced on this PC. Rename and delete both go through the NAS trash (recoverable from the History tab), never a direct deletion.",
+    "it": "Questa è la cartella sul NAS così com'è adesso, non necessariamente ciò che hai sincronizzato su questo PC. Rinominare ed eliminare passano dal cestino del NAS (recuperabili dal tab Storico), mai una cancellazione diretta."
+  },
+  "browse.open_local_failed_body": {
+    "en": "The corresponding local folder doesn't exist: {path}",
+    "it": "La cartella locale corrispondente non esiste: {path}"
+  },
+  "browse.open_local_failed_title": {
+    "en": "Local folder not found",
+    "it": "Cartella locale non trovata"
+  },
+  "browse.path_copied": {
+    "en": "Path copied: {path}",
+    "it": "Percorso copiato: {path}"
+  },
+  "browse.path_label": {
+    "en": "Path: {path}",
+    "it": "Percorso: {path}"
+  },
+  "browse.refresh_btn": {
+    "en": "Refresh",
+    "it": "Aggiorna"
+  },
+  "browse.rename_btn": {
+    "en": "Rename",
+    "it": "Rinomina"
+  },
+  "browse.rename_failed_title": {
+    "en": "Rename failed",
+    "it": "Rinomina fallita"
+  },
+  "browse.rename_invalid_name": {
+    "en": "The name can't contain \"/\".",
+    "it": "Il nome non può contenere \"/\"."
+  },
+  "browse.rename_pick_one": {
+    "en": "Select exactly one item to rename.",
+    "it": "Seleziona un solo elemento da rinominare."
+  },
+  "browse.rename_prompt": {
+    "en": "New name for \"{name}\":",
+    "it": "Nuovo nome per \"{name}\":"
+  },
+  "browse.renaming": {
+    "en": "Renaming…",
+    "it": "Rinomina in corso…"
+  },
+  "browse.retention_days": {
+    "en": "for {days} days",
+    "it": "per {days} giorni"
+  },
+  "browse.retention_never": {
+    "en": "with no automatic deletion",
+    "it": "senza eliminazione automatica"
+  },
+  "browse.search_label": {
+    "en": "Search:",
+    "it": "Cerca:"
+  },
+  "browse.search_placeholder": {
+    "en": "name in current folder…",
+    "it": "nome nella cartella corrente…"
+  },
+  "browse.sync_mode_changed": {
+    "en": "Sync mode: {mode}",
+    "it": "Modalità di sincronizzazione: {mode}"
+  },
+  "browse.up_btn": {
+    "en": "↑ Up",
+    "it": "↑ Su"
+  },
+  "browse.upload_confirm_body": {
+    "en": "Upload {names} to {path} on the NAS?",
+    "it": "Caricare {names} in {path} sul NAS?"
+  },
+  "browse.upload_confirm_title": {
+    "en": "Confirm upload",
+    "it": "Conferma caricamento"
+  },
+  "browse.upload_failed_title": {
+    "en": "Upload failed",
+    "it": "Caricamento fallito"
+  },
+  "browse.upload_not_configured": {
+    "en": "Configure the local NASBox folder first.",
+    "it": "Configura prima la cartella NASBox locale."
+  },
+  "browse.upload_overwrite_body": {
+    "en": "{names} already exist in {path}: they will be overwritten. Continue?",
+    "it": "{names} esistono già in {path}: verranno sovrascritti. Continuare?"
+  },
+  "browse.upload_queued_body": {
+    "en": "{count} items copied into the NASBox folder; sync will upload them to the NAS.",
+    "it": "{count} elementi copiati nella cartella NASBox: verranno caricati sul NAS dalla sincronizzazione."
+  },
+  "browse.upload_queued_title": {
+    "en": "Upload started",
+    "it": "Caricamento avviato"
+  },
+  "conflicts.alternative_placeholder": {
+    "en": "Alternative: -",
+    "it": "Alternativa: -"
+  },
+  "conflicts.alternative_unselected": {
+    "en": "☁️ Alternative Version: Select a copy",
+    "it": "☁️ Versione Alternativa: Seleziona una copia"
+  },
+  "conflicts.alternative_version": {
+    "en": "☁️ Alternative Version: {size} • Modified: {time} (Device: {origin})",
+    "it": "☁️ Versione Alternativa: {size} • Modificato: {time} (Dispositivo: {origin})"
+  },
+  "conflicts.col_alternatives": {
+    "en": "Alternatives",
+    "it": "Alternative"
+  },
+  "conflicts.col_modified": {
+    "en": "Modified",
+    "it": "Modificato"
+  },
+  "conflicts.col_origin": {
+    "en": "Origin",
+    "it": "Origine"
+  },
+  "conflicts.col_original": {
+    "en": "Original path",
+    "it": "Percorso originale"
+  },
+  "conflicts.col_size": {
+    "en": "Size",
+    "it": "Dimensione"
+  },
+  "conflicts.col_status": {
+    "en": "Original status",
+    "it": "Stato originale"
+  },
+  "conflicts.confirm_body": {
+    "en": "Keep this version as the main file?\n\n{path}\n\nThe other versions will be kept in local history.",
+    "it": "Mantenere questa versione come file principale?\n\n{path}\n\nLe altre versioni verranno conservate nello storico locale."
+  },
+  "conflicts.confirm_title": {
+    "en": "Resolve conflict",
+    "it": "Risolvi conflitto"
+  },
+  "conflicts.copy_name_device_unknown": {
+    "en": "device",
+    "it": "dispositivo"
+  },
+  "conflicts.copy_name_none": {
+    "en": "No conflict copy to create.",
+    "it": "Nessuna copia di conflitto da creare."
+  },
+  "conflicts.copy_name_preview": {
+    "en": "Conflict copy name: {name}",
+    "it": "Nome copia conflitto: {name}"
+  },
+  "conflicts.count": {
+    "en": "{groups} groups, {files} alternative versions.",
+    "it": "{groups} gruppi, {files} versioni alternative."
+  },
+  "conflicts.count_unknown": {
+    "en": "Scan the NASBox folder for conflicts.",
+    "it": "Cerca i conflitti presenti nella cartella NASBox."
+  },
+  "conflicts.detail_meta": {
+    "en": "{alternatives} alternatives · {size} total · origin {origin} · {status}",
+    "it": "{alternatives} alternative · {size} in totale · origine {origin} · {status}"
+  },
+  "conflicts.detail_title": {
+    "en": "Conflicting Version Details",
+    "it": "Dettaglio Versioni in Conflitto"
+  },
+  "conflicts.discard_btn": {
+    "en": "Delete copies",
+    "it": "Elimina copie"
+  },
+  "conflicts.discard_confirm_body": {
+    "en": "{count} copies of {path} will be moved into history. The original file is not modified.",
+    "it": "{count} copie di {path} verranno spostate nello storico. Il file originale non viene modificato."
+  },
+  "conflicts.discard_confirm_title": {
+    "en": "Delete the conflict copies?",
+    "it": "Eliminare le copie di conflitto?"
+  },
+  "conflicts.discard_done_body": {
+    "en": "The conflict copies are in history and can be restored.",
+    "it": "Le copie di conflitto sono nello storico e possono essere ripristinate."
+  },
+  "conflicts.discard_done_title": {
+    "en": "Copies deleted",
+    "it": "Copie eliminate"
+  },
+  "conflicts.discard_tooltip": {
+    "en": "Move every conflict copy into history (local and NAS) without touching the original file.",
+    "it": "Sposta tutte le copie di conflitto nello storico (locale e NAS) senza toccare il file originale."
+  },
+  "conflicts.ignore_close_btn": {
+    "en": "⚪ Ignore / Close",
+    "it": "⚪ Ignora / Chiudi"
+  },
+  "conflicts.ignore_close_tooltip": {
+    "en": "Closes the detail view without changing any file.",
+    "it": "Chiude il dettaglio senza modificare alcun file."
+  },
+  "conflicts.ignore_hint": {
+    "en": "Conflict ignored: no files changed.",
+    "it": "Conflitto ignorato: nessun file modificato."
+  },
+  "conflicts.keep_alternative_btn": {
+    "en": "🔵 Use Alternative",
+    "it": "🔵 Usa Alternativa"
+  },
+  "conflicts.keep_alternative_tooltip": {
+    "en": "Replaces the original with the selected alternative version",
+    "it": "Sostituisce l'originale con la versione alternativa selezionata"
+  },
+  "conflicts.keep_both_big_btn": {
+    "en": "🟡 Keep both",
+    "it": "🟡 Mantieni entrambe"
+  },
+  "conflicts.keep_both_btn": {
+    "en": "🟡 Keep Both",
+    "it": "🟡 Conserva entrambe"
+  },
+  "conflicts.keep_both_tooltip": {
+    "en": "Renames the alternative copy as a normal file (archived copy), losing nothing",
+    "it": "Rinomina la copia alternativa come file normale (copia archiviata), senza perdere nulla"
+  },
+  "conflicts.keep_btn": {
+    "en": "Keep selected",
+    "it": "Mantieni selezionata"
+  },
+  "conflicts.keep_label": {
+    "en": "Version to keep:",
+    "it": "Versione da mantenere:"
+  },
+  "conflicts.keep_original_btn": {
+    "en": "🟢 Keep Original",
+    "it": "🟢 Mantieni Originale"
+  },
+  "conflicts.keep_original_tooltip": {
+    "en": "Keeps the original file and deletes the conflict copy",
+    "it": "Conserva il file originale ed elimina la copia di conflitto"
+  },
+  "conflicts.list_title": {
+    "en": "Conflicts to review",
+    "it": "Conflitti da esaminare"
+  },
+  "conflicts.merge_base_unavailable": {
+    "en": "Common base unavailable for this conflict.",
+    "it": "Base non disponibile per questo conflitto."
+  },
+  "conflicts.merge_btn": {
+    "en": "🔀 Merge (3 ways)",
+    "it": "🔀 Unisci (3 vie)"
+  },
+  "conflicts.merge_cancel_btn": {
+    "en": "Cancel merge",
+    "it": "Annulla unione"
+  },
+  "conflicts.merge_label_ours": {
+    "en": "ours",
+    "it": "nostra"
+  },
+  "conflicts.merge_label_theirs": {
+    "en": "theirs",
+    "it": "altra"
+  },
+  "conflicts.merge_review_hint": {
+    "en": "Review the merge result, then save.",
+    "it": "Controlla il risultato dell'unione, poi salva."
+  },
+  "conflicts.merge_save_btn": {
+    "en": "Save merge",
+    "it": "Salva unione"
+  },
+  "conflicts.merge_save_failed": {
+    "en": "Could not save the merge: {detail}",
+    "it": "Impossibile salvare l'unione: {detail}"
+  },
+  "conflicts.merge_text_only": {
+    "en": "Merge available only for text files with a common base.",
+    "it": "Unione disponibile solo per file di testo con base comune."
+  },
+  "conflicts.merge_title": {
+    "en": "Merge result (editable)",
+    "it": "Risultato unione (modificabile)"
+  },
+  "conflicts.merge_tooltip": {
+    "en": "Combine non-overlapping changes relative to the common base.",
+    "it": "Unisce le modifiche non sovrapposte rispetto alla base comune."
+  },
+  "conflicts.no_folder": {
+    "en": "NASBox folder not set up.",
+    "it": "Cartella NASBox non configurata."
+  },
+  "conflicts.no_selection": {
+    "en": "Select a conflict to see its versions.",
+    "it": "Seleziona un conflitto per vedere le versioni."
+  },
+  "conflicts.none": {
+    "en": "No conflicts to resolve.",
+    "it": "Nessun conflitto da risolvere."
+  },
+  "conflicts.notice": {
+    "en": "When two versions change at the same time NASBox keeps both. Choose which version should keep the original name; the discarded one goes to local history and can be restored.",
+    "it": "Quando due versioni cambiano contemporaneamente NASBox conserva entrambe. Scegli qui quale versione deve restare al nome originale; quella scartata finira' nello storico locale e potra' essere ripristinata."
+  },
+  "conflicts.open_btn": {
+    "en": "Open",
+    "it": "Apri"
+  },
+  "conflicts.origin_unknown": {
+    "en": "another device",
+    "it": "altro dispositivo"
+  },
+  "conflicts.original_missing": {
+    "en": "original missing",
+    "it": "originale mancante"
+  },
+  "conflicts.original_option": {
+    "en": "Original version",
+    "it": "Versione originale"
+  },
+  "conflicts.original_placeholder": {
+    "en": "Original: -",
+    "it": "Originale: -"
+  },
+  "conflicts.original_present": {
+    "en": "original present",
+    "it": "originale presente"
+  },
+  "conflicts.original_version": {
+    "en": "🖥️ Local Version (Original): {size} • Modified: {time}",
+    "it": "🖥️ Versione Locale (Originale): {size} • Modificato: {time}"
+  },
+  "conflicts.partial_done": {
+    "en": "{resolved} conflicts resolved; {problems} remote cleanups need a retry. See the log for details.",
+    "it": "{resolved} conflitti risolti; {problems} pulizie remote da riprovare. Dettagli nel log."
+  },
+  "conflicts.preview_alternative": {
+    "en": "alternative",
+    "it": "alternativa"
+  },
+  "conflicts.preview_binary": {
+    "en": "Preview unavailable for a binary file ({size}). Use “Open” to compare it with the default application.",
+    "it": "Anteprima non disponibile per un file binario ({size}). Usa “Apri” per confrontarlo con l'applicazione predefinita."
+  },
+  "conflicts.preview_identical": {
+    "en": "The content is identical; only date or metadata differ.",
+    "it": "Il contenuto è identico; cambiano solo data o metadati."
+  },
+  "conflicts.preview_missing": {
+    "en": "The selected version is no longer available.",
+    "it": "La versione selezionata non è più disponibile."
+  },
+  "conflicts.preview_original": {
+    "en": "original",
+    "it": "originale"
+  },
+  "conflicts.preview_title": {
+    "en": "Version comparison",
+    "it": "Confronto versioni"
+  },
+  "conflicts.preview_too_large": {
+    "en": "File too large for the preview ({size}). Open the version to compare it.",
+    "it": "File troppo grande per l'anteprima ({size}). Apri la versione per confrontarla."
+  },
+  "conflicts.preview_truncated": {
+    "en": "… preview truncated …",
+    "it": "… anteprima troncata …"
+  },
+  "conflicts.progress_cleaning": {
+    "en": "NAS cleanup {done} of {total}…",
+    "it": "Pulizia sul NAS {done} di {total}…"
+  },
+  "conflicts.progress_done": {
+    "en": "Completed {done} of {total}",
+    "it": "Completato {done} di {total}"
+  },
+  "conflicts.progress_resolving": {
+    "en": "Resolving {done} of {total}…",
+    "it": "Risoluzione {done} di {total}…"
+  },
+  "conflicts.progress_waiting": {
+    "en": "Waiting for the current transfer…",
+    "it": "In attesa del trasferimento in corso…"
+  },
+  "conflicts.recommend_alternative": {
+    "en": "★ Recommended version: Alternative (newer)",
+    "it": "★ Versione consigliata: Alternativa (più recente)"
+  },
+  "conflicts.recommend_original": {
+    "en": "★ Recommended version: Local original (newer)",
+    "it": "★ Versione consigliata: Originale locale (più recente)"
+  },
+  "conflicts.recommended": {
+    "en": "recommended",
+    "it": "consigliata"
+  },
+  "conflicts.refresh_btn": {
+    "en": "Refresh",
+    "it": "Aggiorna"
+  },
+  "conflicts.remote_cleanup_failed_body": {
+    "en": "The local copies were moved into history, but some copies on the NAS could not be removed:\n{detail}\n\nTry again shortly with \"Refresh\".",
+    "it": "Le copie locali sono state spostate nello storico, ma alcune copie sul NAS non sono state rimosse:\n{detail}\n\nRiprova tra poco con \"Aggiorna\"."
+  },
+  "conflicts.remote_cleanup_failed_title": {
+    "en": "NAS cleanup incomplete",
+    "it": "Pulizia NAS incompleta"
+  },
+  "conflicts.remote_unreachable": {
+    "en": "NAS unreachable: the local copy was resolved, remote cleanup will be retried later.",
+    "it": "NAS non raggiungibile: la copia locale è stata risolta, la pulizia remota verrà ritentata al prossimo giro."
+  },
+  "conflicts.resolve_all_btn": {
+    "en": "Resolve selected (keep original)",
+    "it": "Risolvi selezionati (mantieni originale)"
+  },
+  "conflicts.resolve_all_confirm_body": {
+    "en": "Resolve {count} conflicts keeping the original? Alternatives will move to local and NAS history.",
+    "it": "Risolvere {count} conflitti mantenendo l'originale? Le alternative finiranno nello storico locale e in quello del NAS."
+  },
+  "conflicts.resolve_all_confirm_title": {
+    "en": "Resolve selected conflicts",
+    "it": "Risolvi conflitti selezionati"
+  },
+  "conflicts.resolve_all_tooltip": {
+    "en": "For every selected conflict keep the original (or the newest version if the original is missing) and archive the alternatives.",
+    "it": "Per ogni conflitto selezionato mantiene l'originale (o la versione più recente se l'originale manca) e archivia le alternative."
+  },
+  "conflicts.resolve_done_body": {
+    "en": "The selected version was kept; the others are in local history.",
+    "it": "La versione scelta e' stata mantenuta; le altre sono nello storico locale."
+  },
+  "conflicts.resolve_done_title": {
+    "en": "Conflict resolved",
+    "it": "Conflitto risolto"
+  },
+  "conflicts.resolve_everything_btn": {
+    "en": "Resolve all",
+    "it": "Risolvi tutto"
+  },
+  "conflicts.resolve_everything_confirm_body": {
+    "en": "Resolve all {count} visible conflicts keeping the original (or the newest version if it is missing)? Alternatives will move to local and NAS history.",
+    "it": "Risolvere tutti i {count} conflitti visibili mantenendo l'originale (o la versione più recente se manca)? Le alternative finiranno nello storico locale e in quello del NAS."
+  },
+  "conflicts.resolve_everything_confirm_title": {
+    "en": "Resolve all conflicts",
+    "it": "Risolvi tutti i conflitti"
+  },
+  "conflicts.resolve_everything_tooltip": {
+    "en": "Resolve every visible conflict, respecting the search filter: keeps the original (or the newest version if it is missing) and archives the alternatives.",
+    "it": "Risolve tutti i conflitti visibili, rispettando il filtro di ricerca: mantiene l'originale (o la versione più recente se manca) e archivia le alternative."
+  },
+  "conflicts.resolve_failed_detail": {
+    "en": "Resolution failed: {detail}",
+    "it": "Risoluzione non riuscita: {detail}"
+  },
+  "conflicts.resolve_failed_title": {
+    "en": "Conflict not resolved",
+    "it": "Conflitto non risolto"
+  },
+  "conflicts.resolving": {
+    "en": "Resolving…",
+    "it": "Risoluzione in corso…"
+  },
+  "conflicts.restore_btn": {
+    "en": "Restore version…",
+    "it": "Ripristina versione…"
+  },
+  "conflicts.restore_tooltip": {
+    "en": "Open the file's history (local and NAS versions), restore an earlier version as the original, and move the conflict copies into history.",
+    "it": "Apri la cronologia del file (versioni locali e sul NAS), ripristina una versione precedente come originale e sposta le copie di conflitto nello storico."
+  },
+  "conflicts.scan_error": {
+    "en": "Scan failed: {detail}",
+    "it": "Scansione non riuscita: {detail}"
+  },
+  "conflicts.scanning": {
+    "en": "Scanning for conflicts…",
+    "it": "Scansione conflitti in corso…"
+  },
+  "conflicts.scheduler_timeout": {
+    "en": "Timed out waiting for the sync turn: retry when transfers are idle.",
+    "it": "Attesa del turno di sincronizzazione scaduta: riprova quando i trasferimenti sono fermi."
+  },
+  "conflicts.search_placeholder": {
+    "en": "Filter by path…",
+    "it": "Filtra per percorso…"
+  },
+  "conflicts.time_missing": {
+    "en": "missing",
+    "it": "mancante"
+  },
+  "conflicts.time_unknown": {
+    "en": "unknown",
+    "it": "sconosciuto"
+  },
+  "conflicts.use_newest_btn": {
+    "en": "🟢 Use newest",
+    "it": "🟢 Usa la più recente"
+  },
+  "conflicts.use_newest_tooltip": {
+    "en": "Use the recommended (newest) version and archive the others.",
+    "it": "Usa la versione consigliata (più recente) e archivia le altre."
+  },
+  "devices.active": {
+    "en": "active",
+    "it": "attivo"
+  },
+  "devices.empty": {
+    "en": "No devices detected",
+    "it": "Nessun dispositivo rilevato"
+  },
+  "devices.minutes_ago": {
+    "en": "{minutes} min ago",
+    "it": "{minutes} min fa"
+  },
+  "devices.refresh_btn": {
+    "en": "Refresh devices",
+    "it": "Aggiorna dispositivi"
+  },
+  "devices.row": {
+    "en": "🖥 {host} ({status})",
+    "it": "🖥 {host} ({status})"
+  },
+  "devices.title": {
+    "en": "Recent devices",
+    "it": "Dispositivi recenti"
+  },
+  "dialogs.fileversions.close_btn": {
+    "en": "Close",
+    "it": "Chiudi"
+  },
+  "dialogs.fileversions.col_age": {
+    "en": "Age (days)",
+    "it": "Età (giorni)"
+  },
+  "dialogs.fileversions.col_size": {
+    "en": "Size",
+    "it": "Dimensione"
+  },
+  "dialogs.fileversions.col_source": {
+    "en": "Source",
+    "it": "Origine"
+  },
+  "dialogs.fileversions.col_version": {
+    "en": "Version",
+    "it": "Versione"
+  },
+  "dialogs.fileversions.confirm_body": {
+    "en": "The {timestamp} version of {path} will replace the current file. Continue?",
+    "it": "La versione di {path} del {timestamp} sostituirà il file attuale. Proseguire?"
+  },
+  "dialogs.fileversions.confirm_title": {
+    "en": "Restore this version?",
+    "it": "Ripristinare la versione?"
+  },
+  "dialogs.fileversions.count_both": {
+    "en": "{local} local versions and {nas} on the NAS.",
+    "it": "{local} versioni locali e {nas} sul NAS."
+  },
+  "dialogs.fileversions.count_local": {
+    "en": "{local} versions in local history.",
+    "it": "{local} versioni nello storico locale."
+  },
+  "dialogs.fileversions.count_nas": {
+    "en": "{nas} versions in NAS history.",
+    "it": "{nas} versioni nello storico del NAS."
+  },
+  "dialogs.fileversions.empty": {
+    "en": "No historical version for {path}.",
+    "it": "Nessuna versione storica per {path}."
+  },
+  "dialogs.fileversions.load_failed": {
+    "en": "Could not read versions: {detail}",
+    "it": "Impossibile leggere le versioni: {detail}"
+  },
+  "dialogs.fileversions.loading": {
+    "en": "Loading versions…",
+    "it": "Lettura delle versioni…"
+  },
+  "dialogs.fileversions.restore_btn": {
+    "en": "Restore selected",
+    "it": "Ripristina selezionata"
+  },
+  "dialogs.fileversions.restore_done_body": {
+    "en": "{path} has been restored. Syncing will bring the restored version to the NAS and the other PCs.",
+    "it": "{path} è stato ripristinato. La sincronizzazione porterà la versione ripristinata sul NAS e sugli altri PC."
+  },
+  "dialogs.fileversions.restore_failed": {
+    "en": "the version is no longer available",
+    "it": "la versione non è più disponibile"
+  },
+  "dialogs.fileversions.restore_failed_title": {
+    "en": "Restore failed",
+    "it": "Ripristino non riuscito"
+  },
+  "dialogs.fileversions.source_local": {
+    "en": "Local",
+    "it": "Locale"
+  },
+  "dialogs.fileversions.source_nas": {
+    "en": "NAS",
+    "it": "NAS"
+  },
+  "dialogs.fileversions.title": {
+    "en": "History: {path}",
+    "it": "Cronologia: {path}"
+  },
+  "dialogs.folder.browse_btn": {
+    "en": "Browse…",
+    "it": "Sfoglia…"
+  },
+  "dialogs.folder.browse_dialog_title": {
+    "en": "Choose or create the NASBox folder",
+    "it": "Scegli o crea la cartella NASBox"
+  },
+  "dialogs.folder.browse_tooltip": {
+    "en": "Pick the folder using the file browser.",
+    "it": "Scegli la cartella con il file manager."
+  },
+  "dialogs.folder.intro_relocate": {
+    "en": "Choose the new location of the NASBox folder on this PC. Important: files in the old location are NOT moved automatically -- move them yourself before confirming, or let NASBox re-download everything from scratch into the new location.",
+    "it": "Scegli la nuova posizione della cartella NASBox su questo PC. Importante: i file nella vecchia posizione NON vengono spostati automaticamente -- spostali tu stesso prima di confermare, oppure lascia che NASBox riscarichi tutto da capo nella nuova posizione."
+  },
+  "dialogs.folder.intro_welcome": {
+    "en": "NASBox keeps a single folder on this PC synced with the NAS and every other connected PC: whatever you put in it shows up everywhere. Choose where you want it on this computer (it's created if it doesn't already exist).",
+    "it": "NASBox tiene sincronizzata un'unica cartella su questo PC con il NAS e con gli altri PC collegati: qualunque cosa ci metti dentro, la ritrovi ovunque. Scegli dove vuoi che sia su questo computer (viene creata se non esiste già)."
+  },
+  "dialogs.folder.missing_path_body": {
+    "en": "Tell NASBox where to put the folder.",
+    "it": "Indica dove vuoi mettere la cartella NASBox."
+  },
+  "dialogs.folder.missing_path_title": {
+    "en": "Missing path",
+    "it": "Percorso mancante"
+  },
+  "dialogs.folder.mkdir_failed_title": {
+    "en": "Couldn't create the folder",
+    "it": "Impossibile creare la cartella"
+  },
+  "dialogs.folder.path_tooltip": {
+    "en": "Full path on this PC's disk. Created if it doesn't exist yet.",
+    "it": "Percorso completo sul disco di questo PC. Viene creato se non esiste."
+  },
+  "dialogs.folder.title_relocate": {
+    "en": "Move the NASBox folder",
+    "it": "Sposta la cartella NASBox"
+  },
+  "dialogs.folder.title_welcome": {
+    "en": "Welcome to NASBox",
+    "it": "Benvenuto in NASBox"
+  },
+  "dialogs.pause.custom_minutes_label": {
+    "en": "Custom minutes:",
+    "it": "Minuti personalizzati:"
+  },
+  "dialogs.pause.custom_minutes_tooltip": {
+    "en": "Only usable when 'Custom' is selected above.",
+    "it": "Disponibile solo scegliendo 'Personalizzato' sopra."
+  },
+  "dialogs.pause.duration_label": {
+    "en": "Duration:",
+    "it": "Durata:"
+  },
+  "dialogs.pause.duration_tooltip": {
+    "en": "How long to pause syncing for.",
+    "it": "Per quanto tempo mettere in pausa la sincronizzazione."
+  },
+  "dialogs.pause.preset_15m": {
+    "en": "15 minutes",
+    "it": "15 minuti"
+  },
+  "dialogs.pause.preset_1h": {
+    "en": "1 hour",
+    "it": "1 ora"
+  },
+  "dialogs.pause.preset_30m": {
+    "en": "30 minutes",
+    "it": "30 minuti"
+  },
+  "dialogs.pause.preset_4h": {
+    "en": "4 hours",
+    "it": "4 ore"
+  },
+  "dialogs.pause.preset_8h": {
+    "en": "8 hours",
+    "it": "8 ore"
+  },
+  "dialogs.pause.preset_custom": {
+    "en": "Custom (minutes)…",
+    "it": "Personalizzato (minuti)…"
+  },
+  "dialogs.pause.title": {
+    "en": "Pause syncing",
+    "it": "Metti in pausa la sincronizzazione"
+  },
+  "dialogs.schedule.day_fri": {
+    "en": "Fri",
+    "it": "Ven"
+  },
+  "dialogs.schedule.day_mon": {
+    "en": "Mon",
+    "it": "Lun"
+  },
+  "dialogs.schedule.day_sat": {
+    "en": "Sat",
+    "it": "Sab"
+  },
+  "dialogs.schedule.day_sun": {
+    "en": "Sun",
+    "it": "Dom"
+  },
+  "dialogs.schedule.day_thu": {
+    "en": "Thu",
+    "it": "Gio"
+  },
+  "dialogs.schedule.day_tue": {
+    "en": "Tue",
+    "it": "Mar"
+  },
+  "dialogs.schedule.day_wed": {
+    "en": "Wed",
+    "it": "Mer"
+  },
+  "dialogs.schedule.days_label": {
+    "en": "Days",
+    "it": "Giorni"
+  },
+  "dialogs.schedule.end_label": {
+    "en": "To:",
+    "it": "Alle:"
+  },
+  "dialogs.schedule.intro": {
+    "en": "Choose the days and time during which NASBox should stay paused.",
+    "it": "Scegli i giorni e l'orario in cui NASBox deve restare in pausa."
+  },
+  "dialogs.schedule.no_days_body": {
+    "en": "Select at least one day for the window.",
+    "it": "Seleziona almeno un giorno per la finestra."
+  },
+  "dialogs.schedule.no_days_title": {
+    "en": "No day selected",
+    "it": "Nessun giorno selezionato"
+  },
+  "dialogs.schedule.overnight_hint": {
+    "en": "If the end time is equal to or earlier than the start, the window crosses midnight (e.g. 22:00 → 07:00).",
+    "it": "Se l'orario di fine è uguale o precedente a quello di inizio, la finestra attraversa la mezzanotte (es. 22:00 → 07:00)."
+  },
+  "dialogs.schedule.same_time_body": {
+    "en": "The start and end times must differ.",
+    "it": "L'orario di inizio e quello di fine devono essere diversi."
+  },
+  "dialogs.schedule.same_time_title": {
+    "en": "Equal times",
+    "it": "Orari uguali"
+  },
+  "dialogs.schedule.start_label": {
+    "en": "From:",
+    "it": "Dalle:"
+  },
+  "dialogs.schedule.title": {
+    "en": "Scheduled pause window",
+    "it": "Finestra di pausa programmata"
+  },
+  "dialogs.selective.empty": {
+    "en": "No subfolder to show (the NASBox folder is empty).",
+    "it": "Nessuna sottocartella da mostrare (la cartella NASBox è vuota)."
+  },
+  "dialogs.selective.intro": {
+    "en": "Uncheck the folders you do NOT want synced with the NAS. The choice is anchored to the selected folder: a name never catches same-named folders elsewhere.",
+    "it": "Togli la spunta alle cartelle che NON vuoi sincronizzare con il NAS. La scelta è ancorata alla cartella selezionata: un nome non cattura cartelle omonime altrove."
+  },
+  "dialogs.selective.note": {
+    "en": "Excluding a folder does not delete what is already synced: it simply stops being managed. Changes in checked folders keep flowing both ways.",
+    "it": "Escludere una cartella non cancella ciò che è già sincronizzato: smette solo di essere gestita. Le novità nelle cartelle spuntate continuano ad arrivare e a partire."
+  },
+  "dialogs.selective.select_all": {
+    "en": "Select all",
+    "it": "Seleziona tutto"
+  },
+  "dialogs.selective.select_none": {
+    "en": "Select none",
+    "it": "Deseleziona tutto"
+  },
+  "dialogs.selective.title": {
+    "en": "Folders to sync",
+    "it": "Cartelle da sincronizzare"
+  },
+  "dialogs.selective.truncated": {
+    "en": "List limited to the first {limit} folders: use the patterns in Settings to exclude more.",
+    "it": "Elenco limitato alle prime {limit} cartelle: usa i pattern in Impostazioni per escluderne altre."
+  },
+  "dupclean.cancel": {
+    "en": "Cancel",
+    "it": "Annulla"
+  },
+  "dupclean.confirm_body": {
+    "en": "Move {count} files to trash?\n\nReclaimable space: {size}.\nThe \"Keep\" files will not be touched.",
+    "it": "Spostare {count} file nel cestino?\n\nSpazio recuperabile: {size}.\nI file \"Mantieni\" non verranno toccati."
+  },
+  "dupclean.confirm_title": {
+    "en": "Confirm duplicate cleanup",
+    "it": "Conferma pulizia duplicati"
+  },
+  "dupclean.empty": {
+    "en": "No duplicate files to clean up.",
+    "it": "Nessun file duplicato da pulire."
+  },
+  "dupclean.error_body": {
+    "en": "Could not complete the cleanup: {error}",
+    "it": "Impossibile completare la pulizia: {error}"
+  },
+  "dupclean.error_keep": {
+    "en": "The \"Keep\" file cannot be removed: {path}",
+    "it": "Il file \"Mantieni\" non può essere rimosso: {path}"
+  },
+  "dupclean.error_missing": {
+    "en": "File not found: {path}",
+    "it": "File non trovato: {path}"
+  },
+  "dupclean.error_move": {
+    "en": "Could not move to trash: {path}",
+    "it": "Impossibile spostare nel cestino: {path}"
+  },
+  "dupclean.error_outside_root": {
+    "en": "Path outside the NASBox folder, skipped: {path}",
+    "it": "Percorso fuori dalla cartella NASBox, ignorato: {path}"
+  },
+  "dupclean.error_title": {
+    "en": "Cleanup error",
+    "it": "Errore durante la pulizia"
+  },
+  "dupclean.group": {
+    "en": "Group {index}: {size} × {count} files",
+    "it": "Gruppo {index}: {size} × {count} file"
+  },
+  "dupclean.intro": {
+    "en": "Select the duplicates to move to trash. The first file of each group (\"Keep\") is always left untouched.",
+    "it": "Seleziona i duplicati da spostare nel cestino. Per ogni gruppo il primo file (\"Mantieni\") resta intatto."
+  },
+  "dupclean.keep_path": {
+    "en": "Keep: {path}",
+    "it": "Mantieni: {path}"
+  },
+  "dupclean.keep_tooltip": {
+    "en": "This file is always kept.",
+    "it": "Questo file viene sempre mantenuto."
+  },
+  "dupclean.no_selection_body": {
+    "en": "Select at least one file to move to trash.",
+    "it": "Seleziona almeno un file da spostare nel cestino."
+  },
+  "dupclean.no_selection_title": {
+    "en": "Nothing selected",
+    "it": "Nessuna selezione"
+  },
+  "dupclean.reclaim": {
+    "en": "Reclaimable space: {size}",
+    "it": "Spazio recuperabile: {size}"
+  },
+  "dupclean.result_body": {
+    "en": "{moved} files moved to trash, {errors} errors.",
+    "it": "{moved} file spostati nel cestino, {errors} errori."
+  },
+  "dupclean.result_title": {
+    "en": "Cleanup finished",
+    "it": "Pulizia completata"
+  },
+  "dupclean.running": {
+    "en": "Moving to trash…",
+    "it": "Spostamento nel cestino…"
+  },
+  "dupclean.select_all": {
+    "en": "Select all",
+    "it": "Seleziona tutti"
+  },
+  "dupclean.select_none": {
+    "en": "None",
+    "it": "Nessuno"
+  },
+  "dupclean.title": {
+    "en": "Duplicate file cleanup",
+    "it": "Pulizia file duplicati"
+  },
+  "dupclean.trash_button": {
+    "en": "Move to trash",
+    "it": "Sposta nel cestino"
+  },
+  "history.col_age": {
+    "en": "Age (days)",
+    "it": "Età (giorni)"
+  },
+  "history.col_name": {
+    "en": "Name",
+    "it": "Nome"
+  },
+  "history.col_size": {
+    "en": "Size",
+    "it": "Dimensione"
+  },
+  "history.col_version": {
+    "en": "Version (date and time)",
+    "it": "Versione (data e ora)"
+  },
+  "history.confirm_delete_body": {
+    "en": "Permanently delete '{path}' (version from {timestamp}) from local history?\nThis cannot be undone.",
+    "it": "Eliminare per sempre '{path}' (versione del {timestamp}) dallo storico locale?\nL'operazione non è reversibile."
+  },
+  "history.confirm_delete_folder_body": {
+    "en": "Permanently delete ALL {count} historical versions in '{folder}'?\nThis cannot be undone.",
+    "it": "Eliminare per sempre TUTTE le {count} versioni storiche in '{folder}'?\nL'operazione non è reversibile."
+  },
+  "history.confirm_delete_folder_title": {
+    "en": "Confirm permanent folder deletion",
+    "it": "Conferma eliminazione definitiva cartella"
+  },
+  "history.confirm_delete_many_body": {
+    "en": "Permanently delete {count} versions from local history? This cannot be undone.",
+    "it": "Eliminare per sempre {count} versioni dallo storico locale? L'operazione non è reversibile."
+  },
+  "history.confirm_delete_title": {
+    "en": "Confirm permanent deletion",
+    "it": "Conferma eliminazione definitiva"
+  },
+  "history.confirm_restore_body": {
+    "en": "Restore '{path}' to the version from {timestamp}?\nThe current file (if any) will be overwritten.",
+    "it": "Ripristinare '{path}' alla versione del {timestamp}?\nIl file attuale (se presente) verrà sovrascritto."
+  },
+  "history.confirm_restore_elsewhere_body": {
+    "en": "Restore {count} versions to '{destination}'? Current files (if any) will be overwritten.",
+    "it": "Ripristinare {count} versioni in '{destination}'? I file attuali (se presenti) verranno sovrascritti."
+  },
+  "history.confirm_restore_folder_body": {
+    "en": "Restore {count} files in '{folder}' to their most recent version in history?\nCurrent files (if any) will be overwritten.",
+    "it": "Ripristinare {count} file in '{folder}' alla loro versione più recente nello storico?\nI file attuali (se presenti) verranno sovrascritti."
+  },
+  "history.confirm_restore_folder_title": {
+    "en": "Confirm folder restore",
+    "it": "Conferma ripristino cartella"
+  },
+  "history.confirm_restore_group_body": {
+    "en": "Restore {count} files from the '{label}' group to their most recent version?\nCurrent files (if any) will be overwritten.",
+    "it": "Ripristinare {count} file del gruppo '{label}' alla loro versione più recente?\nI file attuali (se presenti) verranno sovrascritti."
+  },
+  "history.confirm_restore_group_title": {
+    "en": "Confirm group restore",
+    "it": "Conferma ripristino gruppo"
+  },
+  "history.confirm_restore_many_body": {
+    "en": "Restore {count} files? Current files (if any) will be overwritten.",
+    "it": "Ripristinare {count} file? I file attuali (se presenti) verranno sovrascritti."
+  },
+  "history.confirm_restore_title": {
+    "en": "Confirm restore",
+    "it": "Conferma ripristino"
+  },
+  "history.date_format": {
+    "en": "%m/%d/%Y",
+    "it": "%d/%m/%Y"
+  },
+  "history.day_group_label": {
+    "en": "{label} - {count} items",
+    "it": "{label} - {count} elementi"
+  },
+  "history.delete_all_done_body": {
+    "en": "Deleted {count} versions.",
+    "it": "Eliminate {count} versioni."
+  },
+  "history.delete_btn": {
+    "en": "Delete permanently…",
+    "it": "Elimina definitivamente…"
+  },
+  "history.delete_done_title": {
+    "en": "Deletion complete",
+    "it": "Eliminazione completata"
+  },
+  "history.delete_failed_body": {
+    "en": "The historical file is no longer there.",
+    "it": "Il file storico non è più presente."
+  },
+  "history.delete_failed_title": {
+    "en": "Deletion failed",
+    "it": "Eliminazione non riuscita"
+  },
+  "history.delete_partial_body": {
+    "en": "Deleted {deleted} versions, {failed} no longer present in history.",
+    "it": "Eliminate {deleted} versioni, {failed} non più presenti nello storico."
+  },
+  "history.delete_partial_title": {
+    "en": "Partial deletion",
+    "it": "Eliminazione parziale"
+  },
+  "history.delete_tooltip": {
+    "en": "Permanently deletes selected versions and folders from the local trash, regardless of age. Use Ctrl or Shift for multiple selection. Not recoverable.",
+    "it": "Elimina per sempre le versioni e le cartelle selezionate dal cestino locale, indipendentemente dall'età. Usa Ctrl o Maiusc per una selezione multipla. Non recuperabile."
+  },
+  "history.empty_state": {
+    "en": "History is empty. Overwritten or deleted files will appear here while retention keeps them.",
+    "it": "Lo storico è vuoto. I file sovrascritti o eliminati compariranno qui finché la retention li conserva."
+  },
+  "history.empty_state_filtered": {
+    "en": "No items match the search. Try a different term or clear the filter.",
+    "it": "Nessun elemento corrisponde alla ricerca. Prova con un altro termine o cancella il filtro."
+  },
+  "history.file_versions_btn": {
+    "en": "File versions…",
+    "it": "Versioni del file…"
+  },
+  "history.file_versions_select": {
+    "en": "Select a file's version (a leaf row) in the list.",
+    "it": "Seleziona una versione di un file (una riga foglia) nell'elenco."
+  },
+  "history.file_versions_title": {
+    "en": "File versions",
+    "it": "Versioni del file"
+  },
+  "history.file_versions_tooltip": {
+    "en": "Open the full history of the selected file (local and NAS versions) and restore the one you want.",
+    "it": "Apri la cronologia completa del file selezionato (versioni locali e sul NAS) e ripristina quella che preferisci."
+  },
+  "history.group_label": {
+    "en": "{name}  ({count} files)",
+    "it": "{name}  ({count} file)"
+  },
+  "history.list_scope_local": {
+    "en": "Showing: this PC's local trash. History stored on the NAS is not listed here.",
+    "it": "Elenco mostrato: cestino locale di questo PC. Lo storico sul NAS non viene elencato qui."
+  },
+  "history.list_scope_remote": {
+    "en": "Showing: history kept on the NAS. Restore downloads a copy to your chosen location.",
+    "it": "Elenco mostrato: storico conservato sul NAS. Il ripristino scarica una copia scelta da te."
+  },
+  "history.list_scope_remote_failed": {
+    "en": "Couldn't read NAS history: {detail}",
+    "it": "Impossibile leggere lo storico NAS: {detail}"
+  },
+  "history.list_scope_remote_loading": {
+    "en": "Loading history from the NAS…",
+    "it": "Caricamento dello storico dal NAS…"
+  },
+  "history.list_scope_remote_offline": {
+    "en": "NAS history unavailable: NAS is unreachable.",
+    "it": "Storico NAS non disponibile: NAS non raggiungibile."
+  },
+  "history.local_trash_label": {
+    "en": "Local trash on this PC (days, 0 = never delete):",
+    "it": "Cestino locale su questo PC (giorni, 0 = mai eliminare):"
+  },
+  "history.local_trash_tooltip": {
+    "en": "0 = never automatically delete local historical versions.",
+    "it": "0 = non eliminare mai automaticamente le versioni storiche locali."
+  },
+  "history.nas_unreachable_body": {
+    "en": "Couldn't reach the NAS right now.",
+    "it": "Impossibile contattare il NAS in questo momento."
+  },
+  "history.nas_unreachable_title": {
+    "en": "NAS unreachable",
+    "it": "NAS non raggiungibile"
+  },
+  "history.not_configured_body": {
+    "en": "Set up the NASBox folder first (Status tab).",
+    "it": "Configura prima la cartella NASBox (tab Stato)."
+  },
+  "history.not_configured_title": {
+    "en": "NASBox folder not set up",
+    "it": "Cartella NASBox non configurata"
+  },
+  "history.prune_local_body": {
+    "en": "Removed {count} versions from local history.",
+    "it": "Rimosse {count} versioni dallo storico locale."
+  },
+  "history.prune_local_btn": {
+    "en": "Clean local history now",
+    "it": "Pulisci storico locale ora"
+  },
+  "history.prune_local_deleting": {
+    "en": "Cleaning local history: {current} of {total} versions processed...",
+    "it": "Pulizia dello storico locale: {current} di {total} versioni elaborate..."
+  },
+  "history.prune_local_dirs": {
+    "en": "Removing empty local history folders...",
+    "it": "Rimozione delle cartelle vuote dello storico locale..."
+  },
+  "history.prune_local_disabled_body": {
+    "en": "Local retention is 0: automatic cleanup is disabled and no versions were removed.",
+    "it": "La retention locale è 0: la pulizia automatica è disattivata e nessuna versione è stata rimossa."
+  },
+  "history.prune_local_none_body": {
+    "en": "Nothing is older than {days} days, so there's nothing to remove under the current retention setting. To delete specific files regardless of age, select them in the list and use 'Delete permanently'.",
+    "it": "Nessuna versione più vecchia di {days} giorni: non c'è nulla da rimuovere in base alla retention impostata. Per eliminare file specifici indipendentemente dall'età, selezionali nell'elenco e usa 'Elimina definitivamente'."
+  },
+  "history.prune_local_scanning": {
+    "en": "Scanning local history: {count} items checked...",
+    "it": "Analisi dello storico locale in corso: {count} elementi controllati..."
+  },
+  "history.prune_local_title": {
+    "en": "Local cleanup",
+    "it": "Pulizia locale"
+  },
+  "history.prune_local_tooltip": {
+    "en": "Immediately removes local versions older than the retention set above.",
+    "it": "Rimuove subito le versioni locali più vecchie della retention impostata."
+  },
+  "history.prune_remote_body": {
+    "en": "The NAS cleaned its history according to remote retention.",
+    "it": "Il NAS ha eseguito la pulizia del proprio storico secondo la retention remota."
+  },
+  "history.prune_remote_btn": {
+    "en": "Ask the NAS to clean now",
+    "it": "Chiedi al NAS di pulire ora"
+  },
+  "history.prune_remote_failed_title": {
+    "en": "Remote cleanup failed",
+    "it": "Pulizia remota non riuscita"
+  },
+  "history.prune_remote_running": {
+    "en": "Cleaning…",
+    "it": "Pulizia in corso…"
+  },
+  "history.prune_remote_title": {
+    "en": "Remote cleanup",
+    "it": "Pulizia remota"
+  },
+  "history.prune_remote_tooltip": {
+    "en": "Asks the NAS daemon to clean remote history now using the retention configured on the NAS.",
+    "it": "Chiede al demone sul NAS di pulire subito lo storico remoto secondo la retention configurata sul NAS."
+  },
+  "history.reclaim_clean_btn": {
+    "en": "Clean older than {days} days",
+    "it": "Pulisci vecchi di {days} giorni"
+  },
+  "history.reclaim_clean_tooltip": {
+    "en": "Removes versions older than {days} days from history, using the configured retention.",
+    "it": "Rimuove dallo storico le versioni più vecchie di {days} giorni, usando la retention configurata."
+  },
+  "history.reclaim_confirm_local": {
+    "en": "Remove local history versions older than {days} days? This cannot be undone.",
+    "it": "Rimuovere dallo storico locale le versioni più vecchie di {days} giorni? L'operazione non è reversibile."
+  },
+  "history.reclaim_confirm_remote": {
+    "en": "Ask the NAS to remove its own history versions older than the configured retention? This cannot be undone.",
+    "it": "Chiedere al NAS di rimuovere le proprie versioni storiche più vecchie della retention configurata? L'operazione non è reversibile."
+  },
+  "history.reclaim_summary": {
+    "en": "Space used by the items shown: {size} in {count} versions.",
+    "it": "Spazio occupato dagli elementi mostrati: {size} in {count} versioni."
+  },
+  "history.reclaim_title": {
+    "en": "How much space can I free?",
+    "it": "Quanto spazio posso liberare?"
+  },
+  "history.refresh_btn": {
+    "en": "Refresh",
+    "it": "Aggiorna"
+  },
+  "history.refresh_tooltip": {
+    "en": "Reloads history from the selected source.",
+    "it": "Ricarica lo storico dalla fonte selezionata."
+  },
+  "history.remote_restore_done_body": {
+    "en": "NAS version restored to '{path}'.",
+    "it": "Versione dal NAS ripristinata in '{path}'."
+  },
+  "history.remote_restore_many_picker_title": {
+    "en": "Choose where to save the NAS versions",
+    "it": "Scegli la cartella in cui salvare le versioni dal NAS"
+  },
+  "history.remote_restore_one_body": {
+    "en": "From NAS history you can restore one file at a time to a chosen destination.",
+    "it": "Dallo storico NAS puoi ripristinare un file alla volta, scegliendone la destinazione."
+  },
+  "history.remote_restore_one_title": {
+    "en": "Choose one file",
+    "it": "Scegli un file"
+  },
+  "history.remote_restore_picker_title": {
+    "en": "Choose where to save the NAS version",
+    "it": "Scegli dove salvare la versione dal NAS"
+  },
+  "history.remote_retention_label": {
+    "en": "On the NAS (read from the NAS, not editable here):",
+    "it": "Sul NAS (letta dal NAS, non modificabile qui):"
+  },
+  "history.remote_retention_never": {
+    "en": "never auto-delete",
+    "it": "mai eliminare automaticamente"
+  },
+  "history.remote_retention_unknown": {
+    "en": "not detected yet",
+    "it": "non ancora rilevata"
+  },
+  "history.remote_retention_value": {
+    "en": "{days} days",
+    "it": "{days} giorni"
+  },
+  "history.restore_all_done_body": {
+    "en": "Restored {count} files.",
+    "it": "Ripristinati {count} file."
+  },
+  "history.restore_btn": {
+    "en": "Restore selected…",
+    "it": "Ripristina selezionati…"
+  },
+  "history.restore_done_body": {
+    "en": "'{path}' restored.",
+    "it": "'{path}' ripristinato."
+  },
+  "history.restore_done_title": {
+    "en": "Restore complete",
+    "it": "Ripristino completato"
+  },
+  "history.restore_elsewhere_btn": {
+    "en": "Restore to another folder…",
+    "it": "Ripristina in un'altra cartella…"
+  },
+  "history.restore_elsewhere_picker_title": {
+    "en": "Choose the destination folder for the restore",
+    "it": "Scegli la cartella di destinazione per il ripristino"
+  },
+  "history.restore_elsewhere_tooltip": {
+    "en": "Restore the selected versions into a chosen folder, preserving subfolder structure.",
+    "it": "Ripristina le versioni selezionate in una cartella scelta, mantenendo la struttura delle sottocartelle."
+  },
+  "history.restore_failed_body": {
+    "en": "The historical file is no longer there.",
+    "it": "Il file storico non è più presente."
+  },
+  "history.restore_failed_title": {
+    "en": "Restore failed",
+    "it": "Ripristino non riuscito"
+  },
+  "history.restore_partial_body": {
+    "en": "Restored {restored} files, {failed} no longer present in history.",
+    "it": "Ripristinati {restored} file, {failed} non più presenti nello storico."
+  },
+  "history.restore_partial_title": {
+    "en": "Partial restore",
+    "it": "Ripristino parziale"
+  },
+  "history.restore_tooltip": {
+    "en": "Select multiple files and folders with Ctrl or Shift. The newest selected version of each file is restored. Double-click restores one row immediately.",
+    "it": "Seleziona più file e cartelle con Ctrl o Maiusc. Per ogni file viene ripristinata la versione più recente selezionata. Doppio click ripristina subito una sola riga."
+  },
+  "history.retention_title": {
+    "en": "How much history to keep",
+    "it": "Quanto storico conservare"
+  },
+  "history.root_group_label": {
+    "en": "(root folder)",
+    "it": "(cartella radice)"
+  },
+  "history.save_local_btn": {
+    "en": "Save locally",
+    "it": "Salva locale"
+  },
+  "history.save_local_tooltip": {
+    "en": "Saves the local retention value.",
+    "it": "Salva il valore di retention locale."
+  },
+  "history.saved_body": {
+    "en": "Local retention saved.",
+    "it": "Retention locale salvata."
+  },
+  "history.saved_title": {
+    "en": "Saved",
+    "it": "Salvato"
+  },
+  "history.scope_label": {
+    "en": "Show:",
+    "it": "Mostra:"
+  },
+  "history.scope_local": {
+    "en": "This PC's trash",
+    "it": "Cestino di questo PC"
+  },
+  "history.scope_remote": {
+    "en": "History on NAS",
+    "it": "Storico sul NAS"
+  },
+  "history.search_label": {
+    "en": "Search:",
+    "it": "Cerca:"
+  },
+  "history.search_placeholder": {
+    "en": "folder or file…",
+    "it": "cartella o file…"
+  },
+  "history.source_local_description": {
+    "en": "Source: this PC. Local versions protected before overwrite or removed by conflict maintenance.",
+    "it": "Fonte: questo PC. Versioni locali protette prima di una sovrascrittura o rimosse dalla manutenzione conflitti."
+  },
+  "history.source_remote_description": {
+    "en": "Source: NAS. Versions kept by the server when a NAS file is replaced or deleted.",
+    "it": "Fonte: NAS. Versioni conservate dal server quando un file sul NAS viene sostituito o eliminato."
+  },
+  "history.today_label": {
+    "en": "Today",
+    "it": "Oggi"
+  },
+  "history.totals_filtered": {
+    "en": "Filtered: {versions} versions ({size}) out of {total_versions} total ({total_size})",
+    "it": "Filtrati: {versions} versioni ({size}) su {total_versions} totali ({total_size})"
+  },
+  "history.totals_summary": {
+    "en": "Total in history: {versions} versions ({size}) in {folders} folders",
+    "it": "Totale nello storico: {versions} versioni ({size}) in {folders} cartelle"
+  },
+  "history.yesterday_label": {
+    "en": "Yesterday",
+    "it": "Ieri"
+  },
+  "lock.acquire_failed": {
+    "en": "The NAS synchronization lock is unavailable because of an unexpected problem: {detail}",
+    "it": "Il lock di sincronizzazione del NAS non è disponibile per un problema inatteso: {detail}"
+  },
+  "lock.busy_retry": {
+    "en": "Another PC is syncing with the NAS: this is not an error and no data was lost.",
+    "it": "Un altro PC sta sincronizzando con il NAS: non è un errore e nessun dato è stato perso."
+  },
+  "log.action.browse_delete": {
+    "en": "Deleted in Browse NAS",
+    "it": "Eliminato da Sfoglia NAS"
+  },
+  "log.action.browse_download": {
+    "en": "Downloaded from Browse NAS",
+    "it": "Scaricato da Sfoglia NAS"
+  },
+  "log.action.browse_rename": {
+    "en": "Renamed in Browse NAS",
+    "it": "Rinominato da Sfoglia NAS"
+  },
+  "log.action.cancelled": {
+    "en": "Transfer cancelled",
+    "it": "Trasferimento annullato"
+  },
+  "log.action.conflict": {
+    "en": "Conflict preserved",
+    "it": "Conflitto conservato"
+  },
+  "log.action.delete_local": {
+    "en": "Deleted locally",
+    "it": "Eliminato in locale"
+  },
+  "log.action.delete_remote": {
+    "en": "Deleted on NAS",
+    "it": "Eliminato sul NAS"
+  },
+  "log.action.download": {
+    "en": "Downloaded from NAS",
+    "it": "Scaricato dal NAS"
+  },
+  "log.action.error": {
+    "en": "Error",
+    "it": "Errore"
+  },
+  "log.action.journal_block": {
+    "en": "Journal block",
+    "it": "Blocco del journal"
+  },
+  "log.action.journal_error": {
+    "en": "Journal error",
+    "it": "Errore del journal"
+  },
+  "log.action.lock_deferred": {
+    "en": "Synchronization deferred",
+    "it": "Sincronizzazione rimandata"
+  },
+  "log.action.prune_local_trash": {
+    "en": "Local history cleaned",
+    "it": "Storico locale ripulito"
+  },
+  "log.action.prune_remote_trigger": {
+    "en": "NAS history cleanup requested",
+    "it": "Pulizia storico NAS richiesta"
+  },
+  "log.action.pull_deferred": {
+    "en": "Download deferred",
+    "it": "Scaricamento rimandato"
+  },
+  "log.action.rename_remote": {
+    "en": "Renamed on NAS",
+    "it": "Rinominato sul NAS"
+  },
+  "log.action.restore_remote_version": {
+    "en": "NAS version restored",
+    "it": "Versione NAS ripristinata"
+  },
+  "log.action.safety_block": {
+    "en": "Safety block",
+    "it": "Blocco di sicurezza"
+  },
+  "log.action.server_down": {
+    "en": "NAS server stopped",
+    "it": "Server NAS non attivo"
+  },
+  "log.action.server_outdated": {
+    "en": "NAS server outdated",
+    "it": "Server NAS da aggiornare"
+  },
+  "log.action.server_restarted": {
+    "en": "NAS server restarted",
+    "it": "Server NAS riavviato"
+  },
+  "log.action.server_update_available": {
+    "en": "Server update available",
+    "it": "Aggiornamento server disponibile"
+  },
+  "log.action.stale_delete": {
+    "en": "Stale deletion ignored",
+    "it": "Eliminazione obsoleta ignorata"
+  },
+  "log.action.unsupported": {
+    "en": "Unsupported item",
+    "it": "Elemento non supportato"
+  },
+  "log.action.upload": {
+    "en": "Uploaded to NAS",
+    "it": "Caricato sul NAS"
+  },
+  "log.all_filter": {
+    "en": "All",
+    "it": "Tutti"
+  },
+  "log.category.browse": {
+    "en": "Browse NAS",
+    "it": "Sfoglia NAS"
+  },
+  "log.category.history": {
+    "en": "History",
+    "it": "Storico"
+  },
+  "log.category.safety": {
+    "en": "Safety",
+    "it": "Sicurezza"
+  },
+  "log.category.system": {
+    "en": "System",
+    "it": "Sistema"
+  },
+  "log.category.transfer": {
+    "en": "Sync",
+    "it": "Sincronizzazione"
+  },
+  "log.col_action": {
+    "en": "Action",
+    "it": "Azione"
+  },
+  "log.col_detail": {
+    "en": "Detail",
+    "it": "Dettaglio"
+  },
+  "log.col_path": {
+    "en": "Path",
+    "it": "Percorso"
+  },
+  "log.col_time": {
+    "en": "Time",
+    "it": "Ora"
+  },
+  "log.filter_item": {
+    "en": "{category}: {action}",
+    "it": "{category}: {action}"
+  },
+  "log.filter_label": {
+    "en": "Filter by action:",
+    "it": "Filtra per azione:"
+  },
+  "log.filter_tooltip": {
+    "en": "Shows only rows for this kind of action.",
+    "it": "Mostra solo le righe di questo tipo di azione."
+  },
+  "log.group.errors": {
+    "en": "★ All errors & warnings",
+    "it": "★ Tutti gli errori e avvisi"
+  },
+  "log.group.history": {
+    "en": "★ All history operations",
+    "it": "★ Tutte le operazioni storico"
+  },
+  "log.group.safety": {
+    "en": "★ All conflicts & safety",
+    "it": "★ Tutti i conflitti e sicurezza"
+  },
+  "log.group.transfers": {
+    "en": "★ All transfers",
+    "it": "★ Tutti i trasferimenti"
+  },
+  "log.open_containing_folder": {
+    "en": "Open containing folder",
+    "it": "Apri cartella contenente"
+  },
+  "log.raw_action_tooltip": {
+    "en": "Action code: {action}",
+    "it": "Codice azione: {action}"
+  },
+  "log.refresh_btn": {
+    "en": "Refresh",
+    "it": "Aggiorna"
+  },
+  "log.refresh_tooltip": {
+    "en": "Reloads the log from disk.",
+    "it": "Ricarica il log da disco."
+  },
+  "log.search_label": {
+    "en": "Search:",
+    "it": "Cerca:"
+  },
+  "log.search_placeholder": {
+    "en": "path or detail…",
+    "it": "percorso o dettaglio…"
+  },
+  "log.search_tooltip": {
+    "en": "Filters by file path or detail text.",
+    "it": "Filtra per percorso file o testo del dettaglio."
+  },
+  "main_window.brand_tagline": {
+    "en": "Private file sync, always in control",
+    "it": "Sincronizzazione privata, sempre sotto controllo"
+  },
+  "main_window.server_outdated_suffix": {
+    "en": "NAS update required",
+    "it": "aggiornamento NAS richiesto"
+  },
+  "main_window.server_restarted_suffix": {
+    "en": "NAS daemon",
+    "it": "demone NAS"
+  },
+  "main_window.server_update_available_title": {
+    "en": "NAS server update",
+    "it": "Aggiornamento server NAS"
+  },
+  "main_window.shutdown_message": {
+    "en": "Stopping synchronization. Please wait…",
+    "it": "Arresto della sincronizzazione in corso. Attendi un momento…"
+  },
+  "main_window.shutdown_title": {
+    "en": "Closing",
+    "it": "Chiusura in corso"
+  },
+  "main_window.shutdown_waiting": {
+    "en": "Stopping synchronization for {seconds} seconds. Please wait…",
+    "it": "Arresto della sincronizzazione in corso da {seconds} secondi. Attendi…"
+  },
+  "main_window.startup_error_title": {
+    "en": "startup failed",
+    "it": "avvio non riuscito"
+  },
+  "main_window.tab_browse": {
+    "en": "Browse NAS",
+    "it": "Sfoglia NAS"
+  },
+  "main_window.tab_browse_tooltip": {
+    "en": "Browse the NAS folder as it is right now, download, rename, or delete files and folders.",
+    "it": "Naviga la cartella sul NAS cosi' com'e' adesso, scarica, rinomina o elimina file e cartelle."
+  },
+  "main_window.tab_conflicts": {
+    "en": "Conflicts",
+    "it": "Conflitti"
+  },
+  "main_window.tab_conflicts_tooltip": {
+    "en": "Detected conflicts: choose which version to keep.",
+    "it": "Conflitti rilevati: scegli quale versione mantenere."
+  },
+  "main_window.tab_history": {
+    "en": "History / Trash",
+    "it": "Storico / Cestino"
+  },
+  "main_window.tab_history_tooltip": {
+    "en": "Trash and historical file versions, with restore.",
+    "it": "Cestino e versioni storiche dei file, con ripristino."
+  },
+  "main_window.tab_log": {
+    "en": "Log",
+    "it": "Log"
+  },
+  "main_window.tab_log_tooltip": {
+    "en": "History of every upload, download, deletion, and error.",
+    "it": "Cronologia di ogni upload, download, cancellazione ed errore."
+  },
+  "main_window.tab_metrics": {
+    "en": "NAS Monitor",
+    "it": "Monitor NAS"
+  },
+  "main_window.tab_metrics_tooltip": {
+    "en": "NAS load, memory, disk, and network.",
+    "it": "Carico, memoria, disco e rete del NAS."
+  },
+  "main_window.tab_mirrors": {
+    "en": "External folders",
+    "it": "Cartelle esterne"
+  },
+  "main_window.tab_mirrors_tooltip": {
+    "en": "External folders replicated inside NASBox: the local source stays where it is, the copy is kept in sync and propagated to the other PCs.",
+    "it": "Cartelle esterne replicate dentro NASBox: la sorgente locale resta dov'è, la copia viene sincronizzata e propagata agli altri PC."
+  },
+  "main_window.tab_overview": {
+    "en": "Overview",
+    "it": "Panoramica"
+  },
+  "main_window.tab_settings": {
+    "en": "Settings",
+    "it": "Impostazioni"
+  },
+  "main_window.tab_settings_tooltip": {
+    "en": "NAS connection, bandwidth, exclusions, language.",
+    "it": "Connessione al NAS, banda, esclusioni, lingua."
+  },
+  "main_window.tab_status": {
+    "en": "Status",
+    "it": "Stato"
+  },
+  "main_window.tab_status_tooltip": {
+    "en": "Current status, pause, NASBox folder.",
+    "it": "Stato attuale, pausa, cartella NASBox."
+  },
+  "main_window.tab_transfers": {
+    "en": "Transfers",
+    "it": "Trasferimenti"
+  },
+  "main_window.tab_transfers_tooltip": {
+    "en": "Files currently queued to upload/download.",
+    "it": "File in coda di caricamento/scaricamento in questo momento."
+  },
+  "main_window.tray_running_notice": {
+    "en": "The app keeps syncing in the background. Use the tray icon to reopen it or quit.",
+    "it": "L'app continua a sincronizzare in background. Usa l'icona nel tray per riaprirla o uscire."
+  },
+  "main_window.update_available_body": {
+    "en": "Version {version} is available ({origin}).\n\nInstall and restart?",
+    "it": "La versione {version} è disponibile ({origin}).\n\nInstallarla e riavviare?"
+  },
+  "main_window.update_available_title": {
+    "en": "Update available",
+    "it": "Aggiornamento disponibile"
+  },
+  "main_window.update_check_failed": {
+    "en": "Update check failed",
+    "it": "Controllo aggiornamenti fallito"
+  },
+  "main_window.update_check_title": {
+    "en": "Client update",
+    "it": "Aggiornamento client"
+  },
+  "main_window.update_dev_checkout": {
+    "en": "This installation is a git checkout ({path}): an automatic update would overwrite the repository. Update with git pull, or set NASBOX_UPDATE_FORCE=1 to force it.",
+    "it": "Questa installazione è un checkout git ({path}): un aggiornamento automatico sovrascriverebbe il repository. Aggiorna con git pull, oppure imposta NASBOX_UPDATE_FORCE=1 per forzare."
+  },
+  "main_window.update_failed_title": {
+    "en": "Update failed",
+    "it": "Aggiornamento fallito"
+  },
+  "main_window.update_none": {
+    "en": "No update available: this is already the latest version.",
+    "it": "Nessun aggiornamento disponibile: questa è già la versione più recente."
+  },
+  "main_window.update_notice": {
+    "en": "Version {version} is available on the NAS — use “Update” in the tray menu, or the version in the Status tab.",
+    "it": "Versione {version} disponibile sul NAS — usa «Aggiorna» nel menu della tray, o la versione nella scheda Stato."
+  },
+  "main_window.update_restart_body": {
+    "en": "NASBox will restart with the new version.",
+    "it": "NASBox verrà riavviato con la nuova versione."
+  },
+  "main_window.update_restart_title": {
+    "en": "Update complete",
+    "it": "Aggiornamento completato"
+  },
+  "main_window.version_tooltip": {
+    "en": "Click to check for updates.",
+    "it": "Clicca per cercare aggiornamenti."
+  },
+  "main_window.whats_new_fallback": {
+    "en": "Update installed. No release notes available.",
+    "it": "Aggiornamento installato. Nessuna nota disponibile."
+  },
+  "main_window.whats_new_intro": {
+    "en": "Here is what changed in this release:",
+    "it": "Ecco cosa cambia in questa versione:"
+  },
+  "main_window.whats_new_title": {
+    "en": "What's new in NASBox {version}",
+    "it": "Novità in NASBox {version}"
+  },
+  "metrics.activity_busy": {
+    "en": "{owner}, phase {phase}{progress}",
+    "it": "{owner}, fase {phase}{progress}"
+  },
+  "metrics.activity_idle": {
+    "en": "No transfer",
+    "it": "Nessun trasferimento"
+  },
+  "metrics.activity_label": {
+    "en": "Transfer",
+    "it": "Trasferimento"
+  },
+  "metrics.cpu_chart_title": {
+    "en": "Recent CPU use",
+    "it": "Uso CPU recente"
+  },
+  "metrics.cpu_label": {
+    "en": "Use / I/O wait",
+    "it": "Uso / attesa I/O"
+  },
+  "metrics.cpu_title": {
+    "en": "CPU",
+    "it": "CPU"
+  },
+  "metrics.cpu_value": {
+    "en": "{usage}% / {iowait}%",
+    "it": "{usage}% / {iowait}%"
+  },
+  "metrics.disk_label": {
+    "en": "Free / total",
+    "it": "Liberi / totale"
+  },
+  "metrics.disk_title": {
+    "en": "NASBox disk",
+    "it": "Disco NASBox"
+  },
+  "metrics.disk_value": {
+    "en": "{available} / {total} free ({percent}% used)",
+    "it": "{available} / {total} liberi ({percent}% usato)"
+  },
+  "metrics.first_sample": {
+    "en": "calculating",
+    "it": "calcolo in corso"
+  },
+  "metrics.health_ok": {
+    "en": "Load is within normal range.",
+    "it": "Carico nella norma."
+  },
+  "metrics.health_warning": {
+    "en": "Warning: {areas} under pressure.",
+    "it": "Attenzione: {areas} sotto pressione."
+  },
+  "metrics.interfaces_label": {
+    "en": "Interfaces",
+    "it": "Interfacce"
+  },
+  "metrics.invalid_response": {
+    "en": "invalid NAS response",
+    "it": "risposta NAS non valida"
+  },
+  "metrics.io_read_label": {
+    "en": "Read",
+    "it": "Lettura"
+  },
+  "metrics.io_title": {
+    "en": "NAS disk I/O",
+    "it": "I/O disco NAS"
+  },
+  "metrics.io_write_label": {
+    "en": "Write",
+    "it": "Scrittura"
+  },
+  "metrics.load_chart_title": {
+    "en": "Recent NAS load",
+    "it": "Carico NAS recente"
+  },
+  "metrics.load_label": {
+    "en": "1 / 5 / 15 minutes",
+    "it": "1 / 5 / 15 minuti"
+  },
+  "metrics.load_title": {
+    "en": "Load",
+    "it": "Carico"
+  },
+  "metrics.memory_label": {
+    "en": "Used / total",
+    "it": "Usata / totale"
+  },
+  "metrics.memory_title": {
+    "en": "Memory",
+    "it": "Memoria"
+  },
+  "metrics.memory_value": {
+    "en": "{used} / {total} ({percent}%)",
+    "it": "{used} / {total} ({percent}%)"
+  },
+  "metrics.metadata_label": {
+    "en": "Journal / manifest",
+    "it": "Journal / manifest"
+  },
+  "metrics.metadata_value": {
+    "en": "{journal} / {manifest}",
+    "it": "{journal} / {manifest}"
+  },
+  "metrics.nasbox_title": {
+    "en": "NASBox activity",
+    "it": "Attivita NASBox"
+  },
+  "metrics.network_title": {
+    "en": "Network",
+    "it": "Rete"
+  },
+  "metrics.not_available": {
+    "en": "Not available",
+    "it": "Non disponibile"
+  },
+  "metrics.phase_checking": {
+    "en": "checking",
+    "it": "controllo"
+  },
+  "metrics.phase_confirming": {
+    "en": "confirming",
+    "it": "conferma"
+  },
+  "metrics.phase_transferring": {
+    "en": "transferring",
+    "it": "trasferimento"
+  },
+  "metrics.phase_unknown": {
+    "en": "NAS activity",
+    "it": "attività NAS"
+  },
+  "metrics.queue_label": {
+    "en": "NAS queue",
+    "it": "Coda NAS"
+  },
+  "metrics.receive_label": {
+    "en": "Received",
+    "it": "Ricevuti"
+  },
+  "metrics.refresh_btn": {
+    "en": "Refresh",
+    "it": "Aggiorna"
+  },
+  "metrics.staging_label": {
+    "en": "Staging batches",
+    "it": "Batch staging"
+  },
+  "metrics.status_failed": {
+    "en": "NAS monitor unavailable: {detail}",
+    "it": "Monitor NAS non disponibile: {detail}"
+  },
+  "metrics.status_loading": {
+    "en": "Reading NAS load…",
+    "it": "Lettura carico NAS…"
+  },
+  "metrics.status_offline": {
+    "en": "Monitor unavailable: NAS is unreachable.",
+    "it": "Monitor non disponibile: NAS non raggiungibile."
+  },
+  "metrics.status_unknown": {
+    "en": "NAS metrics have not been loaded yet.",
+    "it": "Metriche NAS non ancora caricate."
+  },
+  "metrics.status_unsupported": {
+    "en": "The NAS server does not support load monitoring. Update the server package.",
+    "it": "Il server NAS non supporta il monitoraggio del carico. Aggiorna il pacchetto server."
+  },
+  "metrics.status_updated": {
+    "en": "Updated at {time}.",
+    "it": "Aggiornato alle {time}."
+  },
+  "metrics.swap_disabled": {
+    "en": "Disabled",
+    "it": "Non attiva"
+  },
+  "metrics.swap_label": {
+    "en": "Used / total",
+    "it": "Usata / totale"
+  },
+  "metrics.swap_title": {
+    "en": "Swap",
+    "it": "Swap"
+  },
+  "metrics.swap_value": {
+    "en": "{used} / {total}",
+    "it": "{used} / {total}"
+  },
+  "metrics.sync_busy_detail": {
+    "en": "Phase: {phase}{progress}",
+    "it": "Fase: {phase}{progress}"
+  },
+  "metrics.sync_busy_title": {
+    "en": "Synchronization in progress",
+    "it": "Sincronizzazione in corso"
+  },
+  "metrics.sync_error_title": {
+    "en": "Sync status unavailable",
+    "it": "Stato sync non disponibile"
+  },
+  "metrics.sync_idle_detail": {
+    "en": "NAS is free; no operation is queued.",
+    "it": "NAS libero; nessuna operazione in coda."
+  },
+  "metrics.sync_idle_title": {
+    "en": "No synchronization in progress",
+    "it": "Nessuna sincronizzazione in corso"
+  },
+  "metrics.sync_loading_detail": {
+    "en": "Reading the current NAS status…",
+    "it": "Lettura dello stato attuale del NAS…"
+  },
+  "metrics.sync_loading_title": {
+    "en": "Checking synchronization",
+    "it": "Verifica sincronizzazione"
+  },
+  "metrics.sync_offline_detail": {
+    "en": "Unable to check synchronization status.",
+    "it": "Impossibile verificare lo stato della sincronizzazione."
+  },
+  "metrics.sync_offline_title": {
+    "en": "NAS unreachable",
+    "it": "NAS non raggiungibile"
+  },
+  "metrics.sync_progress": {
+    "en": " · {done}/{total}",
+    "it": " · {done}/{total}"
+  },
+  "metrics.sync_queue_detail": {
+    "en": "{count} operations are waiting for the NAS lock.",
+    "it": "{count} operazioni attendono il lock NAS."
+  },
+  "metrics.sync_queue_title": {
+    "en": "Synchronization queued",
+    "it": "Sincronizzazione in coda"
+  },
+  "metrics.sync_staging_detail": {
+    "en": "{count} staging batches are waiting to be published.",
+    "it": "{count} batch staging attendono la pubblicazione."
+  },
+  "metrics.sync_staging_title": {
+    "en": "Publication pending",
+    "it": "Pubblicazione in attesa"
+  },
+  "metrics.sync_unknown_detail": {
+    "en": "Waiting for the first update from the NAS.",
+    "it": "In attesa del primo aggiornamento dal NAS."
+  },
+  "metrics.sync_unknown_title": {
+    "en": "Sync status pending",
+    "it": "Stato sync in attesa"
+  },
+  "metrics.transmit_label": {
+    "en": "Sent",
+    "it": "Inviati"
+  },
+  "metrics.unknown_value": {
+    "en": "unknown",
+    "it": "sconosciuto"
+  },
+  "metrics.uptime_label": {
+    "en": "Up for",
+    "it": "Attivo da"
+  },
+  "metrics.uptime_title": {
+    "en": "NAS uptime",
+    "it": "Uptime NAS"
+  },
+  "mirrors.add_btn": {
+    "en": "Add folder…",
+    "it": "Aggiungi cartella…"
+  },
+  "mirrors.add_title": {
+    "en": "Add external folder",
+    "it": "Aggiungi cartella esterna"
+  },
+  "mirrors.add_tooltip": {
+    "en": "Pick an external folder and a destination name inside NASBox.",
+    "it": "Scegli una cartella esterna e un nome di destinazione dentro NASBox."
+  },
+  "mirrors.authority_note": {
+    "en": "The source folder is authoritative: NAS-side edits inside a mirror folder are neither downloaded nor turned into conflicts. Local deletions propagate only when delete propagation is enabled.",
+    "it": "La cartella sorgente è autoritativa: le modifiche fatte sul NAS dentro una cartella mirror non vengono scaricate né trasformate in conflitti. Le cancellazioni locali vengono propagate solo se la propagazione delle cancellazioni è attiva."
+  },
+  "mirrors.choose_source": {
+    "en": "Choose the source folder",
+    "it": "Scegli la cartella sorgente"
+  },
+  "mirrors.col_dest": {
+    "en": "Copy into NASBox",
+    "it": "Copia in NASBox"
+  },
+  "mirrors.col_enabled": {
+    "en": "On",
+    "it": "Attiva"
+  },
+  "mirrors.col_enabled_tooltip": {
+    "en": "Check to keep the copy updated. Uncheck to pause the mirror without removing it.",
+    "it": "Spunta per far sì che NASBox tenga aggiornata la copia. Togli la spunta per mettere in pausa il mirror senza rimuoverlo."
+  },
+  "mirrors.col_last_sync": {
+    "en": "Last sync",
+    "it": "Ultima sincronizzazione"
+  },
+  "mirrors.col_source": {
+    "en": "Source folder",
+    "it": "Cartella sorgente"
+  },
+  "mirrors.col_status": {
+    "en": "Status",
+    "it": "Stato"
+  },
+  "mirrors.dest_prompt": {
+    "en": "Name of the folder inside NASBox to keep the copy in:",
+    "it": "Nome della cartella dentro NASBox in cui tenerne la copia:"
+  },
+  "mirrors.dest_tooltip": {
+    "en": "Name of the subfolder inside NASBox where the source folder is replicated.",
+    "it": "Nome della sottocartella dentro NASBox in cui viene replicata la cartella sorgente."
+  },
+  "mirrors.err_dest_invalid": {
+    "en": "The destination name must be a simple folder name inside NASBox.",
+    "it": "Il nome di destinazione deve essere un semplice nome di cartella dentro NASBox."
+  },
+  "mirrors.err_dest_required": {
+    "en": "Pick a destination folder name inside NASBox.",
+    "it": "Indicare il nome della cartella di destinazione dentro NASBox."
+  },
+  "mirrors.err_dest_reserved": {
+    "en": "This name is reserved for NASBox's internal folders.",
+    "it": "Questo nome è riservato alle cartelle interne di NASBox."
+  },
+  "mirrors.err_dest_taken": {
+    "en": "Another external folder already uses this destination name.",
+    "it": "Un'altra cartella esterna usa già questo nome di destinazione."
+  },
+  "mirrors.err_invalid_entry": {
+    "en": "Source or destination is invalid.",
+    "it": "Sorgente o destinazione non valida."
+  },
+  "mirrors.err_nasbox_not_configured": {
+    "en": "The NASBox folder has not been set up yet.",
+    "it": "Cartella NASBox non ancora configurata."
+  },
+  "mirrors.err_source_absolute": {
+    "en": "The source folder must be an absolute path.",
+    "it": "La cartella sorgente deve essere un percorso assoluto."
+  },
+  "mirrors.err_source_inside_nasbox": {
+    "en": "The source folder is already inside the NASBox folder (and therefore already synced).",
+    "it": "La cartella sorgente è già dentro la cartella NASBox (e quindi già sincronizzata)."
+  },
+  "mirrors.err_source_missing": {
+    "en": "Source folder not found: {source}",
+    "it": "Cartella sorgente non trovata: {source}"
+  },
+  "mirrors.err_source_required": {
+    "en": "Pick a source folder.",
+    "it": "Indicare una cartella sorgente."
+  },
+  "mirrors.err_source_taken": {
+    "en": "This source folder is already in the list.",
+    "it": "Questa cartella sorgente è già presente nell'elenco."
+  },
+  "mirrors.error_title": {
+    "en": "External folder",
+    "it": "Cartella esterna"
+  },
+  "mirrors.last_sync_never": {
+    "en": "never",
+    "it": "mai"
+  },
+  "mirrors.no_nasbox_body": {
+    "en": "Set up the NASBox folder first (Status tab) before adding external folders.",
+    "it": "Configura prima la cartella NASBox (tab Stato) per poter aggiungere cartelle esterne."
+  },
+  "mirrors.note": {
+    "en": "List folders that live OUTSIDE the NASBox folder (e.g. your work folder): NASBox automatically keeps a synced copy of them inside itself, so they show up on the NAS and on every other connected PC too. ⚠️ This is a one-way mirror: the source folder is authoritative, edits made elsewhere to the copy inside NASBox get overwritten.",
+    "it": "Qui puoi elencare cartelle che stanno FUORI dalla cartella NASBox (es. la tua cartella di lavoro): NASBox ne tiene automaticamente una copia sincronizzata dentro di sé, e da lì la ritrovi sul NAS e su tutti gli altri PC collegati. ⚠️ È un mirror a senso unico: la cartella sorgente è quella autorevole, le modifiche fatte altrove alla copia in NASBox vengono sovrascritte."
+  },
+  "mirrors.remove_btn": {
+    "en": "Remove selected",
+    "it": "Rimuovi selezionata"
+  },
+  "mirrors.remove_confirm_body": {
+    "en": "Remove '{source}' from the external folders list?\n\nThe copy already in NASBox stays where it is.",
+    "it": "Rimuovere '{source}' dall'elenco delle cartelle esterne?\n\nLa copia già in NASBox resta dov'è."
+  },
+  "mirrors.remove_confirm_title": {
+    "en": "Remove external folder",
+    "it": "Rimuovi cartella esterna"
+  },
+  "mirrors.remove_tooltip": {
+    "en": "Removes the selected folder from the list. The copy already inside NASBox is not deleted automatically.",
+    "it": "Rimuove la cartella scelta dall'elenco. La copia già presente in NASBox non viene eliminata automaticamente."
+  },
+  "mirrors.state_disabled": {
+    "en": "Disabled",
+    "it": "Disattivata"
+  },
+  "mirrors.state_error": {
+    "en": "Error",
+    "it": "Errore"
+  },
+  "mirrors.state_idle": {
+    "en": "Synced",
+    "it": "Sincronizzato"
+  },
+  "mirrors.state_syncing": {
+    "en": "Syncing…",
+    "it": "Sincronizzazione…"
+  },
+  "mirrors.state_unconfigured": {
+    "en": "NASBox not set up",
+    "it": "NASBox non configurata"
+  },
+  "mirrors.sync_now_btn": {
+    "en": "Sync now",
+    "it": "Sincronizza ora"
+  },
+  "mirrors.sync_now_tooltip": {
+    "en": "Immediately copies the selected folder into NASBox, without waiting for the next check.",
+    "it": "Copia subito la cartella selezionata in NASBox, senza aspettare il prossimo controllo."
+  },
+  "overview.age_days": {
+    "en": "{count} days ago",
+    "it": "{count} giorni fa"
+  },
+  "overview.age_hours": {
+    "en": "{count} hours ago",
+    "it": "{count} ore fa"
+  },
+  "overview.age_minutes": {
+    "en": "{count} minutes ago",
+    "it": "{count} minuti fa"
+  },
+  "overview.age_seconds": {
+    "en": "{count} seconds ago",
+    "it": "{count} secondi fa"
+  },
+  "overview.audit_running": {
+    "en": "Running…",
+    "it": "In corso…"
+  },
+  "overview.audit_summary": {
+    "en": "{count} differences · {when}",
+    "it": "{count} differenze · {when}"
+  },
+  "overview.banner_offline": {
+    "en": "🔴 Offline",
+    "it": "🔴 Offline"
+  },
+  "overview.banner_ok": {
+    "en": "✅ All synced",
+    "it": "✅ Tutto sincronizzato"
+  },
+  "overview.banner_progress": {
+    "en": "⏳ In progress",
+    "it": "⏳ In corso"
+  },
+  "overview.banner_warning": {
+    "en": "⚠ Attention",
+    "it": "⚠ Attenzione"
+  },
+  "overview.check_mismatch": {
+    "en": "{count} mismatches",
+    "it": "{count} differenze"
+  },
+  "overview.devices": {
+    "en": "Devices: {value}",
+    "it": "Dispositivi: {value}"
+  },
+  "overview.guidance": {
+    "en": "Next step: {detail}",
+    "it": "Cosa fare: {detail}"
+  },
+  "overview.last_check": {
+    "en": "Last checksum check: {value}",
+    "it": "Ultima verifica checksum: {value}"
+  },
+  "overview.never": {
+    "en": "Never",
+    "it": "Mai"
+  },
+  "overview.no_devices": {
+    "en": "None",
+    "it": "Nessuno"
+  },
+  "overview.open_details": {
+    "en": "Open details",
+    "it": "Apri dettagli"
+  },
+  "overview.reason": {
+    "en": "Reason: {detail}",
+    "it": "Motivo: {detail}"
+  },
+  "overview.reason_audit": {
+    "en": "{count} differences in last audit",
+    "it": "{count} differenze nell'ultimo audit"
+  },
+  "overview.reason_checksum": {
+    "en": "{count} checksum differences",
+    "it": "{count} differenze checksum"
+  },
+  "overview.reason_conflicts": {
+    "en": "{count} conflicts",
+    "it": "{count} conflitti"
+  },
+  "overview.reason_journal": {
+    "en": "NAS journal not ready",
+    "it": "journal NAS non pronto"
+  },
+  "overview.reason_paused": {
+    "en": "sync paused",
+    "it": "sincronizzazione in pausa"
+  },
+  "overview.reason_pending": {
+    "en": "{count} local changes pending",
+    "it": "{count} modifiche locali in sospeso"
+  },
+  "overview.reason_queued": {
+    "en": "{count} queued operations",
+    "it": "{count} operazioni in coda"
+  },
+  "overview.stat_audit": {
+    "en": "Last audit",
+    "it": "Ultimo audit"
+  },
+  "overview.stat_conflicts": {
+    "en": "Conflicts",
+    "it": "Conflitti"
+  },
+  "overview.stat_queue": {
+    "en": "Queued",
+    "it": "In coda"
+  },
+  "overview.stat_tracked": {
+    "en": "Tracked files",
+    "it": "File tracciati"
+  },
+  "overview.step_audit": {
+    "en": "open Status and run the full audit",
+    "it": "apri lo Stato e avvia l'audit completo"
+  },
+  "overview.step_checksum": {
+    "en": "open Status and press 'Verify now'",
+    "it": "apri lo Stato e premi «Verifica adesso»"
+  },
+  "overview.step_conflicts": {
+    "en": "resolve conflicts in the Conflicts tab",
+    "it": "risolvi i conflitti nella scheda Conflitti"
+  },
+  "overview.step_paused": {
+    "en": "resume sync from Status",
+    "it": "riattiva la sincronizzazione dallo Stato"
+  },
+  "overview.step_pending": {
+    "en": "let the next upload to the NAS finish",
+    "it": "lascia finire il prossimo invio al NAS"
+  },
+  "overview.step_queue": {
+    "en": "check the Log if operations stay queued",
+    "it": "controlla il Log se le operazioni restano in coda"
+  },
+  "overview.step_unreachable": {
+    "en": "check network and NAS settings",
+    "it": "controlla rete e impostazioni del NAS"
+  },
+  "safety.blocked_cumulative": {
+    "en": "Operation blocked: {count} deletions in the last hour, cumulative limit {limit}. Nothing was changed. Check the Log to see which files would be removed; if the deletion is intentional, press 'Confirm mass deletion' in the Status tab before retrying.",
+    "it": "Operazione bloccata: {count} cancellazioni nell'ultima ora, limite cumulativo {limit}. Nessun file è stato modificato. Controlla il Log per capire quali file verrebbero rimossi; se l'eliminazione è intenzionale, premi «Conferma cancellazioni di massa» nella scheda Stato prima di riprovare."
+  },
+  "safety.blocked_proposed": {
+    "en": "Operation blocked: {count} files would be deleted (safety limit {limit}). Nothing was changed. Check the Log and the NASBox folder: usually files on the NAS are missing locally. If it is a mistake, restore them; if intentional, use 'Confirm mass deletion' in the Status tab and retry.",
+    "it": "Operazione bloccata: verrebbero cancellati {count} file (limite di sicurezza {limit}). Nessun file è stato modificato. Controlla il Log e la cartella NASBox: di solito significa che file presenti sul NAS non ci sono più in locale. Se è un errore, ripristinali; se è intenzionale, usa «Conferma cancellazioni di massa» nella scheda Stato e riprova."
+  },
+  "settings.animate_sync_checkbox": {
+    "en": "Animate the tray icon during transfers",
+    "it": "Anima l'icona nel tray durante i trasferimenti"
+  },
+  "settings.animate_sync_tooltip": {
+    "en": "Alternates the tray icon symbol while NASBox prepares or transfers files.",
+    "it": "Alterna il simbolo dell'icona mentre NASBox prepara o trasferisce file."
+  },
+  "settings.auto_exclude_active": {
+    "en": "🔒 Also automatically excluded: {path} (the NAS server script's own folder, not editable here).",
+    "it": "🔒 Esclusa automaticamente anche: {path} (cartella dello script server sul NAS, non modificabile qui)."
+  },
+  "settings.auto_exclude_none": {
+    "en": "No folder auto-excluded yet: set 'Server script on the NAS' above (or use 'Detect from NAS') so the client can also protect the server package's own folder, if it lives inside the NASBox folder.",
+    "it": "Nessuna cartella esclusa automaticamente: imposta 'Script server sul NAS' sopra (o usa 'Rileva dal NAS') perché il client protegga anche quella del pacchetto server, se si trova dentro la cartella NASBox."
+  },
+  "settings.bandwidth_title": {
+    "en": "Bandwidth limit (KB/s, 0 = unlimited)",
+    "it": "Limite di banda (KB/s, 0 = illimitato)"
+  },
+  "settings.bandwidth_tooltip": {
+    "en": "0 = no limit.",
+    "it": "0 = nessun limite."
+  },
+  "settings.cadence_note": {
+    "en": "Local changes are sent to the NAS almost immediately (as soon as detected). This interval only affects downloading changes made by other PCs.",
+    "it": "Le modifiche locali vengono inviate al NAS quasi subito (appena rilevate). Questo intervallo riguarda solo lo scaricare le modifiche fatte da altri PC."
+  },
+  "settings.cadence_title": {
+    "en": "Sync frequency",
+    "it": "Frequenza sincronizzazione"
+  },
+  "settings.compression_auto": {
+    "en": "Automatic (off on LAN)",
+    "it": "Automatica (disattiva in LAN)"
+  },
+  "settings.compression_label": {
+    "en": "rsync compression",
+    "it": "Compressione rsync"
+  },
+  "settings.compression_off": {
+    "en": "Always off",
+    "it": "Sempre disattiva"
+  },
+  "settings.compression_on": {
+    "en": "Always on",
+    "it": "Sempre attiva"
+  },
+  "settings.compression_tooltip": {
+    "en": "On a gigabit LAN compression often costs more NAS CPU than bandwidth it saves. Automatic disables it only for the direct LAN address.",
+    "it": "In LAN gigabit la compressione spesso costa più CPU sul NAS di quanta banda risparmi. Automatica la disattiva solo per l'indirizzo LAN diretto."
+  },
+  "settings.conflict_policy_label": {
+    "en": "Conflicts between two edits",
+    "it": "Conflitti tra due modifiche"
+  },
+  "settings.conflict_policy_manual": {
+    "en": "Always ask (create a conflict copy)",
+    "it": "Chiedi sempre (crea la copia di conflitto)"
+  },
+  "settings.conflict_policy_newest": {
+    "en": "Newest version wins (automatic)",
+    "it": "Vince la versione più recente (automatico)"
+  },
+  "settings.conflict_policy_tooltip": {
+    "en": "'Newest version wins' keeps the newest version at the original path and moves the losing one into history -- no '(conflitto da …)' copy to resolve by hand. 'Always ask' creates the conflict copy and lets you decide from the Conflicts tab. Either way the losing version stays recoverable from history.",
+    "it": "'Vince la versione più recente' tiene la versione più nuova al percorso originale e sposta quella perdente nello storico -- nessuna copia '(conflitto da …)' da risolvere a mano. 'Chiedi sempre' crea la copia di conflitto e lascia decidere a te dal tab Conflitti. In entrambi i casi la versione perdente resta recuperabile dallo storico."
+  },
+  "settings.daemon_active": {
+    "en": "✅ Server daemon active on the NAS",
+    "it": "✅ Demone server attivo sul NAS"
+  },
+  "settings.daemon_inactive": {
+    "en": "⚠️ Server daemon NOT running on the NAS",
+    "it": "⚠️ Demone server NON in esecuzione sul NAS"
+  },
+  "settings.daemon_not_found_body": {
+    "en": "Can't find a sync-daemon-server.sh process running on the NAS (maybe it's stopped, or already running from a non-standard path). Enter the path by hand in the 'Server script on the NAS' field and try again.",
+    "it": "Non trovo un processo sync-daemon-server.sh in esecuzione sul NAS (magari è fermo, o girava già a un percorso non standard). Indica il percorso a mano nel campo 'Script server sul NAS' e riprova."
+  },
+  "settings.daemon_not_found_title": {
+    "en": "Daemon not found",
+    "it": "Demone non trovato"
+  },
+  "settings.daemon_restarted_default": {
+    "en": "Daemon restarted successfully.",
+    "it": "Demone riavviato con successo."
+  },
+  "settings.daemon_restarted_title": {
+    "en": "Daemon restarted",
+    "it": "Demone riavviato"
+  },
+  "settings.delete_enabled_checkbox": {
+    "en": "Propagate deletions (otherwise additions/changes only)",
+    "it": "Propaga le cancellazioni (altrimenti solo aggiunte/modifiche)"
+  },
+  "settings.delete_enabled_tooltip": {
+    "en": "If off, deleting a file on one PC does NOT delete it on the NAS or other PCs (it stays there). If on, deletions propagate -- still protected by the trash/history.",
+    "it": "Se spenta, cancellare un file su un PC NON lo cancella sul NAS o sugli altri PC (resta lì). Se accesa, le cancellazioni si propagano -- protette comunque dal cestino/storico."
+  },
+  "settings.detect_btn": {
+    "en": "Detect from NAS",
+    "it": "Rileva dal NAS"
+  },
+  "settings.detect_done_body": {
+    "en": "{status_line}.\nNASBox folder on the NAS: {share_root}\nNAS retention: {retention}{version_line}",
+    "it": "{status_line}.\nCartella NASBox sul NAS: {share_root}\nRetention sul NAS: {retention}{version_line}"
+  },
+  "settings.detect_done_title": {
+    "en": "Detection complete",
+    "it": "Rilevamento completato"
+  },
+  "settings.detect_failed_title": {
+    "en": "Detection failed",
+    "it": "Rilevamento non riuscito"
+  },
+  "settings.detect_note": {
+    "en": "'Detect from NAS' connects, checks that the server daemon is running, and reads the remote path and retention straight from there -- nothing to copy by hand.",
+    "it": "'Rileva dal NAS' si collega, verifica che il demone server sia attivo e legge da lì il percorso remoto e la retention -- niente da ricopiare a mano."
+  },
+  "settings.detect_running": {
+    "en": "Detecting…",
+    "it": "Rilevamento in corso…"
+  },
+  "settings.dirty_feedback": {
+    "en": "Unsaved changes.",
+    "it": "Modifiche non ancora salvate."
+  },
+  "settings.download_label": {
+    "en": "↓ Download:",
+    "it": "↓ Scarica:"
+  },
+  "settings.exclude_add_btn": {
+    "en": "Add",
+    "it": "Aggiungi"
+  },
+  "settings.exclude_add_tooltip": {
+    "en": "Adds the pattern typed above to the list.",
+    "it": "Aggiunge il pattern scritto sopra all'elenco."
+  },
+  "settings.exclude_hint": {
+    "en": "e.g. node_modules/  *.tmp  .cache/",
+    "it": "es. node_modules/  *.tmp  .cache/"
+  },
+  "settings.exclude_input_tooltip": {
+    "en": "Type a pattern and press Enter or 'Add'.",
+    "it": "Scrivi un pattern e premi Invio o 'Aggiungi'."
+  },
+  "settings.exclude_note": {
+    "en": "Patterns (rsync-style) never synced, in either direction -- useful for caches, build folders, or temp files that don't belong on a shared NAS.",
+    "it": "Pattern (stile rsync) mai sincronizzati, in nessuna direzione -- utile per cache, cartelle di build o file temporanei che non hanno senso su un NAS condiviso."
+  },
+  "settings.exclude_profile_add": {
+    "en": "Add profile",
+    "it": "Aggiungi profilo"
+  },
+  "settings.exclude_profile_label": {
+    "en": "Quick profile:",
+    "it": "Profilo rapido:"
+  },
+  "settings.exclude_profile_tooltip": {
+    "en": "Adds a bundle of common excludes (LaTeX, development, Office, system). You can remove them individually.",
+    "it": "Aggiunge un gruppo di esclusioni tipiche (LaTeX, sviluppo, Office, sistema). Puoi rimuoverle una per una."
+  },
+  "settings.exclude_remove_btn": {
+    "en": "Remove selected",
+    "it": "Rimuovi selezionato"
+  },
+  "settings.exclude_remove_tooltip": {
+    "en": "Removes the pattern selected in the list.",
+    "it": "Rimuove il pattern selezionato nell'elenco."
+  },
+  "settings.exclude_title": {
+    "en": "Exclude from sync",
+    "it": "Escludi dalla sincronizzazione"
+  },
+  "settings.export_bundle_title": {
+    "en": "NASBox diagnostic bundle",
+    "it": "Bundle diagnostico NASBox"
+  },
+  "settings.export_diagnostics_btn": {
+    "en": "Export diagnostic bundle…",
+    "it": "Esporta bundle diagnostico…"
+  },
+  "settings.export_diagnostics_tooltip": {
+    "en": "Save versions, redacted configuration and the last log lines.",
+    "it": "Salva versioni, configurazione senza segreti e le ultime righe di log."
+  },
+  "settings.export_dialog_title": {
+    "en": "Save diagnostic bundle",
+    "it": "Salva bundle diagnostico"
+  },
+  "settings.export_done_body": {
+    "en": "Bundle saved to:\n{path}",
+    "it": "Bundle salvato in:\n{path}"
+  },
+  "settings.export_done_title": {
+    "en": "Bundle exported",
+    "it": "Bundle esportato"
+  },
+  "settings.export_failed_body": {
+    "en": "Could not write the bundle: {detail}",
+    "it": "Impossibile scrivere il bundle: {detail}"
+  },
+  "settings.export_failed_title": {
+    "en": "Export failed",
+    "it": "Esportazione non riuscita"
+  },
+  "settings.export_filter": {
+    "en": "Text file (*.txt);;ZIP archive (*.zip)",
+    "it": "File di testo (*.txt);;Archivio ZIP (*.zip)"
+  },
+  "settings.export_generated": {
+    "en": "Generated: {timestamp}",
+    "it": "Generato: {timestamp}"
+  },
+  "settings.export_no_log": {
+    "en": "(no log available)",
+    "it": "(nessun log disponibile)"
+  },
+  "settings.export_no_nas_stats": {
+    "en": "(no NAS data detected)",
+    "it": "(nessun dato NAS rilevato)"
+  },
+  "settings.export_redacted": {
+    "en": "[REDACTED]",
+    "it": "[RIMOSSO]"
+  },
+  "settings.export_section_config": {
+    "en": "Configuration (secrets redacted)",
+    "it": "Configurazione (segreti rimossi)"
+  },
+  "settings.export_section_log": {
+    "en": "Last {count} client.log lines",
+    "it": "Ultimi {count} righe di client.log"
+  },
+  "settings.export_section_nas_stats": {
+    "en": "NAS / manifest / lock state (from configuration)",
+    "it": "Stato NAS / manifest / lock (da configurazione)"
+  },
+  "settings.export_section_versions": {
+    "en": "Versions",
+    "it": "Versioni"
+  },
+  "settings.feedback_title": {
+    "en": "Sync feedback",
+    "it": "Feedback sincronizzazione"
+  },
+  "settings.full_pull_label": {
+    "en": "Full reconciliation every",
+    "it": "Riconciliazione completa ogni"
+  },
+  "settings.full_pull_note": {
+    "en": "Periodic full NAS safety scan. The change feed still wakes the client for real events, so a high interval does not delay changes.",
+    "it": "Scansione completa di sicurezza del NAS. Il change feed continua a svegliare il client sugli eventi reali, quindi un intervallo alto non ritarda le modifiche."
+  },
+  "settings.info_config_label": {
+    "en": "Configuration file:",
+    "it": "File di configurazione:"
+  },
+  "settings.info_log_label": {
+    "en": "Log file:",
+    "it": "File di log:"
+  },
+  "settings.info_min_server_label": {
+    "en": "Minimum required NAS server version:",
+    "it": "Versione minima server NAS richiesta:"
+  },
+  "settings.info_title": {
+    "en": "About",
+    "it": "Informazioni"
+  },
+  "settings.info_version_label": {
+    "en": "Version:",
+    "it": "Versione:"
+  },
+  "settings.jump_host_label": {
+    "en": "Bastion host:",
+    "it": "Host bastione (ponte):"
+  },
+  "settings.jump_host_placeholder": {
+    "en": "e.g. bastion.example.net",
+    "it": "es. bastion.example.net"
+  },
+  "settings.jump_note": {
+    "en": "If the NAS isn't directly reachable from outside your home (no direct WAN access), set up a 'bridge' machine here that's reachable from the internet and can see the NAS on its own LAN: it's used automatically (SSH ProxyJump) only when direct access to the NAS isn't available.",
+    "it": "Se il NAS non è raggiungibile direttamente da fuori casa (nessun accesso WAN diretto), configura qui una macchina 'ponte' che sia raggiungibile da internet e che veda il NAS sulla propria LAN: ci si passerà attraverso in automatico (SSH ProxyJump) solo quando l'accesso diretto al NAS non è disponibile."
+  },
+  "settings.jump_port_label": {
+    "en": "SSH port on the bastion:",
+    "it": "Porta SSH sul bastione:"
+  },
+  "settings.jump_user_label": {
+    "en": "SSH user on the bastion:",
+    "it": "Utente SSH sul bastione:"
+  },
+  "settings.jump_user_placeholder": {
+    "en": "blank = use the same SSH user as the NAS",
+    "it": "vuoto = usa lo stesso utente SSH del NAS"
+  },
+  "settings.language_auto": {
+    "en": "Automatic (system)",
+    "it": "Automatica (sistema)"
+  },
+  "settings.language_en": {
+    "en": "English",
+    "it": "English"
+  },
+  "settings.language_it": {
+    "en": "Italiano",
+    "it": "Italiano"
+  },
+  "settings.language_label": {
+    "en": "App language:",
+    "it": "Lingua dell'app:"
+  },
+  "settings.language_note": {
+    "en": "Restart the app to apply the language change.",
+    "it": "Riavvia l'app per applicare il cambio lingua."
+  },
+  "settings.language_title": {
+    "en": "Language",
+    "it": "Lingua"
+  },
+  "settings.maint_conflict_count": {
+    "en": "Found {count} conflict files.",
+    "it": "Trovati {count} file di conflitto."
+  },
+  "settings.maint_conflict_count_none": {
+    "en": "No conflict files found in the NASBox folder.",
+    "it": "Nessun file di conflitto trovato nella cartella NASBox."
+  },
+  "settings.maint_conflict_count_unknown": {
+    "en": "Click \"Scan\" to find conflict files.",
+    "it": "Clicca \"Cerca\" per trovare i file di conflitto."
+  },
+  "settings.maint_conflict_error": {
+    "en": "Scan error: {detail}",
+    "it": "Errore nella scansione: {detail}"
+  },
+  "settings.maint_conflict_no_folder": {
+    "en": "NASBox folder not set up.",
+    "it": "Cartella NASBox non configurata."
+  },
+  "settings.maint_conflict_note": {
+    "en": "When two versions of a file are modified at the same time on different PCs, NASBox keeps both: one stays in place, the other is renamed with \"(conflitto da ...)\" to avoid data loss. Review them here and move unneeded copies into local history.",
+    "it": "Quando due versioni di un file vengono modificate contemporaneamente su PC diversi, NASBox conserva entrambe: una resta al suo posto, l'altra viene rinominata con \"(conflitto da ...)\" per non perdere dati. Puoi rivederli qui e spostare nello storico locale le copie che non servono."
+  },
+  "settings.maint_conflict_scanning": {
+    "en": "Scanning…",
+    "it": "Scansione in corso…"
+  },
+  "settings.maint_delete_done_body": {
+    "en": "Moved {count} conflict files into local history.",
+    "it": "Spostati {count} file di conflitto nello storico locale."
+  },
+  "settings.maint_delete_done_title": {
+    "en": "Conflicts moved",
+    "it": "Conflitti spostati"
+  },
+  "settings.maint_delete_partial_body": {
+    "en": "Moved {moved} files, {failed} could not be moved:\n{names}",
+    "it": "Spostati {moved} file, {failed} non spostabili:\n{names}"
+  },
+  "settings.maint_delete_partial_title": {
+    "en": "Partial move",
+    "it": "Spostamento parziale"
+  },
+  "settings.maint_delete_tooltip": {
+    "en": "Shows every conflict and lets you move selected files into local history.",
+    "it": "Mostra tutti i conflitti e consente di spostare quelli selezionati nello storico locale."
+  },
+  "settings.maint_move_selected_btn": {
+    "en": "Move selected to history",
+    "it": "Sposta selezionati nello storico"
+  },
+  "settings.maint_open_folder_btn": {
+    "en": "Open folder",
+    "it": "Apri cartella"
+  },
+  "settings.maint_review_btn": {
+    "en": "Review conflicts…",
+    "it": "Rivedi i conflitti…"
+  },
+  "settings.maint_review_note": {
+    "en": "Select files to remove from the NASBox folder. They will be moved into this PC's local history and remain restorable under local retention.",
+    "it": "Seleziona i file da rimuovere dalla cartella NASBox. Verranno spostati nello storico locale di questo PC e resteranno ripristinabili secondo la retention locale."
+  },
+  "settings.maint_review_title": {
+    "en": "Review conflict files",
+    "it": "Rivedi i file di conflitto"
+  },
+  "settings.maint_scan_btn": {
+    "en": "Scan for conflicts",
+    "it": "Cerca conflitti"
+  },
+  "settings.maint_scan_tooltip": {
+    "en": "Scans the NASBox folder for all files with \"(conflitto da ...)\" in their name.",
+    "it": "Cerca nella cartella NASBox tutti i file con \"(conflitto da ...)\" nel nome."
+  },
+  "settings.maint_title": {
+    "en": "Maintenance",
+    "it": "Manutenzione"
+  },
+  "settings.max_delete_label": {
+    "en": "Delete limit per transfer:",
+    "it": "Limite cancellazioni per trasferimento:"
+  },
+  "settings.max_delete_tooltip": {
+    "en": "Stops a transfer proposing more deletions than this number. Increase only after checking the volume.",
+    "it": "Blocca il trasferimento se propone più cancellazioni di questo numero. Aumentalo solo dopo aver verificato il volume."
+  },
+  "settings.metrics_refresh_label": {
+    "en": "Refresh NAS monitor every:",
+    "it": "Aggiorna monitor NAS ogni:"
+  },
+  "settings.metrics_refresh_note": {
+    "en": "Read-only dashboard interval. It does not scan files.",
+    "it": "Intervallo della dashboard read-only. Non esegue scansioni dei file."
+  },
+  "settings.multiple_instances_body": {
+    "en": "Found multiple sync-daemon-server.sh instances running on the NAS:\n\n{list}\n\nUsing the first one ({first}) -- if that's not the right one, set it by hand in the 'Server script on the NAS' field.",
+    "it": "Trovate più istanze di sync-daemon-server.sh in esecuzione sul NAS:\n\n{list}\n\nUso la prima ({first}) -- se non è quella giusta, indicala a mano nel campo 'Script server sul NAS'."
+  },
+  "settings.multiple_instances_title": {
+    "en": "Multiple instances found",
+    "it": "Più istanze trovate"
+  },
+  "settings.multiplexing_checkbox": {
+    "en": "Reuse a single SSH connection (lighter on the NAS)",
+    "it": "Riutilizza una sola connessione SSH (piu' leggero sul NAS)"
+  },
+  "settings.multiplexing_tooltip": {
+    "en": "SSH multiplexing (ControlMaster): the many short commands of a sync cycle share one authenticated connection instead of opening a new one each time. Cuts handshakes and, on the NAS, sshd/shell forks. Disable only if your SSH setup or a bastion rejects it.",
+    "it": "Multiplexing SSH (ControlMaster): i molti comandi brevi di un ciclo di sincronizzazione condividono una connessione autenticata invece di aprirne una nuova ogni volta. Riduce handshake e, sul NAS, i processi sshd/shell. Disattivalo solo se il tuo SSH o un bastion lo rifiuta."
+  },
+  "settings.nas_box_title": {
+    "en": "NAS connection",
+    "it": "Connessione al NAS"
+  },
+  "settings.nas_fact_lock_label": {
+    "en": "Transfer lock:",
+    "it": "Lock di trasferimento:"
+  },
+  "settings.nas_fact_retention_label": {
+    "en": "NAS retention:",
+    "it": "Retention NAS:"
+  },
+  "settings.nas_fact_server_version_label": {
+    "en": "NAS server version:",
+    "it": "Versione server NAS:"
+  },
+  "settings.nas_facts_note": {
+    "en": "Values read from configuration: use “Detect from NAS” to refresh them.",
+    "it": "Valori letti dalla configurazione: usa «Rileva dal NAS» per aggiornarli."
+  },
+  "settings.nas_facts_title": {
+    "en": "NAS-reported values",
+    "it": "Valori rilevati dal NAS"
+  },
+  "settings.nas_friendly_applied": {
+    "en": "NAS-friendly profile set. Save to apply it.",
+    "it": "Profilo NAS-friendly impostato. Salva per applicarlo."
+  },
+  "settings.nas_friendly_btn": {
+    "en": "Apply NAS-friendly profile",
+    "it": "Applica profilo NAS-friendly"
+  },
+  "settings.nas_friendly_tooltip": {
+    "en": "Sets spaced checks, a six-hour full reconciliation and automatic compression: less NAS load while sync stays event-driven.",
+    "it": "Imposta controlli più distanziati, riconciliazione completa ogni 6 ore e compressione automatica: meno carico sul NAS, sincronizzazione ancora guidata dagli eventi."
+  },
+  "settings.nas_lan_label": {
+    "en": "LAN host:",
+    "it": "Host LAN:"
+  },
+  "settings.nas_lan_placeholder": {
+    "en": "e.g. nas.local",
+    "it": "es. nas.local"
+  },
+  "settings.nas_lan_tooltip": {
+    "en": "The NAS's address on your local network, e.g. 192.0.2.10 or nas.local.",
+    "it": "Indirizzo del NAS sulla rete locale, es. 192.0.2.10 o nas.local."
+  },
+  "settings.nas_lock_free": {
+    "en": "free",
+    "it": "libero"
+  },
+  "settings.nas_lock_held": {
+    "en": "held by {owner} for {age} s",
+    "it": "occupato da {owner} da {age} s"
+  },
+  "settings.nas_not_reported": {
+    "en": "not detected",
+    "it": "non rilevato"
+  },
+  "settings.nas_reported_value": {
+    "en": "detected from NAS: {value}",
+    "it": "rilevato dal NAS: {value}"
+  },
+  "settings.nas_unreachable_body": {
+    "en": "Couldn't reach the NAS, neither directly nor via the bastion, with these parameters.",
+    "it": "Impossibile contattare il NAS, né direttamente né tramite il bastione, con questi parametri."
+  },
+  "settings.nas_unreachable_title": {
+    "en": "NAS unreachable",
+    "it": "NAS non raggiungibile"
+  },
+  "settings.nas_user_label": {
+    "en": "SSH user on the NAS:",
+    "it": "Utente SSH sul NAS:"
+  },
+  "settings.nas_user_tooltip": {
+    "en": "The user the client connects to the NAS as, over SSH.",
+    "it": "Utente con cui il client si collega al NAS via SSH."
+  },
+  "settings.nas_wan_label": {
+    "en": "Direct WAN host (optional):",
+    "it": "Host WAN diretto (opzionale):"
+  },
+  "settings.nas_wan_placeholder": {
+    "en": "e.g. nas.mydomain.com (only if the NAS is directly reachable from outside)",
+    "it": "es. nas.miodominio.com (solo se il NAS è raggiungibile direttamente da fuori)"
+  },
+  "settings.nas_wan_tooltip": {
+    "en": "Only if the NAS is directly reachable from the internet. Leave blank otherwise.",
+    "it": "Solo se il NAS è raggiungibile direttamente da internet. Lascia vuoto altrimenti."
+  },
+  "settings.not_set_placeholder": {
+    "en": "(not set)",
+    "it": "(non impostata)"
+  },
+  "settings.notify_sync_checkbox": {
+    "en": "Show a popup when a sync completes changes",
+    "it": "Mostra un popup quando una sincronizzazione completa delle modifiche"
+  },
+  "settings.notify_sync_note": {
+    "en": "Feedback and tray preferences are applied with 'Save settings'.",
+    "it": "Le preferenze di feedback e tray vengono applicate con 'Salva impostazioni'."
+  },
+  "settings.notify_sync_tooltip": {
+    "en": "Shows a system notification after a successful transfer. The tray icon animation remains active during transfers.",
+    "it": "Mostra una notifica nell'area di sistema dopo un trasferimento riuscito. L'animazione dell'icona resta attiva durante il trasferimento."
+  },
+  "settings.outdated_version_note": {
+    "en": "\n\n⚠️ Server package version: {version} (this client expects at least {expected}). Copy the updated server/ folder to the NAS.",
+    "it": "\n\n⚠️ Versione del pacchetto server: {version} (questo client si aspetta almeno la {expected}). Copia la cartella server/ aggiornata sul NAS."
+  },
+  "settings.poll_label": {
+    "en": "Check the NAS for updates every:",
+    "it": "Controlla il NAS per novità ogni:"
+  },
+  "settings.profile_added": {
+    "en": "{count} exclusions added. Save to apply them.",
+    "it": "{count} esclusioni aggiunte. Salva per applicarle."
+  },
+  "settings.profile_dev": {
+    "en": "Development / build",
+    "it": "Sviluppo / build"
+  },
+  "settings.profile_latex": {
+    "en": "LaTeX / document builds",
+    "it": "LaTeX / build documenti"
+  },
+  "settings.profile_office": {
+    "en": "Office / temporary files",
+    "it": "Office / file temporanei"
+  },
+  "settings.profile_os": {
+    "en": "System / NAS",
+    "it": "Sistema / NAS"
+  },
+  "settings.remote_prefix_label": {
+    "en": "NASBox folder on the NAS:",
+    "it": "Cartella NASBox sul NAS:"
+  },
+  "settings.remote_prefix_placeholder": {
+    "en": "e.g. /volume1/NASBox",
+    "it": "es. /volume1/NASBox"
+  },
+  "settings.remote_script_label": {
+    "en": "Server script on the NAS:",
+    "it": "Script server sul NAS:"
+  },
+  "settings.remote_script_placeholder": {
+    "en": "e.g. /volume1/NASBox/sync-daemon-server/sync-daemon-server.sh",
+    "it": "es. /volume1/NASBox/sync-daemon-server/sync-daemon-server.sh"
+  },
+  "settings.remote_script_tooltip": {
+    "en": "Path to sync-daemon-server.sh on the NAS. You can leave it blank: 'Detect from NAS' finds it on its own.",
+    "it": "Percorso di sync-daemon-server.sh sul NAS. Puoi lasciarlo vuoto: 'Rileva dal NAS' lo trova da solo."
+  },
+  "settings.restart_confirm_body": {
+    "en": "Restart the server daemon on the NAS ({script_path})?\n\nThe daemon only handles history/retention cleanup on the NAS -- file syncing doesn't depend on it and won't be interrupted.",
+    "it": "Riavviare il demone server sul NAS ({script_path})?\n\nIl demone gestisce solo la pulizia dello storico/retention sul NAS -- la sincronizzazione dei file non dipende da lui e non verrà interrotta."
+  },
+  "settings.restart_confirm_title": {
+    "en": "Confirm restart",
+    "it": "Conferma riavvio"
+  },
+  "settings.restart_daemon_btn": {
+    "en": "Restart daemon",
+    "it": "Riavvia demone"
+  },
+  "settings.restart_daemon_tooltip": {
+    "en": "Restarts the daemon on the NAS. Only affects history cleanup, not file syncing.",
+    "it": "Riavvia il demone sul NAS. Riguarda solo la pulizia dello storico, non la sincronizzazione dei file."
+  },
+  "settings.restart_failed_default": {
+    "en": "Unknown error.",
+    "it": "Errore sconosciuto."
+  },
+  "settings.restart_failed_title": {
+    "en": "Restart failed",
+    "it": "Riavvio non riuscito"
+  },
+  "settings.restart_running": {
+    "en": "Restarting…",
+    "it": "Riavvio in corso…"
+  },
+  "settings.retention_days": {
+    "en": "{days} days",
+    "it": "{days} giorni"
+  },
+  "settings.retention_never": {
+    "en": "never (no automatic deletion)",
+    "it": "mai (nessuna eliminazione automatica)"
+  },
+  "settings.save_all_btn": {
+    "en": "Save settings",
+    "it": "Salva impostazioni"
+  },
+  "settings.save_all_tooltip": {
+    "en": "Saves connection, sync mode, bandwidth, cadence, feedback, tray, language, theme, exclusions, and deletion settings together.",
+    "it": "Salva insieme connessione, modalita', banda, frequenza, feedback, tray, lingua, tema, esclusioni e cancellazioni."
+  },
+  "settings.saved_feedback": {
+    "en": "All settings are saved.",
+    "it": "Tutte le impostazioni sono salvate."
+  },
+  "settings.schedule_add_btn": {
+    "en": "Add…",
+    "it": "Aggiungi…"
+  },
+  "settings.schedule_add_tooltip": {
+    "en": "Create a new pause window.",
+    "it": "Crea una nuova finestra di pausa."
+  },
+  "settings.schedule_edit_btn": {
+    "en": "Edit…",
+    "it": "Modifica…"
+  },
+  "settings.schedule_edit_tooltip": {
+    "en": "Edit the selected window.",
+    "it": "Modifica la finestra selezionata."
+  },
+  "settings.schedule_enabled_checkbox": {
+    "en": "Pause automatically during the listed windows",
+    "it": "Metti in pausa automaticamente nelle finestre indicate"
+  },
+  "settings.schedule_enabled_tooltip": {
+    "en": "During the listed windows NASBox does not push, pull, or wait on the NAS: useful to keep the NAS idle at night or during working hours.",
+    "it": "Nelle finestre indicate NASBox non invia, non scarica e non resta in attesa sul NAS: utile per tenere il NAS libero di notte o durante l'orario di lavoro."
+  },
+  "settings.schedule_list_tooltip": {
+    "en": "Recurring windows. An end time not later than the start spans midnight.",
+    "it": "Finestre ricorrenti. Un orario di fine non superiore a quello di inizio significa che la finestra attraversa la mezzanotte."
+  },
+  "settings.schedule_note": {
+    "en": "Windows are optional and apply on save; the manual pause stays independent.",
+    "it": "Le finestre sono opzionali e si applicano solo al salvataggio; la pausa manuale resta indipendente."
+  },
+  "settings.schedule_remove_btn": {
+    "en": "Remove",
+    "it": "Rimuovi"
+  },
+  "settings.schedule_remove_tooltip": {
+    "en": "Delete the selected window.",
+    "it": "Elimina la finestra selezionata."
+  },
+  "settings.schedule_title": {
+    "en": "Sync schedule",
+    "it": "Pianificazione sincronizzazione"
+  },
+  "settings.script_not_configured_body": {
+    "en": "Enter the path to the server script on the NAS, or use 'Detect from NAS' to find it.",
+    "it": "Indica il percorso dello script server sul NAS, oppure usa 'Rileva dal NAS' per trovarlo."
+  },
+  "settings.script_not_configured_title": {
+    "en": "Script not configured",
+    "it": "Script non configurato"
+  },
+  "settings.search_placeholder": {
+    "en": "Search settings…",
+    "it": "Cerca impostazioni…"
+  },
+  "settings.search_tooltip": {
+    "en": "Filter sections by keyword (Ctrl+K).",
+    "it": "Filtra le sezioni per parola chiave (Ctrl+K)."
+  },
+  "settings.selective_btn": {
+    "en": "Choose folders…",
+    "it": "Scegli cartelle…"
+  },
+  "settings.selective_count": {
+    "en": "Excluded folders: {count}.",
+    "it": "Cartelle escluse: {count}."
+  },
+  "settings.selective_needs_folder_body": {
+    "en": "Set up the local NASBox folder first, then choose its subfolders.",
+    "it": "Configura prima la cartella NASBox locale, poi scegli le sottocartelle."
+  },
+  "settings.selective_needs_folder_title": {
+    "en": "Folder not set",
+    "it": "Cartella non impostata"
+  },
+  "settings.selective_none": {
+    "en": "All subfolders are synced.",
+    "it": "Tutte le sottocartelle sono sincronizzate."
+  },
+  "settings.selective_tooltip": {
+    "en": "Choose which subfolders of the NASBox folder to sync: the per-folder alternative to patterns, anchored to the chosen path.",
+    "it": "Scegli quali sottocartelle della cartella NASBox sincronizzare: l'alternativa per-cartella ai pattern, ancorata al percorso scelto."
+  },
+  "settings.ssh_port_label": {
+    "en": "SSH port on the NAS:",
+    "it": "Porta SSH sul NAS:"
+  },
+  "settings.ssh_port_tooltip": {
+    "en": "Usually 22, unless the NAS is configured otherwise.",
+    "it": "Di solito 22, salvo configurazioni particolari sul NAS."
+  },
+  "settings.sync_mode_archive": {
+    "en": "Archive (local -> NAS, no remote deletions)",
+    "it": "Archivio (locale -> NAS, senza cancellazioni remote)"
+  },
+  "settings.sync_mode_bidirectional": {
+    "en": "Bidirectional",
+    "it": "Bidirezionale"
+  },
+  "settings.sync_mode_label": {
+    "en": "Synchronization mode:",
+    "it": "Modalita' di sincronizzazione:"
+  },
+  "settings.sync_mode_note": {
+    "en": "Bidirectional transfers both ways. Local only uploads to the NAS; NAS only downloads from it. Archive uploads additions and changes, keeps files deleted locally on the NAS, and does not pull.",
+    "it": "Bidirezionale scambia entrambe le direzioni. Solo locale invia soltanto al NAS; solo NAS scarica soltanto dal NAS. Archivio invia aggiunte e modifiche, conserva sul NAS i file cancellati localmente e non esegue pull."
+  },
+  "settings.sync_mode_pull_only": {
+    "en": "NAS only (pull-only)",
+    "it": "Solo NAS (pull-only)"
+  },
+  "settings.sync_mode_push_only": {
+    "en": "Local only (push-only)",
+    "it": "Solo locale (push-only)"
+  },
+  "settings.theme_dark": {
+    "en": "Dark",
+    "it": "Scuro"
+  },
+  "settings.theme_label": {
+    "en": "App theme:",
+    "it": "Tema dell'app:"
+  },
+  "settings.theme_light": {
+    "en": "Light",
+    "it": "Chiaro"
+  },
+  "settings.theme_note": {
+    "en": "The theme is applied immediately, no restart needed.",
+    "it": "Il tema viene applicato subito, senza riavviare."
+  },
+  "settings.theme_system": {
+    "en": "System",
+    "it": "Sistema"
+  },
+  "settings.theme_title": {
+    "en": "Theme",
+    "it": "Tema"
+  },
+  "settings.tray_click_label": {
+    "en": "Single-click tray icon:",
+    "it": "Un clic sull'icona:"
+  },
+  "settings.tray_click_menu": {
+    "en": "Show menu",
+    "it": "Mostra il menu"
+  },
+  "settings.tray_click_tooltip": {
+    "en": "Right-click always shows the menu; double-click always opens the window.",
+    "it": "Il clic destro mostra sempre il menu; il doppio clic apre sempre la finestra."
+  },
+  "settings.tray_click_window": {
+    "en": "Open window",
+    "it": "Apri la finestra"
+  },
+  "settings.upload_label": {
+    "en": "↑ Upload:",
+    "it": "↑ Carica:"
+  },
+  "settings.verify_keys_body": {
+    "en": "Host: {label} ({host})\n\nReceived fingerprints:\n{fingerprints}\n\nCompare them with the NAS and accept only if they match.",
+    "it": "Host: {label} ({host})\n\nImpronte ricevute:\n{fingerprints}\n\nConfrontale con il NAS e accettale solo se coincidono."
+  },
+  "settings.verify_keys_btn": {
+    "en": "Verify SSH keys…",
+    "it": "Verifica chiavi SSH…"
+  },
+  "settings.verify_keys_done": {
+    "en": "SSH keys stored. Future connections will verify the NAS identity.",
+    "it": "Chiavi SSH memorizzate. Le prossime connessioni verificheranno l’identità del NAS."
+  },
+  "settings.verify_keys_failed": {
+    "en": "Could not save the key: {detail}",
+    "it": "Impossibile salvare la chiave: {detail}"
+  },
+  "settings.verify_keys_no_host": {
+    "en": "Configure at least one NAS host before verifying its key.",
+    "it": "Configura almeno un host NAS prima di verificare la chiave."
+  },
+  "settings.verify_keys_no_result": {
+    "en": "No key received for {label} ({host}).",
+    "it": "Nessuna chiave ricevuta per {label} ({host})."
+  },
+  "settings.verify_keys_partial": {
+    "en": "Verification incomplete: the client will remain cautious until all configured hosts are verified.",
+    "it": "Verifica incompleta: il client continuerà in modalità prudente finché tutti gli host configurati non saranno verificati."
+  },
+  "settings.verify_keys_title": {
+    "en": "Verify SSH keys",
+    "it": "Verifica chiavi SSH"
+  },
+  "settings.verify_keys_tooltip": {
+    "en": "Shows host-key fingerprints and lets you accept them explicitly.",
+    "it": "Mostra le impronte delle chiavi host e consente di accettarle esplicitamente."
+  },
+  "setup.advanced_later": {
+    "en": "WAN access and a bastion are optional; configure them later in Settings.",
+    "it": "Accesso WAN e bastione sono opzionali: puoi configurarli in Impostazioni dopo questa procedura."
+  },
+  "setup.connection_intro": {
+    "en": "Enter the NAS SSH details. The NAS needs no graphical interface, only SSH shell access.",
+    "it": "Inserisci i dati SSH del NAS. Sul NAS non serve alcuna interfaccia grafica: basta l'accesso shell SSH."
+  },
+  "setup.connection_missing": {
+    "en": "Enter the SSH host and user.",
+    "it": "Inserisci host e utente SSH."
+  },
+  "setup.connection_title": {
+    "en": "SSH connection to the NAS",
+    "it": "Connessione SSH al NAS"
+  },
+  "setup.detect_failed": {
+    "en": "Detection failed: {detail}",
+    "it": "Rilevamento non riuscito: {detail}"
+  },
+  "setup.detect_ok": {
+    "en": "Server configuration detected from the NAS.",
+    "it": "Configurazione server rilevata dal NAS."
+  },
+  "setup.detect_optional": {
+    "en": "Detection is recommended but optional.",
+    "it": "Rilevamento consigliato ma non obbligatorio."
+  },
+  "setup.local_failed_title": {
+    "en": "Invalid local folder",
+    "it": "Cartella locale non valida"
+  },
+  "setup.local_intro": {
+    "en": "Choose the local folder NASBox will sync. It is created only after you finish setup.",
+    "it": "Scegli la cartella locale che NASBox sincronizzerà. Verrà creata solo quando completi la configurazione."
+  },
+  "setup.local_title": {
+    "en": "Folder on this PC",
+    "it": "Cartella su questo PC"
+  },
+  "setup.server_intro": {
+    "en": "Detect the daemon through the SSH shell to fill the script path and remote folder. If it is not running, enter the paths and finish anyway.",
+    "it": "Rileva il demone dalla shell SSH per compilare percorso dello script e cartella remota. Se non è in esecuzione, puoi inserire i percorsi e completare comunque."
+  },
+  "setup.server_title": {
+    "en": "NASBox folder on the NAS",
+    "it": "Cartella NASBox sul NAS"
+  },
+  "setup.test_connection": {
+    "en": "Test SSH connection",
+    "it": "Prova connessione SSH"
+  },
+  "setup.test_failed": {
+    "en": "SSH connection failed: {detail}",
+    "it": "Connessione SSH non riuscita: {detail}"
+  },
+  "setup.test_ok": {
+    "en": "SSH connection to {host} succeeded.",
+    "it": "Connessione SSH riuscita a {host}."
+  },
+  "setup.test_required": {
+    "en": "Test the connection to continue.",
+    "it": "Prova la connessione per continuare."
+  },
+  "setup.testing": {
+    "en": "Connecting...",
+    "it": "Connessione in corso..."
+  },
+  "setup.title": {
+    "en": "Set up NASBox on this PC",
+    "it": "Configura NASBox su questo PC"
+  },
+  "status.active_msg": {
+    "en": "✅ Syncing — connected to {where}",
+    "it": "✅ Sincronizzazione attiva — connesso a {where}"
+  },
+  "status.attention_action_conflicts": {
+    "en": "Open Conflicts",
+    "it": "Apri Conflitti"
+  },
+  "status.attention_action_history": {
+    "en": "Open History",
+    "it": "Apri Storico"
+  },
+  "status.attention_action_log": {
+    "en": "Open Log",
+    "it": "Apri Log"
+  },
+  "status.attention_action_settings": {
+    "en": "Open Settings",
+    "it": "Apri Impostazioni"
+  },
+  "status.attention_action_transfers": {
+    "en": "Open Transfers",
+    "it": "Apri Trasferimenti"
+  },
+  "status.attention_title": {
+    "en": "Requires attention",
+    "it": "Richiede attenzione"
+  },
+  "status.batch_position": {
+    "en": " (file {done} of {total})",
+    "it": " (file {done} di {total})"
+  },
+  "status.batch_progress_format": {
+    "en": "Files synced: {done} of {total}",
+    "it": "File sincronizzati: {done} di {total}"
+  },
+  "status.config_local_folder": {
+    "en": "local folder",
+    "it": "cartella locale"
+  },
+  "status.config_nas_host": {
+    "en": "NAS host",
+    "it": "host NAS"
+  },
+  "status.config_nas_user": {
+    "en": "SSH user",
+    "it": "utente SSH"
+  },
+  "status.confirm_deletes_btn": {
+    "en": "Confirm mass deletion",
+    "it": "Conferma cancellazioni di massa"
+  },
+  "status.confirm_deletes_tooltip": {
+    "en": "Allows deletions above the safety limit for 10 minutes. Use it ONLY after checking the Log for the files involved: they will be removed from the NAS as well.",
+    "it": "Autorizza per 10 minuti le cancellazioni oltre il limite di sicurezza. Usalo SOLO dopo aver controllato nel Log quali file verrebbero rimossi: i file spariranno anche dal NAS."
+  },
+  "status.conflict_stat": {
+    "en": "{count} conflicts to review — open the Conflict Center",
+    "it": "{count} conflitti da rivedere — apri il Conflict Center"
+  },
+  "status.conflict_stat_tooltip": {
+    "en": "Open the Conflict Center to review conflicts.",
+    "it": "Apri il Conflict Center per rivedere i conflitti."
+  },
+  "status.connected_msg": {
+    "en": "Connected to NAS: {where}",
+    "it": "Connesso al NAS: {where}"
+  },
+  "status.details_hide": {
+    "en": "Hide technical details",
+    "it": "Nascondi dettagli tecnici"
+  },
+  "status.details_show": {
+    "en": "Show technical details",
+    "it": "Mostra dettagli tecnici"
+  },
+  "status.details_toggle_tooltip": {
+    "en": "Show or hide technical diagnostics.",
+    "it": "Mostra o nascondi la diagnostica tecnica."
+  },
+  "status.device_active": {
+    "en": "active",
+    "it": "attivo"
+  },
+  "status.devices_seen": {
+    "en": "NAS devices: {names}",
+    "it": "Dispositivi NAS: {names}"
+  },
+  "status.devices_unknown": {
+    "en": "NAS devices: none detected.",
+    "it": "Dispositivi NAS: non rilevati."
+  },
+  "status.diagnostics_failed": {
+    "en": "NAS diagnostics unavailable: {detail}",
+    "it": "Diagnostica NAS non disponibile: {detail}"
+  },
+  "status.diagnostics_invalid": {
+    "en": "invalid NAS response",
+    "it": "risposta NAS non valida"
+  },
+  "status.diagnostics_loading": {
+    "en": "Reading NAS diagnostics…",
+    "it": "Lettura diagnostica NAS…"
+  },
+  "status.diagnostics_offline": {
+    "en": "NAS diagnostics unavailable: NAS is unreachable.",
+    "it": "Diagnostica NAS non disponibile: NAS non raggiungibile."
+  },
+  "status.diagnostics_refresh_btn": {
+    "en": "NAS diagnostics",
+    "it": "Diagnostica NAS"
+  },
+  "status.diagnostics_summary": {
+    "en": "NAS: {free} free; history {trash} across {count} versions. The NAS server is active and managing retention.",
+    "it": "NAS: {free} liberi; storico {trash} in {count} versioni. Il server NAS è attivo e sta gestendo la retention."
+  },
+  "status.diagnostics_unknown": {
+    "en": "NAS diagnostics have not been loaded yet.",
+    "it": "Diagnostica NAS non ancora caricata."
+  },
+  "status.direction_download": {
+    "en": "download from NAS",
+    "it": "scaricamento dal NAS"
+  },
+  "status.direction_upload": {
+    "en": "upload to NAS",
+    "it": "caricamento verso il NAS"
+  },
+  "status.folder_check_title": {
+    "en": "Local folder check",
+    "it": "Verifica cartella locale"
+  },
+  "status.folder_group_title": {
+    "en": "NASBox folder",
+    "it": "Cartella NASBox"
+  },
+  "status.folder_not_configured": {
+    "en": "(not set up)",
+    "it": "(non configurata)"
+  },
+  "status.group_title": {
+    "en": "Status",
+    "it": "Stato"
+  },
+  "status.hash_progress": {
+    "en": "Checking local files: {done} of {total}…",
+    "it": "Verifica file locali in corso: {done} di {total}…"
+  },
+  "status.integrity_btn": {
+    "en": "Check integrity",
+    "it": "Verifica integrità"
+  },
+  "status.integrity_different": {
+    "en": "Integrity: differences found in {count} files. Check Transfers before taking action.",
+    "it": "Integrità: trovate differenze in {count} file. Controlla Trasferimenti prima di intervenire."
+  },
+  "status.integrity_failed": {
+    "en": "Integrity check failed: {detail}",
+    "it": "Verifica integrità non riuscita: {detail}"
+  },
+  "status.integrity_offline": {
+    "en": "Integrity check unavailable: NAS is unreachable.",
+    "it": "Verifica integrità non disponibile: NAS non raggiungibile."
+  },
+  "status.integrity_ok": {
+    "en": "Integrity verified: no differences found.",
+    "it": "Integrità verificata: nessuna differenza rilevata."
+  },
+  "status.integrity_running": {
+    "en": "Comparing local/NAS checksums…",
+    "it": "Confronto checksum locale/NAS in corso…"
+  },
+  "status.integrity_unknown": {
+    "en": "Integrity has not been checked in this session.",
+    "it": "Integrità non verificata in questa sessione."
+  },
+  "status.last_problem": {
+    "en": "Last problem: {time} — {action}: {detail}. Syncing resumes on its own; the full detail is in the Log.",
+    "it": "Ultimo problema: {time} — {action}: {detail}. La sincronizzazione riparte da sola; il dettaglio completo è nel Log."
+  },
+  "status.last_problem_none": {
+    "en": "Last error or safety block: none recorded.",
+    "it": "Ultimo errore o blocco di sicurezza: nessuno registrato."
+  },
+  "status.last_sync": {
+    "en": "Last successful synchronization: {time} ({direction}).",
+    "it": "Ultima sincronizzazione riuscita: {time} ({direction})."
+  },
+  "status.last_sync_never": {
+    "en": "Last successful synchronization: no transfer recorded.",
+    "it": "Ultima sincronizzazione riuscita: nessun trasferimento registrato."
+  },
+  "status.nas_activity_direction_download": {
+    "en": "Download from NAS",
+    "it": "Download dal NAS"
+  },
+  "status.nas_activity_direction_upload": {
+    "en": "Upload to NAS",
+    "it": "Upload verso NAS"
+  },
+  "status.nas_activity_idle": {
+    "en": "NAS activity: Idle",
+    "it": "Attività NAS: A riposo"
+  },
+  "status.nas_activity_idle_full": {
+    "en": "💤 NAS activity: Idle (no transfer in progress)",
+    "it": "💤 Attività NAS: A riposo (nessun trasferimento in corso)"
+  },
+  "status.nas_activity_locked": {
+    "en": "🔒 NAS activity: Sync running from another client ({owner}, for {age})",
+    "it": "🔒 Attività NAS: Sync in corso da altro client ({owner}, da {age})"
+  },
+  "status.nas_activity_offline": {
+    "en": "⚠️ NAS activity: Disconnected",
+    "it": "⚠️ Attività NAS: Disconnesso"
+  },
+  "status.nas_activity_queued": {
+    "en": "⏳ NAS activity: {count} files queued",
+    "it": "⏳ Attività NAS: {count} file in coda"
+  },
+  "status.nas_activity_transfer": {
+    "en": "⚡ NAS activity: {direction}{item}{batch}{pct}{speed}",
+    "it": "⚡ Attività NAS: {direction}{item}{batch}{pct}{speed}"
+  },
+  "status.nas_activity_waiting_retry": {
+    "en": "⏳ NAS activity: waiting for it to free up (retrying in {seconds}s)",
+    "it": "⏳ Attività NAS: in attesa che si liberi (riprovo tra {seconds}s)"
+  },
+  "status.nas_connection_connected": {
+    "en": "🖥️ NAS connection: Connected to {where} (LAN/SSH active)",
+    "it": "🖥️ Connessione NAS: Connesso a {where} (LAN/SSH attivo)"
+  },
+  "status.nas_connection_not_configured": {
+    "en": "⚠️ NAS connection: Not configured",
+    "it": "⚠️ Connessione NAS: Non configurata"
+  },
+  "status.nas_connection_paused": {
+    "en": "⏸️ NAS connection: Connected to {where} (Paused)",
+    "it": "⏸️ Connessione NAS: Collegato a {where} (In pausa)"
+  },
+  "status.nas_connection_paused_countdown": {
+    "en": "⏸️ NAS connection: Connected to {where} (Paused: {mins}:{secs})",
+    "it": "⏸️ Connessione NAS: Collegato a {where} (Pausa: {mins}:{secs})"
+  },
+  "status.nas_connection_scheduled": {
+    "en": "⏸️ NAS connection: Connected to {where} (Paused until {until})",
+    "it": "⏸️ Connessione NAS: Collegato a {where} (Pausa fino alle {until})"
+  },
+  "status.nas_connection_title": {
+    "en": "NAS connection: Waiting for verification...",
+    "it": "Connessione NAS: In attesa di verifica..."
+  },
+  "status.nas_connection_unreachable": {
+    "en": "❌ NAS connection: Unreachable ({where})",
+    "it": "❌ Connessione NAS: Non raggiungibile ({where})"
+  },
+  "status.nas_overview_title": {
+    "en": "NAS Status and Resources",
+    "it": "Stato e Risorse del NAS"
+  },
+  "status.nas_storage_calculating": {
+    "en": "NAS disk space: Calculating...",
+    "it": "Spazio disco NAS: Calcolo in corso..."
+  },
+  "status.nas_unreachable_msg": {
+    "en": "⚠️ NAS unreachable (neither directly nor via the bastion)",
+    "it": "⚠️ NAS non raggiungibile (né direttamente né tramite il bastione)"
+  },
+  "status.not_configured_msg": {
+    "en": "⚠️ NASBox folder not set up yet",
+    "it": "⚠️ Cartella NASBox non ancora configurata"
+  },
+  "status.open_folder_btn": {
+    "en": "Open folder",
+    "it": "Apri cartella"
+  },
+  "status.open_folder_tooltip": {
+    "en": "Opens the NASBox folder in the file manager.",
+    "it": "Apre la cartella NASBox nel file manager."
+  },
+  "status.pause_btn": {
+    "en": "Pause",
+    "it": "Pausa"
+  },
+  "status.pause_for_btn": {
+    "en": "Pause for…",
+    "it": "Pausa per…"
+  },
+  "status.pause_for_tooltip": {
+    "en": "Timed pause, resumes automatically.",
+    "it": "Pausa a tempo, con ripresa automatica."
+  },
+  "status.pause_tooltip": {
+    "en": "Suspends uploads and downloads until you resume. A transfer in progress is stopped immediately.",
+    "it": "Sospende caricamenti e scaricamenti finché non riprendi. Un trasferimento in corso viene interrotto subito."
+  },
+  "status.paused_countdown_msg": {
+    "en": "⏸ Paused (resumes in {mins}:{secs}) — connected to {where}",
+    "it": "⏸ In pausa (riprende tra {mins}:{secs}) — connesso a {where}"
+  },
+  "status.paused_dialog_body": {
+    "en": "Syncing is paused: resume it to sync.",
+    "it": "La sincronizzazione è in pausa: riprendila per sincronizzare."
+  },
+  "status.paused_dialog_title": {
+    "en": "Paused",
+    "it": "In pausa"
+  },
+  "status.paused_msg": {
+    "en": "⏸ Paused — connected to {where}",
+    "it": "⏸ In pausa — connesso a {where}"
+  },
+  "status.pending_empty": {
+    "en": "Persistent queue: empty.",
+    "it": "Coda persistente: vuota."
+  },
+  "status.pending_reason_unknown": {
+    "en": "no reason recorded",
+    "it": "nessun motivo registrato"
+  },
+  "status.pending_summary": {
+    "en": "Persistent queue: {count} paths, oldest for {age}; last defer: {reason}.",
+    "it": "Coda persistente: {count} percorsi, più vecchio da {age}; ultimo rinvio: {reason}."
+  },
+  "status.problem_category_connection": {
+    "en": "SSH connection",
+    "it": "connessione SSH"
+  },
+  "status.problem_category_generic": {
+    "en": "{action} error",
+    "it": "errore {action}"
+  },
+  "status.problem_category_journal_block": {
+    "en": "journal",
+    "it": "journal"
+  },
+  "status.problem_category_safety_block": {
+    "en": "safety block",
+    "it": "blocco di sicurezza"
+  },
+  "status.problem_category_transfer": {
+    "en": "rsync transfer",
+    "it": "trasferimento rsync"
+  },
+  "status.problem_config": {
+    "en": "Setup is incomplete: {fields}.",
+    "it": "Configurazione incompleta: {fields}."
+  },
+  "status.problem_conflicts": {
+    "en": "{count} conflicts are waiting for a decision.",
+    "it": "{count} conflitti aspettano una decisione."
+  },
+  "status.problem_host_keys": {
+    "en": "The configured SSH host keys have not been explicitly verified.",
+    "it": "Le chiavi host SSH configurate non sono state verificate esplicitamente."
+  },
+  "status.problem_journal": {
+    "en": "Journal error: {detail}",
+    "it": "Errore journal: {detail}"
+  },
+  "status.problem_journal_unavailable": {
+    "en": "The NAS repository journal is not verified or available.",
+    "it": "Il journal del repository NAS non risulta verificato o disponibile."
+  },
+  "status.problem_low_space": {
+    "en": "Low available NAS space: {free}. Review history and free space.",
+    "it": "Spazio disponibile sul NAS basso: {free}. Controlla lo storico e libera spazio."
+  },
+  "status.problem_no_detail": {
+    "en": "no details",
+    "it": "nessun dettaglio"
+  },
+  "status.problem_recent_event": {
+    "en": "Recent {action}: {detail}. NASBox retries on its own: open the Log for details.",
+    "it": "{action} di recente: {detail}. NASBox riprova da solo: apri il Log per il dettaglio."
+  },
+  "status.problem_repository": {
+    "en": "The remote NASBox repository is not verified. Detect its configuration before synchronizing.",
+    "it": "Il repository NASBox remoto non è verificato. Rileva la configurazione dal NAS prima di sincronizzare."
+  },
+  "status.problem_safety_block": {
+    "en": "Safety block: {detail}. Nothing was changed. Check the Log and restore any missing local files; confirm the deletion only if it is intentional.",
+    "it": "Blocco di sicurezza: {detail}. Nessun file è stato modificato. Controlla il Log e ripristina i file locali mancanti; conferma la cancellazione solo se è intenzionale."
+  },
+  "status.problem_unreachable": {
+    "en": "The configured NAS is unreachable. Check the network and connection settings.",
+    "it": "Il NAS configurato non è raggiungibile. Controlla rete e parametri di connessione."
+  },
+  "status.queue_empty": {
+    "en": "Current queue: no operations waiting in the latest check.",
+    "it": "Coda corrente: nessuna operazione in attesa nell'ultima verifica."
+  },
+  "status.queue_offline": {
+    "en": "Queue unavailable: the NAS is not connected.",
+    "it": "Coda non disponibile: il NAS non è connesso."
+  },
+  "status.queue_summary": {
+    "en": "Operations: {uploads} uploads, {downloads} downloads, {deletes} deletions. Active: {active}; scheduler waiting: {scheduler_waiting}.",
+    "it": "Operazioni: {uploads} caricamenti, {downloads} scaricamenti, {deletes} eliminazioni. Attiva: {active}; in coda scheduler: {scheduler_waiting}."
+  },
+  "status.queue_unknown": {
+    "en": "First check in progress: analyzing files…",
+    "it": "Prima verifica in corso: sto analizzando i file…"
+  },
+  "status.relocate_btn": {
+    "en": "Change location…",
+    "it": "Cambia percorso…"
+  },
+  "status.relocate_tooltip": {
+    "en": "Changes where the NASBox folder lives on this PC. Doesn't move existing files.",
+    "it": "Cambia dove si trova la cartella NASBox su questo PC. Non sposta i file esistenti."
+  },
+  "status.remote_lock_free": {
+    "en": "NAS lock: free.",
+    "it": "Lock NAS: libero."
+  },
+  "status.remote_lock_held": {
+    "en": "NAS lock: held for about {age}; owner {owner}.",
+    "it": "Lock NAS: occupato da circa {age}; proprietario {owner}."
+  },
+  "status.resume_btn": {
+    "en": "Resume",
+    "it": "Riprendi"
+  },
+  "status.retry_countdown": {
+    "en": "⏳ {direction} deferred — {owner}. Not an error: {queue}; retrying on my own in {seconds}s.",
+    "it": "⏳ {direction} rimandato — {owner}. Nessun errore: {queue}; riprovo da solo tra {seconds}s."
+  },
+  "status.retry_now": {
+    "en": "⏳ {direction}: {owner}. Retrying now ({queue}).",
+    "it": "⏳ {direction}: {owner}. Sto riprovando adesso ({queue})."
+  },
+  "status.retry_owner": {
+    "en": "the NAS is busy with {owner}",
+    "it": "il NAS è impegnato con {owner}"
+  },
+  "status.retry_owner_unknown": {
+    "en": "the NAS is busy with another sync",
+    "it": "il NAS è impegnato con un'altra sincronizzazione"
+  },
+  "status.retry_queue_known": {
+    "en": "{count} files queued, none lost",
+    "it": "{count} file in coda, nessuno perso"
+  },
+  "status.retry_queue_unknown": {
+    "en": "the files stay queued",
+    "it": "i file restano in coda"
+  },
+  "status.scheduled_pause_msg": {
+    "en": "⏸ Scheduled pause until {until} — connected to {where}",
+    "it": "⏸ In pausa programmata fino alle {until} — connesso a {where}"
+  },
+  "status.scheduler_active_none": {
+    "en": "none",
+    "it": "nessuna"
+  },
+  "status.starting": {
+    "en": "Starting…",
+    "it": "In avvio…"
+  },
+  "status.storage_bar_format": {
+    "en": "%p% used ({free} free)",
+    "it": "%p% occupato ({free} liberi)"
+  },
+  "status.storage_error": {
+    "en": "NAS disk space: Read error ({detail})",
+    "it": "Spazio disco NAS: Errore lettura ({detail})"
+  },
+  "status.storage_error_short": {
+    "en": "NAS disk space: Error ({detail})",
+    "it": "Spazio disco NAS: Errore ({detail})"
+  },
+  "status.storage_invalid": {
+    "en": "NAS disk space: Invalid data",
+    "it": "Spazio disco NAS: Dati non validi"
+  },
+  "status.storage_summary": {
+    "en": "NAS disk space: {free} free of {total} ({pct}% used) • Trash: {trash} ({count} files)",
+    "it": "Spazio disco NAS: {free} liberi su {total} ({pct}% occupato) • Cestino: {trash} ({count} file)"
+  },
+  "status.storage_summary_no_total": {
+    "en": "NAS disk space: {free} free • Trash: {trash} ({count} files)",
+    "it": "Spazio disco NAS: {free} liberi • Cestino: {trash} ({count} file)"
+  },
+  "status.sync_deferred_lock": {
+    "en": "{direction} deferred: another client is using the NAS; retrying automatically.",
+    "it": "{direction} rimandato: un altro client sta usando il NAS; nuovo tentativo automatico."
+  },
+  "status.sync_lock_error": {
+    "en": "Synchronization did not start: the NAS lock returned an error. {detail}",
+    "it": "Sincronizzazione non avviata: il lock NAS ha restituito un errore. {detail}"
+  },
+  "status.sync_now_btn": {
+    "en": "Sync everything now",
+    "it": "Sincronizza tutto ora"
+  },
+  "status.sync_now_tooltip": {
+    "en": "Forces a check against the NAS right now, without waiting for the usual timing.",
+    "it": "Forza subito un controllo verso il NAS, senza aspettare i tempi normali."
+  },
+  "status.sync_requested": {
+    "en": "Request received: checking for changes.",
+    "it": "Richiesta ricevuta: controllo delle modifiche in corso."
+  },
+  "status.sync_state_active": {
+    "en": "{direction} in progress.",
+    "it": "{direction} in corso."
+  },
+  "status.sync_state_file": {
+    "en": "{direction} in progress: {path}",
+    "it": "{direction} in corso: {path}"
+  },
+  "status.sync_state_not_configured": {
+    "en": "Synchronization unavailable: complete setup.",
+    "it": "Sincronizzazione non disponibile: completa la configurazione."
+  },
+  "status.sync_state_offline": {
+    "en": "Synchronization unavailable while the NAS is offline.",
+    "it": "Sincronizzazione non disponibile finché il NAS è offline."
+  },
+  "status.sync_state_paused": {
+    "en": "Synchronization is paused.",
+    "it": "Sincronizzazione in pausa."
+  },
+  "status.sync_state_paused_timed": {
+    "en": "Synchronization is temporarily paused.",
+    "it": "Sincronizzazione in pausa temporanea."
+  },
+  "status.sync_state_pending": {
+    "en": "Synchronization ready: {count} queued.",
+    "it": "Sincronizzazione pronta: {count} in coda."
+  },
+  "status.sync_state_preparing": {
+    "en": "Preparing {direction}…",
+    "it": "Preparazione {direction} in corso…"
+  },
+  "status.sync_state_ready": {
+    "en": "Synchronization ready: monitoring is active, no transfer in progress.",
+    "it": "Sincronizzazione pronta: monitoraggio attivo, nessun trasferimento in corso."
+  },
+  "status.sync_state_scheduled": {
+    "en": "Scheduled pause: resumes at {until}.",
+    "it": "In pausa programmata: riprende alle {until}."
+  },
+  "status.sync_state_starting": {
+    "en": "Synchronization: checking status.",
+    "it": "Sincronizzazione: stato in verifica."
+  },
+  "status.sync_state_waiting": {
+    "en": "{direction}: waiting for the NAS synchronization lock.",
+    "it": "{direction}: in attesa del lock di sincronizzazione sul NAS."
+  },
+  "status.transfer_interrupted": {
+    "en": "⏸ {direction} interrupted: the files stay queued and the attempt restarts on its own. Details in the Log.",
+    "it": "⏸ {direction} interrotto: i file restano in coda e il tentativo riparte da solo. Dettagli nel Log."
+  },
+  "status.unknown_owner": {
+    "en": "unknown",
+    "it": "sconosciuto"
+  },
+  "status.update_available": {
+    "en": "🔄 Update {version} available — click to install and restart.",
+    "it": "🔄 Aggiornamento {version} disponibile — clicca per installare e riavviare."
+  },
+  "status.update_available_tooltip": {
+    "en": "Click to install the update and restart.",
+    "it": "Clicca per installare l'aggiornamento e riavviare."
+  },
+  "status.update_check_failed": {
+    "en": "Update check failed: {detail}",
+    "it": "Controllo aggiornamenti non riuscito: {detail}"
+  },
+  "status.update_checking": {
+    "en": "Checking for updates…",
+    "it": "Controllo aggiornamenti in corso…"
+  },
+  "status.update_confirm_body": {
+    "en": "Install version {version} and restart NASBox?",
+    "it": "Installare la versione {version} e riavviare NASBox?"
+  },
+  "status.update_confirm_title": {
+    "en": "Update available",
+    "it": "Aggiornamento disponibile"
+  },
+  "status.update_failed_title": {
+    "en": "Update failed",
+    "it": "Aggiornamento fallito"
+  },
+  "status.update_restart_body": {
+    "en": "NASBox will restart with the new version.",
+    "it": "NASBox verrà riavviato con la nuova versione."
+  },
+  "status.update_restart_title": {
+    "en": "Update complete",
+    "it": "Aggiornamento completato"
+  },
+  "status.version_tooltip": {
+    "en": "Click to check for client updates.",
+    "it": "Clicca per cercare aggiornamenti del client."
+  },
+  "status.via_bastion": {
+    "en": "(via bastion)",
+    "it": "(via bastione)"
+  },
+  "status.watcher_disabled": {
+    "en": "Change detection: inactive.",
+    "it": "Controllo modifiche: non attivo."
+  },
+  "status.watcher_inotify": {
+    "en": "Change detection: inotify active.",
+    "it": "Controllo modifiche: inotify attivo."
+  },
+  "status.watcher_polling": {
+    "en": "Change detection: periodic scan every 2 seconds; performance may be reduced.",
+    "it": "Controllo modifiche: scansione periodica ogni 2 secondi; le prestazioni possono ridursi."
+  },
+  "status.watcher_polling_detail": {
+    "en": "Change detection: periodic scan; {detail}",
+    "it": "Controllo modifiche: scansione periodica; {detail}"
+  },
+  "status.watcher_starting": {
+    "en": "Change detection: starting…",
+    "it": "Controllo modifiche: avvio in corso…"
+  },
+  "storage.analyze_btn": {
+    "en": "Analyze now",
+    "it": "Analizza ora"
+  },
+  "storage.analyzing": {
+    "en": "Analyzing disk space…",
+    "it": "Analisi dello spazio in corso…"
+  },
+  "storage.cleanup_btn": {
+    "en": "Clean duplicates…",
+    "it": "Pulisci duplicati…"
+  },
+  "storage.cleanup_tooltip": {
+    "en": "Open guided cleanup: choose which copies to move to trash",
+    "it": "Apri la pulizia guidata: scegli quali copie spostare nel cestino"
+  },
+  "storage.details_title": {
+    "en": "Analysis details (folders, duplicates, history)",
+    "it": "Dettagli analisi (cartelle, duplicati, storico)"
+  },
+  "storage.duplicate_group": {
+    "en": "• {size} × {count} files",
+    "it": "• {size} × {count} file"
+  },
+  "storage.duplicate_groups_title": {
+    "en": "Identical file groups",
+    "it": "Gruppi di file identici"
+  },
+  "storage.duplicate_more": {
+    "en": "    … and {count} more",
+    "it": "    … e altri {count}"
+  },
+  "storage.duplicate_more_groups": {
+    "en": "… and {count} more groups",
+    "it": "… e altri {count} gruppi"
+  },
+  "storage.duplicate_path": {
+    "en": "    {path}",
+    "it": "    {path}"
+  },
+  "storage.duplicate_row": {
+    "en": "{size} × {count}: {paths}",
+    "it": "{size} × {count}: {paths}"
+  },
+  "storage.duplicate_summary": {
+    "en": "{groups} groups, {wasted} reclaimable out of {candidates} candidates",
+    "it": "{groups} gruppi, {wasted} recuperabili su {candidates} candidati"
+  },
+  "storage.duplicates_title": {
+    "en": "Duplicate files",
+    "it": "File duplicati"
+  },
+  "storage.empty_duplicates": {
+    "en": "No duplicate files found.",
+    "it": "Nessun file duplicato trovato."
+  },
+  "storage.empty_folders": {
+    "en": "No folders scanned.",
+    "it": "Nessuna cartella analizzata."
+  },
+  "storage.empty_trash": {
+    "en": "No versions in history.",
+    "it": "Nessuna versione nello storico."
+  },
+  "storage.error": {
+    "en": "Analysis failed: {detail}",
+    "it": "Analisi non riuscita: {detail}"
+  },
+  "storage.folder_row": {
+    "en": "{path} — {size} ({count} files)",
+    "it": "{path} — {size} ({count} file)"
+  },
+  "storage.folders_title": {
+    "en": "Top 20 folders by size",
+    "it": "Top 20 cartelle per dimensione"
+  },
+  "storage.invalid_result": {
+    "en": "Invalid analysis result.",
+    "it": "Risultato dell'analisi non valido."
+  },
+  "storage.last_updated": {
+    "en": "Last updated: {time}",
+    "it": "Ultimo aggiornamento: {time}"
+  },
+  "storage.limited_notice": {
+    "en": "Sample limited to 2000 candidate files for performance.",
+    "it": "Campione limitato a 2000 file candidati per prestazioni."
+  },
+  "storage.missing_root": {
+    "en": "NASBox folder not configured.",
+    "it": "Cartella NASBox non configurata."
+  },
+  "storage.never_updated": {
+    "en": "Last updated: never",
+    "it": "Ultimo aggiornamento: mai"
+  },
+  "storage.progress": {
+    "en": "Analyzing… {count} files scanned",
+    "it": "Analisi… {count} file esaminati"
+  },
+  "storage.scan_errors": {
+    "en": "Unreadable folders: {count}.",
+    "it": "Cartelle non leggibili: {count}."
+  },
+  "storage.status_done": {
+    "en": "Analysis complete: {files} files scanned.",
+    "it": "Analisi completata: {files} file esaminati."
+  },
+  "storage.status_idle": {
+    "en": "No analysis run yet.",
+    "it": "Nessuna analisi eseguita."
+  },
+  "storage.title": {
+    "en": "Storage insights",
+    "it": "Approfondimenti storage"
+  },
+  "storage.trash_summary": {
+    "en": "{count} versions, {size} used · {expired} expired ({expired_size} reclaimable) · retention {days}d",
+    "it": "{count} versioni, {size} occupati · {expired} scadute ({expired_size} recuperabili) · retention {days}g"
+  },
+  "storage.trash_title": {
+    "en": "Recoverable history (.sync-trash)",
+    "it": "Storico recuperabile (.sync-trash)"
+  },
+  "transfers.active_file": {
+    "en": "{direction} in progress: {path} ({seconds}s elapsed)",
+    "it": "{direction} in corso: {path} ({seconds}s trascorsi)"
+  },
+  "transfers.active_file_progress": {
+    "en": "{direction} in progress: {path} — file {done} of {total} ({seconds}s elapsed)",
+    "it": "{direction} in corso: {path} — file {done} di {total} ({seconds}s trascorsi)"
+  },
+  "transfers.active_starting": {
+    "en": "{direction} in progress: comparing files with the NAS; they will appear below as detected ({seconds}s elapsed).",
+    "it": "{direction} in corso: sto confrontando i file con il NAS; compariranno qui sotto appena rilevati ({seconds}s trascorsi)."
+  },
+  "transfers.aging": {
+    "en": "{seconds}s",
+    "it": "{seconds}s"
+  },
+  "transfers.aging_tooltip": {
+    "en": "Time spent in queue",
+    "it": "Tempo in coda"
+  },
+  "transfers.col_aging": {
+    "en": "Queued for",
+    "it": "In coda da"
+  },
+  "transfers.col_controls": {
+    "en": "Actions",
+    "it": "Azioni"
+  },
+  "transfers.col_direction": {
+    "en": "Direction",
+    "it": "Direzione"
+  },
+  "transfers.col_file": {
+    "en": "File",
+    "it": "File"
+  },
+  "transfers.col_priority": {
+    "en": "Priority",
+    "it": "Priorità"
+  },
+  "transfers.col_progress": {
+    "en": "Progress",
+    "it": "Progresso"
+  },
+  "transfers.col_size": {
+    "en": "Size",
+    "it": "Dimensione"
+  },
+  "transfers.col_state": {
+    "en": "Status",
+    "it": "Stato"
+  },
+  "transfers.completed_batch": {
+    "en": "{direction} complete: {count} operations completed. Monitoring continues.",
+    "it": "{direction} completato: {count} operazioni eseguite. Il monitoraggio continua."
+  },
+  "transfers.dir_delete_local": {
+    "en": "🗑 Delete locally",
+    "it": "🗑 Elimina in locale"
+  },
+  "transfers.dir_delete_remote": {
+    "en": "🗑 Delete on NAS",
+    "it": "🗑 Elimina sul NAS"
+  },
+  "transfers.dir_download": {
+    "en": "↓ Download",
+    "it": "↓ Scarica"
+  },
+  "transfers.dir_rename_remote": {
+    "en": "↔ Rename on NAS",
+    "it": "↔ Rinomina sul NAS"
+  },
+  "transfers.dir_upload": {
+    "en": "↑ Upload",
+    "it": "↑ Carica"
+  },
+  "transfers.download_prefix": {
+    "en": "↓ Download",
+    "it": "↓ Scarica"
+  },
+  "transfers.download_speed_idle": {
+    "en": "↓ Download: -",
+    "it": "↓ Scarica: -"
+  },
+  "transfers.empty_hint": {
+    "en": "Queue is empty: change a file in the NASBox folder or start a sync from the Status tab.",
+    "it": "Coda vuota: modifica un file nella cartella NASBox oppure avvia una sincronizzazione dalla scheda Stato."
+  },
+  "transfers.empty_search": {
+    "en": "No file matches the search: try a different name.",
+    "it": "Nessun file corrisponde alla ricerca: prova con un altro nome."
+  },
+  "transfers.failed_batch": {
+    "en": "{direction} interrupted. The files stay queued and NASBox retries on its own: nothing to do (details are in the Log).",
+    "it": "{direction} interrotto. I file restano in coda e NASBox riprova da solo: non serve fare nulla (i dettagli sono nel Log)."
+  },
+  "transfers.group_active": {
+    "en": "Running",
+    "it": "In corso"
+  },
+  "transfers.group_conflict": {
+    "en": "Conflicts",
+    "it": "Conflitti"
+  },
+  "transfers.group_count": {
+    "en": "{count} operations",
+    "it": "{count} operazioni"
+  },
+  "transfers.group_mirror": {
+    "en": "Mirrors",
+    "it": "Mirror"
+  },
+  "transfers.group_preview": {
+    "en": "Previews",
+    "it": "Anteprime"
+  },
+  "transfers.group_priority_tooltip": {
+    "en": "Effective priority of the oldest operation in the group",
+    "it": "Priorità effettiva dell'operazione più vecchia del gruppo"
+  },
+  "transfers.group_progress_format": {
+    "en": "Group {percent}%",
+    "it": "Gruppo {percent}%"
+  },
+  "transfers.group_progress_tooltip": {
+    "en": "Group progress",
+    "it": "Avanzamento del gruppo"
+  },
+  "transfers.group_pull": {
+    "en": "Download (pull)",
+    "it": "Scarica (pull)"
+  },
+  "transfers.group_push": {
+    "en": "Upload (push)",
+    "it": "Carica (push)"
+  },
+  "transfers.group_waiting": {
+    "en": "Waiting",
+    "it": "In attesa"
+  },
+  "transfers.item_active": {
+    "en": "In progress",
+    "it": "In corso"
+  },
+  "transfers.item_completed": {
+    "en": "Completed",
+    "it": "Completato"
+  },
+  "transfers.item_waiting": {
+    "en": "Waiting",
+    "it": "In attesa"
+  },
+  "transfers.last_completed": {
+    "en": "last completed: {path}",
+    "it": "ultimo completato: {path}"
+  },
+  "transfers.lock_unavailable": {
+    "en": "Synchronization deferred. {detail}",
+    "it": "Sincronizzazione rimandata. {detail}"
+  },
+  "transfers.move_top_btn": {
+    "en": "Move to top",
+    "it": "Sposta in cima"
+  },
+  "transfers.move_top_tooltip": {
+    "en": "Priority is managed automatically by the scheduler with aging: a single item cannot be moved to the top.",
+    "it": "La priorità è gestita automaticamente dallo scheduler con invecchiamento: non si può spostare un singolo elemento in cima."
+  },
+  "transfers.no_items": {
+    "en": "No files queued.",
+    "it": "Nessun file in coda."
+  },
+  "transfers.no_items_all_synced": {
+    "en": "No differences detected with the NAS: all files are synced.",
+    "it": "Nessuna differenza rilevata con il NAS: tutti i file sono sincronizzati."
+  },
+  "transfers.pause_btn": {
+    "en": "Pause",
+    "it": "Pausa"
+  },
+  "transfers.pause_only_current_tooltip": {
+    "en": "Pause is available only for the current operation",
+    "it": "Pausa disponibile solo per l'operazione corrente"
+  },
+  "transfers.pause_tooltip": {
+    "en": "Stop the current operation",
+    "it": "Interrompi l'operazione corrente"
+  },
+  "transfers.phase_activity": {
+    "en": "{direction}: {phase} for {seconds}s",
+    "it": "{direction}: {phase} da {seconds}s"
+  },
+  "transfers.phase_checking": {
+    "en": "checking NAS state",
+    "it": "verifica stato NAS"
+  },
+  "transfers.phase_committing": {
+    "en": "committing manifest and journal",
+    "it": "commit manifest e journal"
+  },
+  "transfers.phase_confirming": {
+    "en": "confirming results",
+    "it": "conferma risultati"
+  },
+  "transfers.phase_transferring": {
+    "en": "transferring batch",
+    "it": "trasferimento batch"
+  },
+  "transfers.preflight_progress": {
+    "en": "Comparing {total} files with the NAS: {done} checked ({seconds}s elapsed)…",
+    "it": "Sto confrontando {total} file con il NAS: verificati {done} ({seconds}s trascorsi)…"
+  },
+  "transfers.preparing": {
+    "en": "{direction} preparing: analyzing files and building the list ({seconds}s elapsed).",
+    "it": "{direction} in preparazione: sto analizzando i file e costruendo la lista ({seconds}s trascorsi)."
+  },
+  "transfers.priority_cell": {
+    "en": "base {base} → effective {effective}",
+    "it": "base {base} → effettiva {effective}"
+  },
+  "transfers.priority_tooltip": {
+    "en": "Base priority minus aging (30 seconds)",
+    "it": "Priorità base meno l'invecchiamento (30 secondi)"
+  },
+  "transfers.progress_format": {
+    "en": "Queue: {done}/{total} ({percent}%)",
+    "it": "Coda: {done}/{total} ({percent}%)"
+  },
+  "transfers.progress_idle": {
+    "en": "Queue: -",
+    "it": "Coda: -"
+  },
+  "transfers.progress_preparing": {
+    "en": "Queue: building the list of files to sync…",
+    "it": "Coda: sto preparando la lista dei file da sincronizzare…"
+  },
+  "transfers.progress_scan": {
+    "en": "Queue: updating preview…",
+    "it": "Coda: aggiorno l'anteprima…"
+  },
+  "transfers.queue_note": {
+    "en": "This is the current queue preview, not history. It updates during and after syncing.",
+    "it": "Questa è l'anteprima della coda attuale, non lo storico. Si aggiorna durante e dopo la sincronizzazione."
+  },
+  "transfers.queue_scan_running": {
+    "en": "Checking for differences with the NAS ({seconds}s elapsed)…",
+    "it": "Sto verificando le differenze con il NAS ({seconds}s trascorsi)…"
+  },
+  "transfers.resume_btn": {
+    "en": "Resume",
+    "it": "Riprendi"
+  },
+  "transfers.resume_tooltip": {
+    "en": "Resume synchronization",
+    "it": "Riprendi la sincronizzazione"
+  },
+  "transfers.retry_countdown": {
+    "en": "⏳ {direction} deferred: the NAS is serving another PC. {count} files stay queued, none are lost — retrying automatically in {seconds}s.",
+    "it": "⏳ {direction} rimandato: il NAS sta servendo un altro PC. {count} file restano in coda, nessuno è perso — riprovo automaticamente tra {seconds}s."
+  },
+  "transfers.retry_now": {
+    "en": "⏳ {direction}: retrying now…",
+    "it": "⏳ {direction}: sto riprovando adesso…"
+  },
+  "transfers.scheduler_request": {
+    "en": "{kind}: request {request_id}",
+    "it": "{kind}: richiesta {request_id}"
+  },
+  "transfers.search_label": {
+    "en": "Search:",
+    "it": "Cerca:"
+  },
+  "transfers.search_placeholder": {
+    "en": "file…",
+    "it": "file…"
+  },
+  "transfers.speed_title": {
+    "en": "Speed",
+    "it": "Velocità"
+  },
+  "transfers.summary": {
+    "en": "{up} to upload · {down} to download · {delete} to delete",
+    "it": "{up} da caricare · {down} da scaricare · {delete} da eliminare"
+  },
+  "transfers.summary_active_no_items": {
+    "en": "Transfer in progress: comparing files with the NAS; the list is still empty.",
+    "it": "Trasferimento in corso: sto confrontando i file con il NAS; la lista è ancora vuota."
+  },
+  "transfers.summary_preparing": {
+    "en": "Plan in preparation: no file has been declared complete yet.",
+    "it": "Piano in preparazione: nessun file è ancora dichiarato completato."
+  },
+  "transfers.summary_scan_running": {
+    "en": "Checking for differences with the NAS: the list below may not be complete yet.",
+    "it": "Sto verificando le differenze con il NAS: la lista qui sotto potrebbe non essere completa."
+  },
+  "transfers.summary_waiting_for_lock": {
+    "en": "Transfer waiting for the NAS lock: synchronization is not complete.",
+    "it": "Trasferimento in attesa del lock NAS: la sincronizzazione non è conclusa."
+  },
+  "transfers.upload_prefix": {
+    "en": "↑ Upload",
+    "it": "↑ Carica"
+  },
+  "transfers.upload_speed_idle": {
+    "en": "↑ Upload: -",
+    "it": "↑ Carica: -"
+  },
+  "transfers.visible_limit": {
+    "en": "Showing the first {shown} of {total} items to keep the app responsive. Use Search to find a specific file.",
+    "it": "Mostro i primi {shown} di {total} elementi per mantenere l'app reattiva. Usa Cerca per trovare un file specifico."
+  },
+  "transfers.waiting": {
+    "en": "Queue ready: monitoring the folder in real time. Local changes are sent immediately, NAS changes every 60 seconds.",
+    "it": "Coda pronta: sto monitorando la cartella in tempo reale. Le modifiche locali vengono inviate subito, quelle dal NAS ogni 60 secondi."
+  },
+  "transfers.waiting_for_lock": {
+    "en": "{direction} waiting for the NAS lock: checking that no other client is syncing ({seconds}s elapsed).",
+    "it": "{direction} in attesa del lock NAS: verifico che nessun altro client stia sincronizzando ({seconds}s trascorsi)."
+  },
+  "tray.active": {
+    "en": "✅ Active — {where}",
+    "it": "✅ Attivo — {where}"
+  },
+  "tray.conflict_body": {
+    "en": "Both versions of '{path}' were kept. {detail}",
+    "it": "Sono state mantenute entrambe le versioni di '{path}'. {detail}"
+  },
+  "tray.conflict_title": {
+    "en": "Sync conflict",
+    "it": "Conflitto di sincronizzazione"
+  },
+  "tray.conflicts_action": {
+    "en": "Review {count} conflicts…",
+    "it": "Rivedi {count} conflitti…"
+  },
+  "tray.conflicts_suffix": {
+    "en": " · {count} conflicts",
+    "it": " · {count} conflitti"
+  },
+  "tray.download": {
+    "en": "Download",
+    "it": "Scaricamento"
+  },
+  "tray.nas_lost_body": {
+    "en": "The NAS is no longer reachable. Pending operations will be retried automatically.",
+    "it": "Il NAS non è più raggiungibile. Le operazioni in attesa verranno ritentate automaticamente."
+  },
+  "tray.nas_lost_title": {
+    "en": "NAS connection lost",
+    "it": "Connessione NAS persa"
+  },
+  "tray.nas_restored_body": {
+    "en": "The NAS connection is available again.",
+    "it": "Il collegamento al NAS è nuovamente disponibile."
+  },
+  "tray.nas_restored_title": {
+    "en": "NAS connection restored",
+    "it": "Connessione NAS ripristinata"
+  },
+  "tray.nas_unreachable": {
+    "en": "⚠️ NAS unreachable",
+    "it": "⚠️ NAS non raggiungibile"
+  },
+  "tray.no_recent_activity": {
+    "en": "(no recent activity)",
+    "it": "(nessuna attività recente)"
+  },
+  "tray.not_configured": {
+    "en": "⚠️ NASBox folder not set up",
+    "it": "⚠️ Cartella NASBox non configurata"
+  },
+  "tray.open_folder": {
+    "en": "Open NASBox folder",
+    "it": "Apri cartella NASBox"
+  },
+  "tray.pause": {
+    "en": "Pause",
+    "it": "Pausa"
+  },
+  "tray.pause_for": {
+    "en": "Pause for…",
+    "it": "Pausa per…"
+  },
+  "tray.paused": {
+    "en": "⏸ Paused",
+    "it": "⏸ In pausa"
+  },
+  "tray.pending_files": {
+    "en": "{count} files queued",
+    "it": "{count} file in coda"
+  },
+  "tray.pending_suffix": {
+    "en": " — {count} queued",
+    "it": " — {count} in coda"
+  },
+  "tray.quit": {
+    "en": "Quit",
+    "it": "Esci"
+  },
+  "tray.recent_files_menu": {
+    "en": "Recent files",
+    "it": "File recenti"
+  },
+  "tray.resume": {
+    "en": "Resume",
+    "it": "Riprendi"
+  },
+  "tray.retry_action": {
+    "en": "⏳ Retrying automatically in {seconds}s",
+    "it": "⏳ Riprovo automaticamente tra {seconds}s"
+  },
+  "tray.retry_suffix": {
+    "en": " · retrying in {seconds}s",
+    "it": " · riprovo tra {seconds}s"
+  },
+  "tray.server_unresponsive_body": {
+    "en": "The NAS daemon is not responding. The client will try to restart it over SSH and keep retrying.",
+    "it": "Il demone NAS non risponde. Il client proverà a riavviarlo via SSH e continuerà a ritentare."
+  },
+  "tray.server_unresponsive_title": {
+    "en": "NAS service not responding",
+    "it": "Servizio NAS non responsivo"
+  },
+  "tray.show_window": {
+    "en": "Open main window",
+    "it": "Apri finestra principale"
+  },
+  "tray.show_window_shortcut": {
+    "en": "Ctrl+Shift+O",
+    "it": "Ctrl+Shift+O"
+  },
+  "tray.starting": {
+    "en": "Starting…",
+    "it": "In avvio…"
+  },
+  "tray.sync_completed_body": {
+    "en": "{direction}: {count} operations completed.",
+    "it": "{direction}: {count} operazioni completate."
+  },
+  "tray.sync_completed_body_time": {
+    "en": "{direction}: {count} operations completed in {duration}.",
+    "it": "{direction}: {count} operazioni completate in {duration}."
+  },
+  "tray.sync_completed_title": {
+    "en": "Sync completed",
+    "it": "Sincronizzazione completata"
+  },
+  "tray.sync_now": {
+    "en": "⚡ Sync now",
+    "it": "⚡ Sincronizza adesso"
+  },
+  "tray.sync_now_shortcut": {
+    "en": "Ctrl+Shift+S",
+    "it": "Ctrl+Shift+S"
+  },
+  "tray.update_action": {
+    "en": "⬆️ Update to {version}…",
+    "it": "⬆️ Aggiorna a {version}…"
+  },
+  "tray.upload": {
+    "en": "Upload",
+    "it": "Caricamento"
+  },
+  "tray.via_bastion": {
+    "en": "(via bastion)",
+    "it": "(via bastione)"
+  },
+  "updater.available_body": {
+    "en": "Client version {version} is available ({origin}).\n\nUpdate and restart NASBox?",
+    "it": "È disponibile la versione {version} del client ({origin}).\n\nVuoi aggiornarla e riavviare NASBox?"
+  },
+  "updater.available_title": {
+    "en": "Update available",
+    "it": "Aggiornamento disponibile"
+  },
+  "updater.failed_body": {
+    "en": "The client could not be updated.\n\n{detail}\n\nStarting the current version anyway.",
+    "it": "Non è stato possibile aggiornare il client.\n\n{detail}\n\nAvvio comunque la versione attuale."
+  },
+  "updater.failed_title": {
+    "en": "Update failed",
+    "it": "Aggiornamento non riuscito"
+  },
+  "updater.restarting_body": {
+    "en": "Update complete. Restarting NASBox…",
+    "it": "Aggiornamento completato. Riavvio NASBox…"
+  },
+  "updater.restarting_title": {
+    "en": "Client update",
+    "it": "Aggiornamento client"
+  }
+}
