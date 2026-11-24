@@ -378,7 +378,7 @@ func (c *clientApp) makeNav(id sectionID, label string, icon fyne.Resource, hint
 
 func (c *clientApp) buildFooter() fyne.CanvasObject {
 	c.eventLabel = widget.NewLabel("")
-	c.eventLabel.Wrapping = fyne.TextTruncate
+	c.eventLabel.Wrapping = fyne.TextWrapWord
 	c.hintLabel = widget.NewLabelWithStyle("", fyne.TextAlignLeading, fyne.TextStyle{Italic: true})
 	line := canvas.NewRectangle(c.tint(theme.ColorNameSeparator))
 	line.SetMinSize(fyne.NewSize(1, 1))
@@ -670,11 +670,11 @@ func (c *clientApp) filesView() fyne.CanvasObject {
 		func() int { return len(c.browseEntries) },
 		func(id int, label *widget.Label) {
 			entry := c.browseEntries[id]
-			icon := "📄"
+			suffix := ""
 			if entry.Kind == "DIR" {
-				icon = "📁"
+				suffix = "/"
 			}
-			label.SetText(fmt.Sprintf("%s %s   %s   %s", icon, entry.Name, entry.Kind, humanBytes(entry.Size)))
+			label.SetText(fmt.Sprintf("%s%s   %s", entry.Name, suffix, humanBytes(entry.Size)))
 		},
 	)
 	c.browseList.OnSelected = func(id widget.ListItemID) {
@@ -722,8 +722,8 @@ func (c *clientApp) filesView() fyne.CanvasObject {
 					"", widget.MediumImportance, c.onBrowseDownload, c.setHint),
 			),
 			container.NewHBox(
-				c.downloadPathEntry,
-				newHintButton(tr("ui.action.download", nil), theme.DownloadIcon(),
+				container.NewGridWrap(fyne.NewSize(280, 36), c.downloadPathEntry),
+				newHintButton(tr("ui.action.download_path", nil), theme.DownloadIcon(),
 					"Scarica il percorso digitato", widget.HighImportance, c.onDownloadPath, c.setHint),
 			),
 		),
@@ -844,12 +844,11 @@ func (c *clientApp) settingsView() fyne.CanvasObject {
 				c.smallButton(tr("settings.theme_dark", nil), "", func() { c.setTheme("dark") }),
 			),
 		), ""),
+		c.surface(c.settingsConnection(), ""),
+		c.surface(c.settingsSync(), ""),
 		c.surface(container.NewVBox(
-			widget.NewLabelWithStyle(tr("settings.nas_box_title", nil), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-			widget.NewLabel(fmt.Sprintf("%s: %d / %d kbps", tr("settings.upload_label", nil),
-				c.cfg.Int("bandwidth_upload_kbps"), c.cfg.Int("bandwidth_download_kbps"))),
-			c.note(fmt.Sprintf("%s: %s", tr("settings.info_config_label", nil), valueOrDash(c.cfg.Path))),
-			c.note(fmt.Sprintf("%s: %s", tr("status.config_local_folder", nil), valueOrDash(c.cfg.LocalRoot()))),
+			widget.NewLabel(fmt.Sprintf("%s: %s", tr("settings.info_config_label", nil), valueOrDash(c.cfg.Path))),
+			widget.NewLabel(fmt.Sprintf("%s: %s", tr("status.config_local_folder", nil), valueOrDash(c.cfg.LocalRoot()))),
 			widget.NewLabel(fmt.Sprintf("%s: %s", tr("ui.settings.display", nil), displayBackend(c.cfg))),
 		), ""),
 	)
@@ -887,7 +886,10 @@ func (c *clientApp) settingsView() fyne.CanvasObject {
 	)
 	c.settingsTabs = container.NewAppTabs(
 		container.NewTabItem(tr("ui.group.general", nil), container.NewVScroll(general)),
+		container.NewTabItem("Sicurezza", container.NewVScroll(c.surface(c.settingsSafety(), ""))),
+		container.NewTabItem("Integrità", container.NewVScroll(c.surface(c.settingsIntegrity(), ""))),
 		container.NewTabItem(tr("ui.group.folders", nil), container.NewVScroll(folders)),
+		container.NewTabItem("Avanzate", container.NewVScroll(c.surface(c.settingsAdvanced(), ""))),
 		container.NewTabItem(tr("ui.group.about", nil), container.NewVScroll(about)),
 	)
 	return c.settingsTabs
@@ -917,6 +919,9 @@ func iconStateForLevel(level statusLevel) string {
 }
 
 func (c *clientApp) applyStatusUI(level statusLevel, reason string) {
+	if strings.TrimSpace(reason) == "" {
+		reason = tr("status.sync_state_ready", nil)
+	}
 	c.level = level
 	c.syncActive.Store(level == statusProgress)
 	if level != statusProgress {
@@ -1061,7 +1066,7 @@ func (c *clientApp) consumeEvents() {
 		case "status":
 			c.applyStatus(statusProgress, tr("status.sync_requested", nil))
 			c.appendLog(tr("status.sync_state_active", map[string]any{
-				"direction": tr("status.sync_state_preparing", nil),
+				"direction": tr("ui.direction.sync", nil),
 			}))
 		case "blocked":
 			c.applyStatus(statusBlocked, event.Message)

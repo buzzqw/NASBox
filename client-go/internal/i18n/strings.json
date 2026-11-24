@@ -4979,6 +4979,8 @@
     "en": "Restore files deleted recently from the NAS trash.",
     "it": "Ripristina i file eliminati di recente dal cestino NAS."
   },
+  "ui.direction.sync": {"it": "sincronizzazione", "en": "sync"},
+  "ui.action.download_path": {"it": "Scarica percorso", "en": "Download path"},
   "ui.action.undo_short": {
     "en": "Undo",
     "it": "Annulla"
