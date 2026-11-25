@@ -120,8 +120,19 @@ detect_capabilities() {
         NAS_MEM_TOTAL_MB=0
     fi
     NAS_DISK_ROTATIONAL=$(disk_rotational_for "$SHARE_ROOT" || true)
-    NAS_RSYNC_VERSION=$(rsync --version 2>/dev/null | head -1 | awk '{print $3}')
-    NAS_FS_TYPE=$(awk -v root="$SHARE_ROOT" '$2 == root {print $3; exit}' /proc/mounts 2>/dev/null || true)
+    # "3.5.2-g41bbd895" -> "3.5.2": clients compare plain versions.
+    NAS_RSYNC_VERSION=$(rsync --version 2>/dev/null | head -1 | awk '{print $3}' \
+        | sed 's/[^0-9.].*$//')
+    # SHARE_ROOT is normally a folder inside a volume (not a mount point), so the
+    # filesystem comes from the device df reports, not from matching the path.
+    local mount_point=""
+    mount_point=$(df -P "$SHARE_ROOT" 2>/dev/null | awk 'NR == 2 {print $6}')
+    if [[ -n "$mount_point" ]]; then
+        NAS_FS_TYPE=$(awk -v mp="$mount_point" '$2 == mp {print $3; exit}' /proc/mounts 2>/dev/null || true)
+    fi
+    if [[ -z "$NAS_FS_TYPE" ]]; then
+        NAS_FS_TYPE=$(stat -f -c %T "$SHARE_ROOT" 2>/dev/null || true)
+    fi
     if [[ -z "${FILE_STATES_PARALLELISM:-}" ]]; then
         FILE_STATES_PARALLELISM="$NAS_CPU_COUNT"
         ((FILE_STATES_PARALLELISM > 8)) && FILE_STATES_PARALLELISM=8
