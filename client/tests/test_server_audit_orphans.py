@@ -150,3 +150,25 @@ class NestedInternalFolderTests(unittest.TestCase):
             self.assertEqual(rows[0].split("\t")[1], "")
             # The bytes are still there: forgetting a row is not a deletion.
             self.assertTrue((sandbox.share / "progetto" / "da-dimenticare.txt").exists())
+
+    def test_forget_accepts_an_internal_path(self) -> None:
+        """The paths a maintenance forget must remove are exactly the internal
+        ones, so its validation cannot reuse the one that refuses them."""
+        with ServerSandbox() as sandbox:
+            sandbox.init_repository()
+            _put(sandbox, "RPG/.sync-trash/mappe/vecchia.jpg-2026-08-06", b"storico")
+            # Adopted by an older release of the audit (which only knew the root
+            # .sync-trash), so the row is in the manifest and must go.
+            adopted = sandbox.run("--audit-adopt")
+            self.assertEqual(adopted.returncode, 0, adopted.stderr.decode())
+            done = sandbox.run(
+                "--journal-forget", input=b"RPG/.sync-trash/mappe/vecchia.jpg-2026-08-06\0"
+            )
+            self.assertEqual(done.returncode, 0, done.stderr.decode())
+            self.assertEqual(_values(done.stdout.decode())["FORGOTTEN"], "1")
+            rows = [
+                line for line in sandbox.run("--manifest-export").stdout.decode().splitlines()
+                if line.startswith("RPG/.sync-trash/mappe/vecchia.jpg-2026-08-06\t")
+            ]
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0].split("\t")[1], "")

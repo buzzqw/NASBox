@@ -4,6 +4,15 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 3.32.2 - 2026-11-25
+
+Server:
+
+- `--journal-forget` accetta i percorsi interni: sono esattamente quelli che
+  deve poter togliere dal manifest, quindi non può usare la validazione delle
+  operazioni normali (che li rifiuta). Restano esclusi percorsi assoluti, `..` e
+  antenati che sono link simbolici.
+
 ## 3.32.1 - 2026-11-25
 
 Server:

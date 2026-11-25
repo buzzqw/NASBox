@@ -33,7 +33,7 @@
 #
 set -uo pipefail
 
-VERSION="3.32.1"
+VERSION="3.32.2"
 SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -1848,6 +1848,24 @@ audit_orphan_encoded_list() {
     return 0
 }
 
+# Same checks as valid_sync_relative_path, but internal folders are allowed:
+# forgetting a path that the clients refuse is exactly what this is for. It still
+# refuses absolute paths, ".." and an ancestor that is a symlink.
+valid_forget_path() {
+    local path="$1" part current remaining
+    [[ -n "$path" && "$path" != /* && "/$path/" != */../* ]] || return 1
+    current="$SHARE_ROOT"
+    remaining="$path"
+    while [[ "$remaining" == */* ]]; do
+        part="${remaining%%/*}"
+        remaining="${remaining#*/}"
+        [[ -n "$part" ]] || continue
+        current="$current/$part"
+        [[ ! -L "$current" ]] || return 1
+    done
+    return 0
+}
+
 # Tombstone rows the manifest should never have held (a path a client refuses,
 # a folder that is history and not repository content). Only the journal is
 # written: nothing on disk moves, so a version in .sync-trash is untouched.
@@ -1857,7 +1875,7 @@ cmd_journal_forget() {
     records="$tmpdir/paths"
     : > "$records" || { rm -rf "$tmpdir"; return 1; }
     while IFS= read -r -d '' path; do
-        valid_sync_relative_path "$path" || continue
+        valid_forget_path "$path" || continue
         printf '%s\0' "$path" >> "$records" || { rm -rf "$tmpdir"; return 1; }
         (( count++ ))
     done
