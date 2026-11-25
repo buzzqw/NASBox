@@ -4,6 +4,14 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 1.2.1 - 2026-11-25
+
+Client Go:
+
+- **Attività recente più compatta**: le righe non hanno più il doppio
+  padding (circa 33 px l'una invece di 48) e niente spazio extra tra una e
+  l'altra.
+
 ## 1.2.0 - 2026-11-25
 
 Client Go, interfaccia e avanzamento (dalla revisione degli screenshot della 1.1.1):

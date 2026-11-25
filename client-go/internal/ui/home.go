@@ -169,7 +169,7 @@ func (c *clientApp) cardTitle(text string) fyne.CanvasObject {
 
 // buildRecentCard lists the latest files moved by NASBox, newest first.
 func (c *clientApp) buildRecentCard() fyne.CanvasObject {
-	c.recentBox = container.NewVBox()
+	c.recentBox = container.New(layout.NewCustomPaddedVBoxLayout(0))
 	all := widget.NewButtonWithIcon(tr("ui.home.see_all", nil), theme.NavigateNextIcon(), func() {
 		c.navigate(sectionActivity, 1)
 	})
@@ -252,7 +252,12 @@ func (t *tapCard) MouseOut()                      { t.hovered = false; t.Refresh
 func (t *tapCard) Cursor() desktop.Cursor         { return desktop.PointerCursor }
 
 func (t *tapCard) CreateRenderer() fyne.WidgetRenderer {
-	padded := container.NewPadded(t.content)
+	// List rows (plain) carry no extra padding: the labels already have inner
+	// padding, and doubling it spread the rows far apart.
+	var padded fyne.CanvasObject = t.content
+	if !t.plain {
+		padded = container.NewPadded(t.content)
+	}
 	r := &tapCardRenderer{t: t, objects: []fyne.CanvasObject{t.bg, padded}, padded: padded}
 	r.Layout(t.Size())
 	return r
