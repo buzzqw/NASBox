@@ -211,10 +211,61 @@ func RsyncCommand(cfg *config.Config, source, destination string) []string {
 // lease: the following normal engine push is what propagates the local copy.
 // The returned error joins per-mirror failures; cancellation wins immediately.
 func SyncAll(ctx context.Context, cfg *config.Config) (int, error) {
+	synced, _, err := SyncAllChanged(ctx, cfg)
+	return synced, err
+}
+
+// itemizedChange tells whether one line of rsync --itemize-changes output means
+// something really changed in the destination. A bare "directory time changed"
+// (".d..t......") is rsync tidying folder dates, not a change.
+func itemizedChange(line string) bool {
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return false
+	}
+	if strings.HasPrefix(line, "*deleting") {
+		return true
+	}
+	if len(line) < 12 {
+		return false
+	}
+	flags := line[:11]
+	if strings.HasPrefix(flags, ".d") && !strings.ContainsAny(flags[2:], "+") {
+		return false
+	}
+	return flags[0] != '.' || strings.Contains(flags, "+") || strings.ContainsAny(flags[2:], "cstpogaux")
+}
+
+// CountChanges counts the lines of itemized rsync output that are real changes.
+func CountChanges(output string) int {
+	changes := 0
+	for _, line := range strings.Split(output, "\n") {
+		if itemizedChange(line) {
+			changes++
+		}
+	}
+	return changes
+}
+
+// insertItemize puts --itemize-changes before the source/destination pair.
+func insertItemize(args []string) []string {
+	if len(args) < 2 {
+		return args
+	}
+	out := append([]string{}, args[:len(args)-2]...)
+	out = append(out, "--itemize-changes")
+	return append(out, args[len(args)-2:]...)
+}
+
+// SyncAllChanged is SyncAll that also reports how many files/folders really
+// changed in the destinations. A pass whose mirrors changed nothing has no
+// reason to wake the whole sync engine.
+func SyncAllChanged(ctx context.Context, cfg *config.Config) (int, int, error) {
 	mirrors := Configured(cfg)
 	if len(mirrors) == 0 {
-		return 0, nil
+		return 0, 0, nil
 	}
+	changed := 0
 	timeout := time.Duration(cfg.Int("mirror_sync_timeout_seconds")) * time.Second
 	if timeout <= 0 {
 		timeout = DefaultSyncTimeout
@@ -225,7 +276,7 @@ func SyncAll(ctx context.Context, cfg *config.Config) (int, error) {
 	var failures []error
 	for _, item := range mirrors {
 		if err := ctx.Err(); err != nil {
-			return synced, err
+			return synced, changed, err
 		}
 		if !item.Enabled {
 			continue
@@ -246,14 +297,14 @@ func SyncAll(ctx context.Context, cfg *config.Config) (int, error) {
 
 		destination := filepath.Join(root, filepath.FromSlash(dest))
 		passCtx, cancel := context.WithTimeout(ctx, timeout)
-		cmd := exec.CommandContext(passCtx, "rsync", RsyncCommand(cfg, source, destination)...)
+		cmd := exec.CommandContext(passCtx, "rsync", insertItemize(RsyncCommand(cfg, source, destination))...)
 		var stdout, stderr bytes.Buffer
 		cmd.Stdout, cmd.Stderr = &stdout, &stderr
 		err := cmd.Run()
 		cancel()
 		if err != nil {
 			if ctxErr := ctx.Err(); ctxErr != nil {
-				return synced, ctxErr
+				return synced, changed, ctxErr
 			}
 			detail := strings.TrimSpace(stderr.String())
 			if detail == "" {
@@ -272,8 +323,9 @@ func SyncAll(ctx context.Context, cfg *config.Config) (int, error) {
 			continue
 		}
 		synced++
+		changed += CountChanges(stdout.String())
 	}
-	return synced, errors.Join(failures...)
+	return synced, changed, errors.Join(failures...)
 }
 
 // SyncOnce is the UI-facing entry point. The optional argument is accepted for

@@ -387,3 +387,18 @@ func TestPatchMirrorKeepsOtherEntries(t *testing.T) {
 		t.Fatal("unrelated key lost")
 	}
 }
+
+func TestCountChangesIgnoresDirectoryTimestampNoise(t *testing.T) {
+	quiet := ".d..t...... ./\n.d..t...... sub/\n\n"
+	if got := CountChanges(quiet); got != 0 {
+		t.Fatalf("directory times are not changes: %d", got)
+	}
+	busy := ">f+++++++++ new.txt\n>f.st...... edited.txt\n*deleting   old.txt\ncd+++++++++ newdir/\n.d..t...... ./\n"
+	if got := CountChanges(busy); got != 4 {
+		t.Fatalf("expected 4 real changes, got %d", got)
+	}
+	args := insertItemize([]string{"-a", "--delete-after", "/src/", "/dst/"})
+	if len(args) != 5 || args[2] != "--itemize-changes" || args[3] != "/src/" {
+		t.Fatalf("itemize must sit before source and destination: %v", args)
+	}
+}

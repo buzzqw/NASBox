@@ -42,6 +42,7 @@ type Runner struct {
 	paused        bool
 	dirty         map[string]bool
 	remotePending bool
+	mirrorTick    bool // the mirror timer fired; cleared once the mirrors ran
 	backoff       time.Duration
 	nextTry       time.Time
 
@@ -344,8 +345,12 @@ func (r *Runner) Run(ctx context.Context) error {
 			if len(mirror.Configured(r.cfg)) == 0 {
 				continue
 			}
+			// Only the mirrors are due. They run, and the rest of the pass is
+			// skipped when they changed nothing (see below): it used to wake the
+			// whole engine (manifest, scan, journal) every five minutes for
+			// nothing.
 			r.mu.Lock()
-			r.remotePending = true
+			r.mirrorTick = true
 			r.mu.Unlock()
 		case <-r.wake:
 		case <-ctx.Done():
@@ -353,7 +358,7 @@ func (r *Runner) Run(ctx context.Context) error {
 		}
 		r.mu.Lock()
 		paused, next := r.paused, r.nextTry
-		pending := len(r.dirty) > 0 || r.remotePending
+		pending := len(r.dirty) > 0 || r.remotePending || r.mirrorTick
 		r.mu.Unlock()
 		if paused || timedPause(r.cfg) || scheduledPause(r.cfg) || !pending || time.Now().Before(next) {
 			continue
@@ -383,16 +388,25 @@ func (r *Runner) Run(ctx context.Context) error {
 		// freshly written copies in local_root and propagates them with the
 		// usual journal and backup. This uses the same cancellable context as
 		// the transfer instead of a remote lease or a sleeping idle loop.
+		// The tick is consumed here whether or not a mirror is due, so a stale
+		// tick can never keep requesting passes.
+		r.mu.Lock()
+		tick := r.mirrorTick
+		r.mirrorTick = false
+		r.mu.Unlock()
 		if r.mirrorDue() {
 			r.mu.Lock()
 			r.nextMirror = time.Now().Add(mirrorInterval)
 			r.mu.Unlock()
-			count, mirrorErr := mirror.SyncAll(transferCtx, r.cfg)
+			count, changed, mirrorErr := mirror.SyncAllChanged(transferCtx, r.cfg)
 			if mirrorErr != nil {
 				r.emit("error", "mirror: "+mirrorErr.Error())
 			}
-			if count > 0 {
+			if changed > 0 {
 				r.emit("status", fmt.Sprintf("mirror: %d cartelle locali aggiornate", count))
+			}
+			if tick && changed == 0 && mirrorErr == nil && len(paths) == 0 && !remoteOnly {
+				continue // nothing changed anywhere: no pass at all
 			}
 		}
 		r.emit("status", i18n.T("metrics.sync_busy_title", nil))

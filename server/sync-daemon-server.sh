@@ -33,7 +33,7 @@
 #
 set -uo pipefail
 
-VERSION="3.27.1"
+VERSION="3.28.0"
 SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -359,7 +359,7 @@ recover_pending_transactions_unlocked() {
                     rm -f "$file" "$paths_file"
                     continue
                 fi
-                if [[ "$kind" == "BROWSE_RENAME" && "$protocol" == "BROWSE_RENAME_V2" ]]; then
+                if [[ "$kind" == "BROWSE_RENAME" && ( "$protocol" == "BROWSE_RENAME_V2" || "$protocol" == "BROWSE_RENAME_V3" ) ]]; then
                     # V2's paths file contains source/destination metadata. A
                     # crash after mv must complete both journal sides; it must
                     # never be downgraded to a source-only tombstone.
@@ -1633,57 +1633,90 @@ cmd_checked_delete() {
     flock -x 9 || { exec 9>&-; return 1; }
     ensure_journal_files
     recover_pending_transactions_unlocked || { flock -u 9; exec 9>&-; return 1; }
-    printf 'CHECKED_DELETE_V1\0%s\0' "$count"
+    # One journal append and one revision bump for the whole request instead of
+    # one of each per file: on a small NAS the two fsyncs per file were the
+    # cost (a few files per second). Every file is still moved under its own
+    # transaction record, and a crash before the journal commit is recovered per
+    # file by recover_pending_transactions_unlocked, exactly as before.
+    local -a status_of=() backup_of=() txfile_of=()
+    local batch_paths batch_txid last_backup_dir=""
+    batch_paths="$TRANSACTION_DIR/checked-delete-batch-${run_ts}-$$-${RANDOM}.paths"
+    mkdir -p "$TRANSACTION_DIR" || { flock -u 9; exec 9>&-; return 1; }
+    : > "$batch_paths" || { flock -u 9; exec 9>&-; return 1; }
     for ((index = 0; index < count; index++)); do
         path="${paths[index]}"
         target="$SHARE_ROOT/$path"
         if [[ ! -e "$target" && ! -L "$target" ]]; then
-            if append_delete_journal_unlocked "$path" "$device"; then
-                printf '%s\0ABSENT\0' "$path"
-            else
-                printf '%s\0ERROR\0' "$path"
-            fi
+            printf '%s\0' "$path" >> "$batch_paths"
+            status_of[index]=ABSENT_PENDING
             continue
         fi
         if [[ ! -f "$target" || -L "$target" ]]; then
-            printf '%s\0ERROR\0' "$path"
+            status_of[index]=ERROR
             continue
         fi
         digest=$(portable_sha256 "$target" || true)
         mtime=$(portable_file_mtime "$target" || true)
         if [[ "$digest" != "${digests[index]}" || "$mtime" != "${mtimes[index]}" ]]; then
-            printf '%s\0STALE\0' "$path"
+            status_of[index]=STALE
             continue
         fi
         backup="$SHARE_ROOT/$TRASH_DIRNAME/$path-$run_ts"
-        mkdir -p "${backup%/*}" || { printf '%s\0ERROR\0' "$path"; continue; }
+        # mkdir only when the folder changes (files of one folder come together).
+        if [[ "${backup%/*}" != "$last_backup_dir" ]]; then
+            mkdir -p "${backup%/*}" || { status_of[index]=ERROR; continue; }
+            last_backup_dir="${backup%/*}"
+        fi
         txid="delete-move-${run_ts}-${index}-${RANDOM}"
         txfile="$TRANSACTION_DIR/$txid.txn"
-        if ! begin_move_transaction DELETE "$txid" "$device" "$run_ts" "$path" "$target" "$backup"; then
-            printf '%s\0ERROR\0' "$path"
+        # Same record begin_move_transaction writes; the directory exists already.
+        if ! write_move_transaction "$txfile" DELETE "$txid" STARTED \
+                "$device" "$run_ts" "$path" "$target" "$backup" "" STAGING_PUBLISH_V1; then
+            status_of[index]=ERROR
             continue
         fi
         if mv "$target" "$backup"; then
             test_failpoint "checked_delete_after_move"
-            if ! advance_move_transaction "$txfile" MOVED; then
-                mv "$backup" "$target" 2>/dev/null || true
-                rm -f "$txfile"
-                printf '%s\0ERROR\0' "$path"
-                continue
-            fi
-            if append_delete_journal_unlocked "$path" "$device" "$txid"; then
-                test_failpoint "checked_delete_after_journal"
-                rm -f "$txfile"
-                printf '%s\0DELETED\0' "$path"
-            else
-                mv "$backup" "$target" 2>/dev/null || true
-                rm -f "$txfile"
-                printf '%s\0ERROR\0' "$path"
-            fi
+            # No MOVED rewrite of the transaction record: recovery of a DELETE
+            # decides from what exists on disk (target gone and backup present
+            # means "moved, journal it"), never from the recorded stage.
+            printf '%s\0' "$path" >> "$batch_paths"
+            status_of[index]=DELETED_PENDING
+            backup_of[index]="$backup"
+            txfile_of[index]="$txfile"
         else
             rm -f "$txfile"
-            printf '%s\0ERROR\0' "$path"
+            status_of[index]=ERROR
         fi
+    done
+    if [[ -s "$batch_paths" ]]; then
+        batch_txid="delete-batch-${run_ts}-$$-${RANDOM}"
+        if append_delete_journal_batch_unlocked "$batch_paths" "$device" "$batch_txid"; then
+            test_failpoint "checked_delete_after_journal"
+            for ((index = 0; index < count; index++)); do
+                case "${status_of[index]:-}" in
+                    DELETED_PENDING) rm -f "${txfile_of[index]}"; status_of[index]=DELETED ;;
+                    ABSENT_PENDING) status_of[index]=ABSENT ;;
+                esac
+            done
+        else
+            # The journal refused the batch: put every moved file back, so the
+            # NAS and the manifest stay consistent, and report an error.
+            for ((index = 0; index < count; index++)); do
+                case "${status_of[index]:-}" in
+                    DELETED_PENDING)
+                        mv "${backup_of[index]}" "$SHARE_ROOT/${paths[index]}" 2>/dev/null || true
+                        rm -f "${txfile_of[index]}"
+                        status_of[index]=ERROR ;;
+                    ABSENT_PENDING) status_of[index]=ERROR ;;
+                esac
+            done
+        fi
+    fi
+    rm -f "$batch_paths"
+    printf 'CHECKED_DELETE_V1\0%s\0' "$count"
+    for ((index = 0; index < count; index++)); do
+        printf '%s\0%s\0' "${paths[index]}" "${status_of[index]:-ERROR}"
     done
     flock -u 9
     exec 9>&-
@@ -2032,21 +2065,41 @@ cmd_browse_rename() {
     local magic run_ts device src dst src_target dst_target rel_file paths_file txid txfile
     local expected_kind expected_digest expected_size expected_mtime actual_size actual_mtime actual_digest
     local -a journal_paths=()
+    local -a v3_rel=() v3_digest=() v3_size=() v3_mtime=()
+    local v3_count=0 v3_index
     IFS= read -r -d '' magic || return 1
     IFS= read -r -d '' run_ts || return 1
     IFS= read -r -d '' device || return 1
     IFS= read -r -d '' src || return 1
     IFS= read -r -d '' dst || return 1
-    if [[ "$magic" == "BROWSE_RENAME_V2" ]]; then
+    if [[ "$magic" == "BROWSE_RENAME_V2" || "$magic" == "BROWSE_RENAME_V3" ]]; then
         IFS= read -r -d '' expected_kind || return 1
         IFS= read -r -d '' expected_digest || return 1
         IFS= read -r -d '' expected_size || return 1
         IFS= read -r -d '' expected_mtime || return 1
     fi
-    [[ "$magic" == "BROWSE_RENAME_V1" || "$magic" == "BROWSE_RENAME_V2" ]] || return 1
+    if [[ "$magic" == "BROWSE_RENAME_V3" ]]; then
+        # V3 moves a whole folder and carries what the client already knows
+        # about every file (digest, size, mtime), so the NAS does not have to
+        # read and hash each one: it only checks size and mtime.
+        IFS= read -r -d '' v3_count || return 1
+        [[ "$v3_count" =~ ^[0-9]+$ && "$v3_count" -le 200000 ]] || return 1
+        for ((v3_index = 0; v3_index < v3_count; v3_index++)); do
+            IFS= read -r -d '' rel_file || return 1
+            v3_rel[v3_index]="$rel_file"
+            IFS= read -r -d '' v3_digest[v3_index] || return 1
+            IFS= read -r -d '' v3_size[v3_index] || return 1
+            IFS= read -r -d '' v3_mtime[v3_index] || return 1
+            valid_sync_relative_path "$src/${v3_rel[v3_index]}" || return 1
+            [[ "${v3_digest[v3_index]}" =~ ^[0-9a-f]{64}$ && "${v3_size[v3_index]}" =~ ^[0-9]+$ \
+               && "${v3_mtime[v3_index]}" =~ ^[0-9]+$ ]] || return 1
+        done
+        [[ "$expected_kind" == "DIR" ]] || return 1
+    fi
+    [[ "$magic" == "BROWSE_RENAME_V1" || "$magic" == "BROWSE_RENAME_V2" || "$magic" == "BROWSE_RENAME_V3" ]] || return 1
     [[ "$run_ts" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}--[0-9]{2}-[0-9]{2}-[0-9]{2}-[0-9]{6}Z$ ]] || return 1
     [[ "$device" =~ ^[A-Za-z0-9._:-]{1,128}$ ]] || return 1
-    if [[ "$magic" == "BROWSE_RENAME_V2" ]]; then
+    if [[ "$magic" != "BROWSE_RENAME_V1" ]]; then
         [[ "$expected_kind" == "FILE" || "$expected_kind" == "DIR" ]] || return 1
         [[ "$expected_size" =~ ^[0-9]+$ && "$expected_mtime" =~ ^[0-9]+$ ]] || return 1
         if [[ "$expected_kind" == "FILE" ]]; then
@@ -2087,7 +2140,7 @@ cmd_browse_rename() {
         return 1
     fi
 
-    if [[ "$magic" == "BROWSE_RENAME_V2" ]]; then
+    if [[ "$magic" != "BROWSE_RENAME_V1" ]]; then
         if [[ "$expected_kind" == "FILE" ]]; then
             if [[ ! -f "$src_target" || -L "$src_target" ]]; then
                 flock -u 9; exec 9>&-
@@ -2097,8 +2150,11 @@ cmd_browse_rename() {
             actual_size=$(portable_file_size "$src_target" || true)
             actual_mtime=$(portable_file_mtime "$src_target" || true)
             actual_digest=$(portable_sha256 "$src_target" || true)
+            # The manifest may hold a sub-second mtime (a file uploaded by a
+            # client keeps its local one); the NAS reads whole seconds. Compare
+            # seconds, or every such file looked "changed".
             if [[ "$actual_size" != "$expected_size" || ! "$actual_mtime" =~ ^[0-9]+$ \
-                  || "$((actual_mtime * 1000000000))" != "$expected_mtime" \
+                  || "$actual_mtime" != "$((expected_mtime / 1000000000))" \
                   || "$actual_digest" != "$expected_digest" ]]; then
                 flock -u 9; exec 9>&-
                 printf '%s\0ERROR\0la sorgente e cambiata\0' "$magic"
@@ -2119,10 +2175,34 @@ cmd_browse_rename() {
         printf '%s\0ERROR\0creazione elenco percorsi fallita\0' "$magic"
         return 1
     fi
-    if [[ "$magic" == "BROWSE_RENAME_V2" ]]; then
+    if [[ "$magic" != "BROWSE_RENAME_V1" ]]; then
         if [[ "$expected_kind" == "FILE" ]]; then
             printf '%s\0%s\0%s\0%s\0%s\0' "$src" "$dst" "$expected_digest" \
                 "$expected_size" "$expected_mtime" >> "$paths_file"
+        elif [[ "$magic" == "BROWSE_RENAME_V3" ]]; then
+            local found_files
+            found_files=$(cd "$src_target" && find . -type f 2>/dev/null | wc -l)
+            if [[ "${found_files//[[:space:]]/}" != "$v3_count" ]]; then
+                rm -f "$paths_file"
+                flock -u 9; exec 9>&-
+                printf '%s\0ERROR\0la directory e cambiata\0' "$magic"
+                return 1
+            fi
+            for ((v3_index = 0; v3_index < v3_count; v3_index++)); do
+                local v3_file="$src_target/${v3_rel[v3_index]}"
+                actual_size=$(portable_file_size "$v3_file" || true)
+                actual_mtime=$(portable_file_mtime "$v3_file" || true)
+                if [[ ! -f "$v3_file" || -L "$v3_file" || "$actual_size" != "${v3_size[v3_index]}" \
+                      || ! "$actual_mtime" =~ ^[0-9]+$ \
+                      || "$actual_mtime" != "$((v3_mtime[v3_index] / 1000000000))" ]]; then
+                    rm -f "$paths_file"
+                    flock -u 9; exec 9>&-
+                    printf '%s\0ERROR\0la directory e cambiata\0' "$magic"
+                    return 1
+                fi
+                printf '%s\0%s\0%s\0%s\0%s\0' "$src/${v3_rel[v3_index]}" "$dst/${v3_rel[v3_index]}" \
+                    "${v3_digest[v3_index]}" "${v3_size[v3_index]}" "${v3_mtime[v3_index]}" >> "$paths_file"
+            done
         else
             while IFS= read -r -d '' rel_file; do
                 local source_file="$src/${rel_file#./}" destination_file="$dst/${rel_file#./}"
@@ -2176,7 +2256,7 @@ cmd_browse_rename() {
         printf '%s\0ERROR\0registrazione transazione fallita\0' "$magic"
         return 1
     fi
-    if [[ "$magic" == "BROWSE_RENAME_V2" ]]; then
+    if [[ "$magic" != "BROWSE_RENAME_V1" ]]; then
         append_rename_journal_batch_unlocked "$paths_file" "$device" "$txid"
     else
         append_delete_journal_batch_unlocked "$paths_file" "$device" "$txid"

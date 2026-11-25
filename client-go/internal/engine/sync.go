@@ -79,6 +79,10 @@ type nasStateReader interface {
 
 // nasNameChecker answers "which of these names already exist on the NAS?"
 // without hashing anything (see remote.Client.ExistingPaths).
+type nasDirRenamer interface {
+	RenameDirV3(src, dst string, files []remote.DirFile, device string) (bool, error)
+}
+
 type nasNameChecker interface {
 	ExistingPaths(paths []string) (map[string]bool, error)
 }
@@ -96,6 +100,8 @@ type SyncResult struct {
 	Blocked  string
 	Missing  int
 	Renames  int
+	// DirRenames counts folders moved in a single request.
+	DirRenames int
 	// RenamesRefused counts moves the NAS refused; they fall back to
 	// upload + guarded deletion.
 	RenamesRefused int
@@ -451,10 +457,63 @@ func syncPass(
 		localDeletes = nil
 	}
 
-	// Renames are atomic server mutations. A failed rename must abort the pass:
-	// falling back to delete+upload would risk losing the file if the upload
-	// then failed.
-	for _, rename := range report.Renames {
+	// A rename already moved the very file that was queued for upload.
+	// Re-uploading it would write a second version of the same bytes and bump
+	// the clock once more. Move the baseline instead: a tombstone at the source
+	// and the observed remote fingerprint at the destination.
+	movedUploads := map[string]bool{}
+	recordRename := func(rename classify.Rename, remoteState classify.RemoteState) {
+		delete(manifest, rename.Missing)
+		renameCausal := localCausals[rename.Missing]
+		_ = store.RecordEntry(cfg.LocalRepositoryID(), rename.Missing, state.EntryState{Causal: renameCausal})
+		_ = store.RecordEntry(cfg.LocalRepositoryID(), rename.Local, state.EntryState{
+			Digest: remoteState.Digest, Size: remoteState.Size, MTimeNS: remoteState.MTimeNS,
+			Causal: renameCausal,
+		})
+		entries[rename.Missing] = state.EntryState{Causal: renameCausal}
+		entries[rename.Local] = state.EntryState{
+			Digest: remoteState.Digest, Size: remoteState.Size, MTimeNS: remoteState.MTimeNS,
+			Causal: renameCausal,
+		}
+		if uploadSeen[rename.Local] {
+			uploadSeen[rename.Local] = false
+			movedUploads[rename.Local] = true
+		}
+	}
+
+	// Folders renamed as a whole move in one request. If the NAS cannot do it
+	// (older server, folder changed meanwhile, destination taken) the files go
+	// through the per-file renames below, so nothing is lost by trying.
+	singles := report.Renames
+	if mover, ok := client.(nasDirRenamer); ok {
+		moves, rest := groupDirRenames(report.Renames, manifest)
+		singles = rest
+		for _, move := range moves {
+			files := make([]remote.DirFile, 0, len(move.Pairs))
+			for _, pair := range move.Pairs {
+				known := manifest[pair.Missing]
+				files = append(files, remote.DirFile{
+					Rel:    strings.TrimPrefix(pair.Missing, move.Src+"/"),
+					Digest: known.Digest, Size: known.Size, MTimeNS: known.MTimeNS,
+				})
+			}
+			done, err := mover.RenameDirV3(move.Src, move.Dst, files, device)
+			if err == nil && done {
+				for _, pair := range move.Pairs {
+					recordRename(pair, manifest[pair.Missing])
+				}
+				result.DirRenames++
+				continue
+			}
+			if err != nil && globalFailure(err) {
+				return result, err
+			}
+			singles = append(singles, move.Pairs...) // fall back to per-file
+		}
+	}
+
+	// Per-file renames are atomic server mutations.
+	for _, rename := range singles {
 		remoteState := manifest[rename.Missing]
 		ok, err := client.RenameV2(
 			rename.Missing, rename.Local, "FILE",
@@ -477,32 +536,16 @@ func syncPass(
 			}
 			return result, err
 		}
-		delete(manifest, rename.Missing)
-		// The rename already moved the very file that was queued for upload.
-		// Re-uploading it would write a second version of the same bytes and
-		// bump the clock once more. Move the baseline instead: a tombstone at
-		// the source and the observed remote fingerprint at the destination.
-		renameCausal := localCausals[rename.Missing]
-		_ = store.RecordEntry(cfg.LocalRepositoryID(), rename.Missing, state.EntryState{Causal: renameCausal})
-		_ = store.RecordEntry(cfg.LocalRepositoryID(), rename.Local, state.EntryState{
-			Digest: remoteState.Digest, Size: remoteState.Size, MTimeNS: remoteState.MTimeNS,
-			Causal: renameCausal,
-		})
-		entries[rename.Missing] = state.EntryState{Causal: renameCausal}
-		entries[rename.Local] = state.EntryState{
-			Digest: remoteState.Digest, Size: remoteState.Size, MTimeNS: remoteState.MTimeNS,
-			Causal: renameCausal,
-		}
-		if uploadSeen[rename.Local] {
-			uploadSeen[rename.Local] = false
-			kept := uploads[:0]
-			for _, path := range uploads {
-				if path != rename.Local {
-					kept = append(kept, path)
-				}
+		recordRename(rename, remoteState)
+	}
+	if len(movedUploads) > 0 {
+		kept := uploads[:0]
+		for _, path := range uploads {
+			if !movedUploads[path] {
+				kept = append(kept, path)
 			}
-			uploads = kept
 		}
+		uploads = kept
 	}
 
 	// Files that failed recently wait for their retry delay.
@@ -683,9 +726,9 @@ func syncPass(
 				if _, ok := causal.Parse(remoteCausal); !ok {
 					remoteCausal = ""
 				}
+				digest, size, mtime := downloadedState(cfg.LocalRoot(), path, remoteState)
 				if err := store.RecordEntry(cfg.LocalRepositoryID(), path, state.EntryState{
-					Digest: remoteState.Digest, Size: remoteState.Size,
-					MTimeNS: remoteState.MTimeNS, Causal: remoteCausal,
+					Digest: digest, Size: size, MTimeNS: mtime, Causal: remoteCausal,
 				}); err != nil {
 					return fatalError{err}
 				}
@@ -1037,9 +1080,24 @@ func applyRemoteDeletions(
 		if err := store.RecordEntry(cfg.LocalRepositoryID(), path, state.EntryState{Causal: remoteCausal}); err != nil {
 			return deleted, err
 		}
+		removeEmptyParents(root, path)
 		deleted++
 	}
 	return deleted, nil
+}
+
+// removeEmptyParents deletes the folders left empty by a removed file, up to
+// (never including) the synced root. os.Remove refuses a folder that still
+// holds anything, so only truly empty ones go: a folder renamed or deleted on
+// another PC no longer lingers here as an empty shell.
+func removeEmptyParents(root, relative string) {
+	dir := filepath.Dir(filepath.FromSlash(relative))
+	for dir != "." && dir != string(filepath.Separator) && dir != "" {
+		if err := os.Remove(filepath.Join(root, dir)); err != nil {
+			return
+		}
+		dir = filepath.Dir(dir)
+	}
 }
 
 // dropRenamesOntoExistingFiles turns a rename whose destination the NAS
@@ -1108,4 +1166,26 @@ func withoutWaiting(paths []string) []string {
 		}
 	}
 	return kept
+}
+
+// downloadedState is what to remember as the baseline of a file just
+// downloaded. Normally it is what the manifest said. But the file can have
+// changed on the NAS between the manifest and the transfer: rsync then brought
+// newer bytes, and remembering the old digest would make the next pass see a
+// "local edit" against a stale baseline. A cheap check (size and mtime against
+// the manifest) catches it, and only then is the file read to get its real
+// digest; a bulk download of thousands of unchanged files costs no extra read.
+func downloadedState(root, path string, remote classify.RemoteState) (string, int64, int64) {
+	info, err := os.Lstat(filepath.Join(root, filepath.FromSlash(path)))
+	if err != nil || !info.Mode().IsRegular() {
+		return remote.Digest, remote.Size, remote.MTimeNS
+	}
+	if info.Size() == remote.Size && info.ModTime().Unix() == remote.MTimeNS/1_000_000_000 {
+		return remote.Digest, remote.Size, remote.MTimeNS
+	}
+	sum, err := hashFile(filepath.Join(root, filepath.FromSlash(path)))
+	if err != nil {
+		return remote.Digest, remote.Size, remote.MTimeNS
+	}
+	return sum, info.Size(), info.ModTime().UnixNano()
 }

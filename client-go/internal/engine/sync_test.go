@@ -78,11 +78,16 @@ type fakeTransfer struct {
 	replaceStale map[string]bool
 	replaceErr   error
 	replaceRunTS string
+	// onDownload lets a test write the files a real download would have written.
+	onDownload func(paths []string)
 }
 
 func (f *fakeTransfer) Upload(paths []string) error { f.uploaded = paths; return nil }
 func (f *fakeTransfer) Download(paths []string) error {
 	f.downloaded = append([]string(nil), paths...)
+	if f.onDownload != nil {
+		f.onDownload(paths)
+	}
 	return nil
 }
 func (f *fakeTransfer) UploadStaged(paths []string, device string, files []remote.StagedFile) error {
@@ -429,7 +434,13 @@ func TestSyncOnceDownloadsRemoteChangeWithStaleLocalBaseline(t *testing.T) {
 	manifest := "NASBOX_MANIFEST_V1\n" +
 		manifestLine("stale.txt", digest("remote"), 6, 1700000100000000000, "dev-a:2")
 	nas := &fakeNAS{config: nasConfig(), manifest: manifest}
-	transfers := &fakeTransfer{}
+	transfers := &fakeTransfer{onDownload: func([]string) {
+		// What rsync would have left on disk: the remote bytes with the remote mtime.
+		full := filepath.Join(root, "stale.txt")
+		_ = os.WriteFile(full, []byte("remote"), 0o600)
+		when := time.Unix(1700000100, 0)
+		_ = os.Chtimes(full, when, when)
+	}}
 	result, err := SyncOnce(cfg, store, nas, transfers)
 	if err != nil {
 		t.Fatal(err)

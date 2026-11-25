@@ -4,6 +4,47 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 3.28.0 - 2026-11-25
+
+Server:
+
+- **`--checked-delete` in blocco**: un solo append al journal e un solo
+  avanzamento della revisione per richiesta, invece di uno per file (due fsync
+  a file: il costo reale su un NAS piccolo). Ogni file resta spostato sotto una
+  propria transazione e un crash prima del commit si recupera file per file.
+  Tolta la riscrittura inutile dello stadio "MOVED" e le chiamate `mkdir` ripetute.
+  Misurato: 300 file in 3,7 s contro 9,6 s anche su un SSD veloce (sul NAS il
+  guadagno è maggiore, dominano gli fsync). Se il journal rifiuta il blocco, tutti i
+  file tornano al loro posto.
+- **`--browse-rename` V3**: rinomina un'intera cartella in una richiesta, con
+  digest/dimensione/data già noti al client: il NAS non rilegge né calcola
+  l'hash di ogni file, controlla solo dimensione e data e che la cartella
+  contenga esattamente quei file.
+- **Corretto il controllo della data nella V2**: confrontava secondi con
+  nanosecondi e rifiutava ("la sorgente è cambiata") i file con data
+  sub-secondo nel manifest, cioè quelli caricati da un client.
+
+## 1.8.0 - 2026-11-25
+
+Client Go, logica di sincronizzazione:
+
+- **Rinomina di cartelle in una sola richiesta.** Una cartella da 2.000 file
+  rinominata era 2.000 richieste SSH, ognuna con il lock preso e rilasciato.
+  Ora è una (con ripiego automatico sui rinomina per file se il server è più
+  vecchio, la cartella è cambiata o la destinazione è occupata).
+- **Cartelle vuote rimosse** sugli altri PC quando una cartella viene rinominata
+  o eliminata altrove (prima restava il guscio vuoto).
+- **Cancellazioni sul NAS più veloci** grazie al server 3.28.0 (vedi sotto);
+  il client non cambia.
+- **I mirror non svegliano più il motore.** Prima, ogni 5 minuti, il timer dei
+  mirror faceva partire una passata completa anche senza modifiche. Ora i
+  mirror vengono eseguiti e, se rsync non ha cambiato nulla, la passata non
+  parte affatto.
+- **Base del download corretta.** Se un file cambia sul NAS tra il manifest e il
+  download, la base ricordata è l'hash reale dei byte arrivati (controllo
+  economico su dimensione e data; l'hash si calcola solo se non coincidono),
+  non quello vecchio del manifest.
+
 ## 1.7.0 - 2026-11-25
 
 Client Go, installazione e avvio più semplici:

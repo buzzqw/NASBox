@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -560,5 +561,56 @@ func TestE2EServerTrashQuotaAndQuietLocks(t *testing.T) {
 		if err == nil && info.ModTime().After(old.Add(time.Minute)) {
 			t.Fatalf("%s modificato da un comando di sola lettura: i dischi non potrebbero dormire", filepath.Base(lock))
 		}
+	}
+}
+
+// A folder renamed as a whole moves on the NAS in one request (BROWSE_RENAME_V3)
+// and the other PC follows without downloading anything again.
+func TestE2EFolderRenameIsOneRequestAndKeepsBytes(t *testing.T) {
+	nas := newE2ENAS(t)
+	a, b := nas.client("pc-a"), nas.client("pc-b")
+	for i := 0; i < 6; i++ {
+		a.write(fmt.Sprintf("Progetto/sub/f%d.txt", i), fmt.Sprintf("contenuto %d", i))
+	}
+	a.write("Progetto/radice.txt", "alla radice")
+	a.write("Altro/resta.txt", "non si muove")
+	a.sync()
+	b.sync()
+
+	if err := os.Rename(filepath.Join(a.local, "Progetto"), filepath.Join(a.local, "Progetto 2026")); err != nil {
+		t.Fatal(err)
+	}
+	out := a.sync()
+	if _, err := os.Stat(filepath.Join(nas.share, "Progetto")); !os.IsNotExist(err) {
+		t.Fatalf("la vecchia cartella è ancora sul NAS\n%s", out)
+	}
+	for i := 0; i < 6; i++ {
+		want := fmt.Sprintf("contenuto %d", i)
+		if got := readOrEmpty(filepath.Join(nas.share, "Progetto 2026", "sub", fmt.Sprintf("f%d.txt", i))); got != want {
+			t.Fatalf("file %d non spostato: %q\n%s", i, got, out)
+		}
+	}
+	if got := readOrEmpty(filepath.Join(nas.share, "Altro", "resta.txt")); got != "non si muove" {
+		t.Fatalf("la cartella accanto è stata toccata: %q", got)
+	}
+	// One folder move = one journal transaction (per-file renames would leave seven).
+	journal := readOrEmpty(filepath.Join(filepath.Dir(nas.script), "state", "transfer-journal.tsv"))
+	if got := strings.Count(journal, "BEGIN\tbrowse-rename-"); got != 1 {
+		t.Fatalf("attese 1 transazione di rinomina, trovate %d:\n%s", got, journal)
+	}
+	// Nothing was uploaded again: the move kept the bytes on the NAS.
+	if strings.Contains(out, "↑ Progetto 2026") {
+		t.Fatalf("la cartella rinominata è stata ricaricata invece che spostata:\n%s", out)
+	}
+
+	out = b.sync()
+	if got := readOrEmpty(filepath.Join(b.local, "Progetto 2026", "sub", "f3.txt")); got != "contenuto 3" {
+		t.Fatalf("B non ha seguito la rinomina: %q\n%s", got, out)
+	}
+	if _, err := os.Stat(filepath.Join(b.local, "Progetto")); !os.IsNotExist(err) {
+		t.Fatalf("su B la vecchia cartella è rimasta\n%s", out)
+	}
+	if !nas.lockFree() {
+		t.Fatal("il lock NAS deve essere libero")
 	}
 }

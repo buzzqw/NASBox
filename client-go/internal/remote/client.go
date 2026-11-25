@@ -913,6 +913,54 @@ func (c *Client) RenameV2(
 	return false, fmt.Errorf("rename remoto fallito: %s", detail)
 }
 
+// DirFile is one file inside a folder being renamed: its path relative to the
+// folder and what the manifest knows about it.
+type DirFile struct {
+	Rel     string
+	Digest  string
+	Size    int64
+	MTimeNS int64
+}
+
+// RenameDirV3 moves a whole folder on the NAS in one request. The client
+// sends the digest, size and mtime of every file; the server checks size and
+// mtime (no hashing) and that the folder holds exactly these files, moves it
+// and journals every file in one transaction. Servers older than 3.28 do not
+// know the verb and answer with an error: the caller falls back to per-file
+// renames.
+func (c *Client) RenameDirV3(src, dst string, files []DirFile, device string) (bool, error) {
+	fields := [][]byte{
+		[]byte("BROWSE_RENAME_V3"), []byte(RunTimestamp()), []byte(device),
+		[]byte(src), []byte(dst), []byte("DIR"), []byte(""), []byte("0"), []byte("0"),
+		[]byte(fmt.Sprint(len(files))),
+	}
+	for _, file := range files {
+		fields = append(fields, []byte(file.Rel), []byte(file.Digest),
+			[]byte(fmt.Sprint(file.Size)), []byte(fmt.Sprint(file.MTimeNS)))
+	}
+	output, err := c.RunLocked(
+		[]string{c.script(), "--browse-rename"}, nulJoin(fields), device, 10*time.Minute,
+	)
+	parts := bytes.Split(output, []byte{0})
+	if err != nil {
+		if len(parts) > 2 && string(parts[0]) == "BROWSE_RENAME_V3" && string(parts[1]) == "ERROR" {
+			return false, fmt.Errorf("il NAS ha rifiutato lo spostamento della cartella %s → %s: %s", src, dst, string(parts[2]))
+		}
+		return false, err
+	}
+	if len(parts) < 2 || string(parts[0]) != "BROWSE_RENAME_V3" {
+		return false, fmt.Errorf("risposta rename cartella non valida")
+	}
+	if string(parts[1]) == "OK" {
+		return true, nil
+	}
+	detail := ""
+	if len(parts) > 2 {
+		detail = string(parts[2])
+	}
+	return false, fmt.Errorf("rename cartella remoto fallito: %s", detail)
+}
+
 type HistoryVersion struct {
 	Original, Suffix, TrashRel string
 	Size                       int64
