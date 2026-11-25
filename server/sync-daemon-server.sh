@@ -33,7 +33,7 @@
 #
 set -uo pipefail
 
-VERSION="3.30.0"
+VERSION="3.30.1"
 SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -867,20 +867,32 @@ cmd_manifest_export() {
         fi
     fi
     journal_lines=$(wc -l < "$JOURNAL_FILE" 2>/dev/null || echo 0)
-    local rendered
+    # Rendered into a private file, not a shell variable: an 11 MB string in
+    # bash is copied twice and cost seconds of CPU on a small NAS.
+    local rendered_file
+    rendered_file=$(mktemp "${STATE_DIR}/.manifest-export.$$.XXXXXX" 2>/dev/null) || {
+        [[ "$lock_held" == "true" ]] && flock -u 9
+        exec 9>&-
+        return 1
+    }
     if (( journal_lines <= 1 )); then
-        rendered=$(<"$MANIFEST_FILE")
-    else
-        rendered=$(render_manifest_unlocked) || {
+        cp "$MANIFEST_FILE" "$rendered_file" || {
+            rm -f "$rendered_file"
             [[ "$lock_held" == "true" ]] && flock -u 9
             exec 9>&-
             return 1
         }
+    elif ! render_manifest_unlocked > "$rendered_file"; then
+        rm -f "$rendered_file"
+        [[ "$lock_held" == "true" ]] && flock -u 9
+        exec 9>&-
+        return 1
     fi
     # Release before streaming over SSH: appends must not wait for the network.
     [[ "$lock_held" == "true" ]] && flock -u 9
     exec 9>&-
-    printf '%s\n' "$rendered"
+    cat "$rendered_file"
+    rm -f "$rendered_file"
 }
 
 # Rendered (manifest + journal) state of the current revision. Stored in a
@@ -917,6 +929,25 @@ write_manifest_snapshot_unlocked() {
         printf 'NASBOX_MANIFEST_SNAPSHOT_V1\n'
         printf 'REVISION=%s\n' "$revision"
         printf '%s\n' "$rendered" | awk 'NR == 1 && $0 == "NASBOX_MANIFEST_V1" { next } { print }'
+    } > "$tmp" || { rm -f "$tmp"; return 1; }
+    mv -f "$tmp" "$MANIFEST_SNAPSHOT_FILE" || { rm -f "$tmp"; return 1; }
+}
+
+# Same snapshot, written from the rendered file instead of a shell variable:
+# the row set is already on disk, so only the two header lines are prepended.
+write_manifest_snapshot_from_file_unlocked() {
+    local revision="$1" source="$2" tmp
+    [[ -f "$source" ]] || return 1
+    mkdir -p "$STATE_DIR" || return 1
+    tmp="${MANIFEST_SNAPSHOT_FILE}.tmp.$$"
+    {
+        printf 'NASBOX_MANIFEST_SNAPSHOT_V1\n'
+        printf 'REVISION=%s\n' "$revision"
+        if [[ "$(head -1 "$source")" == "NASBOX_MANIFEST_V1" ]]; then
+            tail -n +2 "$source"
+        else
+            cat "$source"
+        fi
     } > "$tmp" || { rm -f "$tmp"; return 1; }
     mv -f "$tmp" "$MANIFEST_SNAPSHOT_FILE" || { rm -f "$tmp"; return 1; }
 }
@@ -987,11 +1018,7 @@ cmd_manifest_export_delta() {
             status=75
         elif (( requested == current )); then
             print_empty_manifest_delta "$requested" "$current"
-        elif ! read_rendered_manifest_unlocked; then
-            printf 'manifest export delta: rendering del manifest fallito\n' >&2
-            status=1
         else
-            rendered="$RENDERED_MANIFEST"
             base_rev=$(snapshot_revision 2>/dev/null) || base_rev=""
             if [[ -n "$base_rev" && "$base_rev" == "$requested" ]]; then
                 use_snapshot="true"
@@ -1008,8 +1035,13 @@ cmd_manifest_export_delta() {
                     status=1
                 fi
             fi
-            if (( status == 0 )); then
-                printf '%s\n' "$rendered" | awk 'NR == 1 && $0 == "NASBOX_MANIFEST_V1" { next } { print }' > "$current_file" || status=1
+            # Stream the rendered manifest into the file the diff reads. Keeping
+            # the same 11 MB in a shell variable cost about 5 s of CPU per export
+            # on this NAS (bash copies it twice), and a delta is requested on
+            # every pass that sees a remote change: it was the real limit of
+            # real-time sync, far more than the transfer itself.
+            if (( status == 0 )) && ! render_manifest_unlocked > "$current_file"; then
+                status=1
             fi
             if (( status == 0 )); then
                 if [[ "$use_snapshot" == "true" ]]; then
@@ -1061,7 +1093,7 @@ cmd_manifest_export_delta() {
                     status=1
                 fi
                 if (( status == 0 )); then
-                    write_manifest_snapshot_unlocked "$current" "$rendered" || status=1
+                    write_manifest_snapshot_from_file_unlocked "$current" "$current_file" || status=1
                 fi
             fi
             if (( status == 0 )); then

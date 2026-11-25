@@ -4,6 +4,21 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 3.30.1 - 2026-11-25
+
+Server:
+
+- **Export del manifest in streaming**: `--manifest-export` e
+  `--manifest-export-delta` tenevano l'intero manifest renderizzato (11 MB) in
+  una variabile di bash, che lo copia due volte: su questo NAS erano ~5 s di
+  CPU per export, e il delta viene chiesto a ogni passata che vede un cambiamento
+  remoto — era il vero limite del "tempo reale", più del trasferimento. Ora il
+  render va direttamente su file: **delta da 6,9 s a 2,2 s**, export completo da
+  2,1 s a 1,4 s, uscita identica byte per byte.
+- Resta da fare (prossimo passo): un delta *per client* basato su un indice
+  revisione→offset del journal. Oggi lo snapshot è uno solo, quindi il client
+  riceve spesso il manifest completo invece delle poche righe cambiate.
+
 ## 3.30.0 - 2026-11-25
 
 Server:
