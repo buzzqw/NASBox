@@ -191,15 +191,20 @@ func (c *clientApp) buildRecentCard() fyne.CanvasObject {
 func (c *clientApp) buildNASCard() fyne.CanvasObject {
 	c.homeNASLabel = widget.NewLabel(fmt.Sprintf("%s · %s", valueOrDash(c.cfg.String("nas_lan")),
 		valueOrDash(c.cfg.String("remote_prefix"))))
-	c.homeNASLabel.Truncation = fyne.TextTruncateEllipsis
+	c.homeNASLabel.Wrapping = fyne.TextWrapWord
 	c.homeDiskLabel = widget.NewLabel(tr("status.diagnostics_loading", nil))
 	c.homeDiskLabel.Importance = widget.LowImportance
+	c.homeDiskLabel.Wrapping = fyne.TextWrapWord
 	c.homeDiskBar = widget.NewProgressBar()
 	c.homeDiskBar.TextFormatter = func() string { return "" }
 	c.homeDevicesLabel = widget.NewLabel("")
 	c.homeDevicesLabel.Importance = widget.LowImportance
+	c.homeDevicesLabel.Wrapping = fyne.TextWrapWord
 	c.homeTrashLabel = widget.NewLabel("")
 	c.homeTrashLabel.Importance = widget.LowImportance
+	// Wrap: this text grows ("... quota piena: ...") and two cards share a row,
+	// so an unwrapped line doubled the minimum width of the whole page.
+	c.homeTrashLabel.Wrapping = fyne.TextWrapWord
 	c.homeTrashLabel.Hide()
 	open := widget.NewButtonWithIcon(tr("ui.home.nas_details", nil), theme.NavigateNextIcon(), func() {
 		c.navigate(sectionNAS, 0)

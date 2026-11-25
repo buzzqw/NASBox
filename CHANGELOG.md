@@ -4,6 +4,16 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 1.4.2 - 2026-11-25
+
+Client Go:
+
+- **Finestra stretta anche nell'app vera.** Sul PC con la cronologia reale la
+  Stato imponeva ancora 1385 px: la riga "Storico versioni sul NAS: … quota
+  piena: …" non andava a capo e le due schede affiancate raddoppiavano la
+  larghezza. Ora le etichette delle schede NAS vanno a capo; minimo misurato
+  nell'app in esecuzione: 574 px (finestra iniziale 980×700).
+
 ## 1.4.1 - 2026-11-25
 
 Client Go:
