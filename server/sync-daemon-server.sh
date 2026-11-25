@@ -33,7 +33,7 @@
 #
 set -uo pipefail
 
-VERSION="3.30.1"
+VERSION="3.31.0"
 SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -79,6 +79,8 @@ NAS_CPU_COUNT=""
 NAS_MEM_TOTAL_MB=""
 NAS_DISK_ROTATIONAL=""
 NAS_RSYNC_VERSION=""
+NAS_RSYNC_PATH=""
+NAS_RSYNC_SYSTEM_VERSION=""
 NAS_FS_TYPE=""
 CAPABILITIES_LIST="change_feed,causal_versions,v3_rename,batch_delete,quiet_lock,empty_dir_prune,capabilities_v1"
 
@@ -121,8 +123,30 @@ detect_capabilities() {
     fi
     NAS_DISK_ROTATIONAL=$(disk_rotational_for "$SHARE_ROOT" || true)
     # "3.5.2-g41bbd895" -> "3.5.2": clients compare plain versions.
-    NAS_RSYNC_VERSION=$(rsync --version 2>/dev/null | head -1 | awk '{print $3}' \
+    NAS_RSYNC_SYSTEM_VERSION=$(rsync --version 2>/dev/null | head -1 | awk '{print $3}' \
         | sed 's/[^0-9.].*$//')
+    NAS_RSYNC_VERSION="$NAS_RSYNC_SYSTEM_VERSION"
+    # A private, newer rsync (tools/install_server_rsync.sh) wins when it runs.
+    # The system one stays untouched -- it is what DSM and other services use.
+    # The client asks for it with --rsync-path, so nothing has to be installed.
+    local candidate="$SCRIPT_DIR/bin/nasbox-rsync" private_version="" private_output=""
+    NAS_RSYNC_PATH=""
+    if [[ -x "$candidate" ]]; then
+        # Exit status matters: a wrapper that prints a banner and then dies must
+        # not be advertised, or every client transfer would fail.
+        if private_output=$("$candidate" --version 2>/dev/null); then
+            private_version=$(printf '%s\n' "$private_output" | head -1 | awk '{print $3}' \
+                | sed 's/[^0-9.].*$//')
+        fi
+        if [[ -n "$private_version" ]]; then
+            NAS_RSYNC_PATH="$candidate"
+            NAS_RSYNC_VERSION="$private_version"
+            case ",$CAPABILITIES_LIST," in
+                *,private_rsync,*) ;;
+                *) CAPABILITIES_LIST="$CAPABILITIES_LIST,private_rsync" ;;
+            esac
+        fi
+    fi
     # SHARE_ROOT is normally a folder inside a volume (not a mount point), so the
     # filesystem comes from the device df reports, not from matching the path.
     local mount_point=""
@@ -152,6 +176,8 @@ print_capability_values() {
     echo "MEM_TOTAL_MB=$NAS_MEM_TOTAL_MB"
     echo "DISK_ROTATIONAL=$NAS_DISK_ROTATIONAL"
     echo "RSYNC_VERSION=$NAS_RSYNC_VERSION"
+    echo "RSYNC_PATH=$NAS_RSYNC_PATH"
+    echo "RSYNC_SYSTEM_VERSION=$NAS_RSYNC_SYSTEM_VERSION"
     echo "FS_TYPE=$NAS_FS_TYPE"
     echo "FILE_STATES_PARALLELISM=$FILE_STATES_PARALLELISM"
 }

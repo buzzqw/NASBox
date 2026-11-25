@@ -72,3 +72,47 @@ class CapabilitiesTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PrivateRsyncTests(unittest.TestCase):
+    """A newer rsync can live next to the server script (server/bin). The system
+    one is left alone: the NAS only declares the private one, and a client that
+    knows the capability asks for it with --rsync-path."""
+
+    def _fake_rsync(self, sandbox: ServerSandbox, version: str, exit_code: int = 0) -> None:
+        bin_dir = sandbox.root / "bin"
+        bin_dir.mkdir(exist_ok=True)
+        wrapper = bin_dir / "nasbox-rsync"
+        wrapper.write_text(
+            f"#!/bin/sh\necho 'rsync  version {version}  protocol version 33'\nexit {exit_code}\n",
+            encoding="utf-8",
+        )
+        wrapper.chmod(0o755)
+
+    def test_private_rsync_is_advertised_when_it_runs(self) -> None:
+        with ServerSandbox() as sandbox:
+            self._fake_rsync(sandbox, "9.9.9")
+            done = sandbox.run("--capabilities")
+            self.assertEqual(done.returncode, 0, done.stderr.decode())
+            values = _values(done.stdout.decode())
+            self.assertEqual(values["RSYNC_PATH"], str(sandbox.root / "bin" / "nasbox-rsync"))
+            self.assertEqual(values["RSYNC_VERSION"], "9.9.9")
+            self.assertIn("private_rsync", values["CAPABILITIES"])
+            # The system version stays visible for diagnostics.
+            self.assertIn("RSYNC_SYSTEM_VERSION", values)
+
+    def test_broken_private_rsync_falls_back_to_the_system_one(self) -> None:
+        with ServerSandbox() as sandbox:
+            self._fake_rsync(sandbox, "9.9.9", exit_code=1)
+            done = sandbox.run("--capabilities")
+            self.assertEqual(done.returncode, 0, done.stderr.decode())
+            values = _values(done.stdout.decode())
+            self.assertEqual(values["RSYNC_PATH"], "")
+            self.assertNotIn("private_rsync", values["CAPABILITIES"])
+            self.assertNotEqual(values["RSYNC_VERSION"], "9.9.9")
+
+    def test_print_config_carries_the_rsync_path(self) -> None:
+        with ServerSandbox() as sandbox:
+            done = sandbox.run("--print-config")
+            self.assertEqual(done.returncode, 0, done.stderr.decode())
+            self.assertIn("RSYNC_PATH", _values(done.stdout.decode()))

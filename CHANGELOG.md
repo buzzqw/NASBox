@@ -4,6 +4,32 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 3.31.0 - 2026-11-25
+
+Server:
+
+- **Un rsync più recente accanto al demone, senza toccare quello di sistema.**
+  `tools/install_server_rsync.sh` scarica da Entware (sha256 fissati nello
+  script) rsync 3.5.1 per aarch64 e lo mette in `server/bin/` con le sue
+  librerie e un wrapper. Il demone lo dichiara in `--capabilities`
+  (`RSYNC_PATH`, `RSYNC_VERSION=3.5.1`, `RSYNC_SYSTEM_VERSION=3.1.2`,
+  capacità `private_rsync`) solo se parte davvero; i client lo chiedono con
+  `--rsync-path`, quindi il rsync di DSM resta intatto e nessun altro servizio
+  cambia. Se il binario manca o non funziona, non viene dichiarato e i client
+  tornano al 3.1.2 come prima. Rimozione: `--remove` dello stesso script.
+  Verificato sul NAS: il wrapper risponde 3.5.1 (protocollo 33), `--old-args`
+  e `--compress-choice=zstd` disponibili, trasferimenti normali.
+
+## 1.11.0 - 2026-11-25
+
+Client Go:
+
+- **Usa il rsync privato quando il NAS lo dichiara**, con `--rsync-path`: nessuna
+  opzione nuova, nessun cambio di comportamento se il NAS non ce l'ha (un NAS
+  vecchio continua a funzionare identico). Il percorso è letto dalle capacità
+  al bootstrap e usato da trasferimenti, download singoli e ripristini dallo
+  storico.
+
 ## 3.30.1 - 2026-11-25
 
 Server:

@@ -45,3 +45,7 @@ CLAUDE.md
 
 # Output di tools/publish_client.py (archivio + manifest della release)
 dist-client-update/
+
+# rsync privato del demone, installato da tools/install_server_rsync.sh
+server/bin/
+.rsync-install.*

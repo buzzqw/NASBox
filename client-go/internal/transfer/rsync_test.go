@@ -218,3 +218,49 @@ func TestRsyncVanishedFilesAreNotAnError(t *testing.T) {
 		t.Fatal("exit 23 (partial transfer) is a real failure")
 	}
 }
+
+// The NAS can offer a private, newer rsync next to the server script. The client
+// asks for it with --rsync-path, which rsync forwards to the remote side; the
+// system binary is never replaced. Without the capability nothing changes, so an
+// older NAS keeps working exactly as before.
+func TestPrivateRemoteRsyncIsRequestedOnlyWhenAdvertised(t *testing.T) {
+	cfg := baseConfig()
+	tr := New(cfg, remote.New(cfg))
+	for _, upload := range []bool{true, false} {
+		args, _ := tr.BuildCommand([]string{"a.txt"}, upload)
+		for _, arg := range args {
+			if strings.HasPrefix(arg, "--rsync-path=") {
+				t.Fatalf("nessun rsync privato dichiarato, ma l'opzione c'è: %v", args)
+			}
+		}
+	}
+
+	cfg.Set("nas_rsync_path", "/volume1/Varie/sync-daemon/server/bin/nasbox-rsync", false)
+	args, _ := tr.BuildCommand([]string{"a.txt"}, true)
+	want := "--rsync-path=/volume1/Varie/sync-daemon/server/bin/nasbox-rsync"
+	found := -1
+	for index, arg := range args {
+		if arg == want {
+			found = index
+		}
+	}
+	if found < 0 {
+		t.Fatalf("rsync privato non richiesto: %v", args)
+	}
+	// rsync parses options before the two endpoints: after them it would be
+	// treated as a path (and the transfer would try to copy it).
+	if found >= len(args)-2 {
+		t.Fatalf("--rsync-path dopo gli endpoint: %v", args)
+	}
+	// No duplicates when the same command is rebuilt.
+	args = tr.withRemoteRsync(args)
+	count := 0
+	for _, arg := range args {
+		if arg == want {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("opzione duplicata %d volte: %v", count, args)
+	}
+}

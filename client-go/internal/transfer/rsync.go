@@ -82,6 +82,30 @@ func (t *Transfer) bandwidthLimit(upload bool) int {
 	return t.cfg.Int("bandwidth_kbps")
 }
 
+// remoteRsyncPath is the private rsync the NAS advertises, if any. The system
+// binary keeps serving DSM; the client only asks this one for its own transfers
+// via --rsync-path. Empty means "use whatever the login shell finds", which is
+// the behaviour of every release before the capability existed.
+func (t *Transfer) remoteRsyncPath() string {
+	return strings.TrimSpace(t.cfg.String("nas_rsync_path"))
+}
+
+// withRemoteRsync inserts --rsync-path when the NAS offered one. It must come
+// before the endpoints (the last two arguments of every command we build).
+func (t *Transfer) withRemoteRsync(args []string) []string {
+	path := t.remoteRsyncPath()
+	if path == "" {
+		return args
+	}
+	option := "--rsync-path=" + path
+	for _, existing := range args {
+		if strings.HasPrefix(existing, "--rsync-path=") {
+			return args
+		}
+	}
+	return append(args[:len(args)-2:len(args)-2], append([]string{option}, args[len(args)-2:]...)...)
+}
+
 func (t *Transfer) shouldCompress() bool {
 	switch strings.ToLower(t.cfg.String("compression_mode")) {
 	case "on":
@@ -118,6 +142,7 @@ func (t *Transfer) DownloadPath(relative string) error {
 		"--ignore-times", "--protect-args", "-e", t.sshArgs(),
 		t.remoteSpec(remotePath), local,
 	}
+	args = t.withRemoteRsync(args)
 	if limit := t.bandwidthLimit(false); limit > 0 {
 		args = append(args[:1], append([]string{"--bwlimit", fmt.Sprint(limit)}, args[1:]...)...)
 	}
@@ -151,6 +176,7 @@ func (t *Transfer) BuildCommand(paths []string, upload bool) ([]string, []byte) 
 		source, destination = root, remoteSpec
 	}
 	args = append(args, source, destination)
+	args = t.withRemoteRsync(args)
 	var payload bytes.Buffer
 	for _, path := range paths {
 		payload.WriteString(path)
@@ -258,6 +284,7 @@ func (t *Transfer) DownloadHistoryVersion(trashRel, relative string) error {
 	temporary := filepath.Join(filepath.Dir(local), "."+filepath.Base(local)+".nasbox-restore")
 	remotePath := strings.TrimSuffix(t.cfg.RemotePrefix(), "/") + "/.sync-trash/" + trashRel
 	args := []string{"-a", "--protect-args", "-e", t.sshArgs(), t.remoteSpec(remotePath), temporary}
+	args = t.withRemoteRsync(args)
 	if _, err := runRsync(t.ctx, nil, args...); err != nil {
 		_ = os.Remove(temporary)
 		return err
