@@ -221,6 +221,17 @@ func TestCaptureSoftware(t *testing.T) {
 	save("01d-status-held")
 	c.navigate(sectionActivity, 2)
 	save("02f-waiting")
+	c.searchIdx.entries = map[string]state.EntryState{
+		"Documenti/Progetti/preventivo.txt":             {Digest: "a", Size: 2048, MTimeNS: now.Add(-time.Hour).UnixNano()},
+		"Documenti/Progetti/preventivo-2025.pdf":        {Digest: "b", Size: 184320, MTimeNS: now.Add(-48 * time.Hour).UnixNano()},
+		"Archivio/2024/Preventivi/Preventivo Rossi.odt": {Digest: "c", Size: 31200, MTimeNS: now.Add(-900 * time.Hour).UnixNano()},
+		"Foto/2026/mare/IMG_2041.jpg":                   {Digest: "d", Size: 4200000, MTimeNS: now.Add(-12 * time.Minute).UnixNano()},
+	}
+	c.searchIdx.at = time.Now()
+	c.searchEntry.SetText("preventivo")
+	c.runSearch()
+	c.navigate(sectionFiles, 3)
+	save("03b-search")
 	c.navigate(sectionActivity, 1)
 	save("02c-transfers-live")
 	logEntries := []diagnostics.Entry{

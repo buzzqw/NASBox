@@ -4,6 +4,23 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 1.5.0 - 2026-11-25
+
+Client Go, più pratico e più vicino a Dropbox:
+
+- **Ricerca file immediata** (File › Cerca, pulsante «Cerca» in alto, voce nel
+  menu della tray e **Ctrl+F** da qualsiasi schermata). Cerca per nome o
+  cartella su tutti i file sincronizzati mentre scrivi, senza interrogare il
+  NAS: più parole = tutte devono comparire, gli accenti non contano
+  ("perche" trova "Perché"), i match nel nome vengono prima di quelli nella
+  cartella, a parità vince il file modificato più di recente. Per ogni
+  risultato: **Apri**, **Mostra cartella**, **Versioni**, **Copia percorso**.
+- **«Apri cartella»** sempre a portata di mano nell'intestazione.
+- **Attività recente apre il file** con un clic (le serie di file aprono la
+  cartella); il tooltip dice cosa fa il clic.
+- Corretto un crash raro nei test del selettore cartelle (aggiornamento UI a
+  finestra già chiusa).
+
 ## 1.4.4 - 2026-11-25
 
 Client Go:

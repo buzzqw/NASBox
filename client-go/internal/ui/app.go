@@ -162,6 +162,17 @@ type clientApp struct {
 	selectedDeviceLabel *widget.Label
 	wideRows            map[fyne.CanvasObject]bool
 	tipLayer            *fyne.Container
+	searchIdx           searchIndex
+	searchEntry         *widget.Entry
+	searchInfo          *widget.Label
+	searchList          *widget.List
+	searchHits          []searchHit
+	searchSelected      string
+	searchTimer         *time.Timer
+	searchOpenBtn       *tipButton
+	searchFolderBtn     *tipButton
+	searchVersionsBtn   *tipButton
+	searchCopyBtn       *tipButton
 	heldBox             *fyne.Container
 	waitingCard         fyne.CanvasObject
 	deletesCard         fyne.CanvasObject
@@ -473,6 +484,7 @@ func (c *clientApp) installShortcuts() {
 	canvas.AddShortcut(&desktop.CustomShortcut{KeyName: fyne.Key3, Modifier: fyne.KeyModifierControl}, func(fyne.Shortcut) { c.showSection(sectionFiles) })
 	canvas.AddShortcut(&desktop.CustomShortcut{KeyName: fyne.Key4, Modifier: fyne.KeyModifierControl}, func(fyne.Shortcut) { c.showSection(sectionNAS) })
 	canvas.AddShortcut(&desktop.CustomShortcut{KeyName: fyne.Key5, Modifier: fyne.KeyModifierControl}, func(fyne.Shortcut) { c.showSection(sectionSettings) })
+	canvas.AddShortcut(&desktop.CustomShortcut{KeyName: fyne.KeyF, Modifier: fyne.KeyModifierControl}, func(fyne.Shortcut) { c.focusSearch() })
 	canvas.AddShortcut(&desktop.CustomShortcut{KeyName: fyne.KeyComma, Modifier: fyne.KeyModifierControl}, func(fyne.Shortcut) { c.navigate(sectionSettings, 0) })
 }
 
@@ -667,6 +679,7 @@ func (c *clientApp) filesView() fyne.CanvasObject {
 		container.NewTabItem(tr("main_window.tab_browse", nil), c.buildBrowsePane()),
 		container.NewTabItem(tr("main_window.tab_conflicts", nil), c.buildConflictPane()),
 		container.NewTabItem(tr("main_window.tab_history", nil), c.buildHistoryPane()),
+		container.NewTabItem(lt("Cerca", "Search"), c.buildSearchPane()),
 	)
 	return c.fileTabs
 }

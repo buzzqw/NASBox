@@ -9,6 +9,7 @@ import (
 	"nasbox-go/internal/diagnostics"
 	"nasbox-go/internal/i18n"
 	"nasbox-go/internal/remote"
+	"nasbox-go/internal/state"
 )
 
 func TestBuildLogRowsFoldsBulkTransfersAndWritesSentences(t *testing.T) {
@@ -103,5 +104,34 @@ func TestWrapTip(t *testing.T) {
 		if len([]rune(line)) > 34 {
 			t.Fatalf("line too long: %q", line)
 		}
+	}
+}
+
+func TestSearchEntriesRanksNameMatchesAndFoldsAccents(t *testing.T) {
+	entries := map[string]state.EntryState{
+		"Archivio/Preventivo/nota.txt":     {Digest: "a", MTimeNS: 1},
+		"Documenti/preventivo.txt":         {Digest: "b", MTimeNS: 2},
+		"Documenti/Perché si fa.txt":       {Digest: "c", MTimeNS: 3},
+		"Documenti/cancellato.txt":         {Digest: "", MTimeNS: 4}, // tombstone
+		"Documenti/preventivo vecchio.txt": {Digest: "d", MTimeNS: 1},
+	}
+	hits := searchEntries(entries, "preventivo", 10)
+	if len(hits) != 3 || hits[0].Path != "Documenti/preventivo.txt" {
+		t.Fatalf("hits: %+v", hits)
+	}
+	if hits[2].Path != "Archivio/Preventivo/nota.txt" {
+		t.Fatalf("a folder-only match must rank last: %+v", hits)
+	}
+	if got := searchEntries(entries, "perche", 10); len(got) != 1 || got[0].Path != "Documenti/Perché si fa.txt" {
+		t.Fatalf("accent folding: %+v", got)
+	}
+	if got := searchEntries(entries, "cancellato", 10); len(got) != 0 {
+		t.Fatalf("deleted files must not be found: %+v", got)
+	}
+	if got := searchEntries(entries, "preventivo txt", 10); len(got) != 3 {
+		t.Fatalf("every word must match: %+v", got)
+	}
+	if got := searchEntries(entries, "   ", 10); got != nil {
+		t.Fatalf("empty query: %+v", got)
 	}
 }

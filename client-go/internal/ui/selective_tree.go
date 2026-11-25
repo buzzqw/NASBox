@@ -79,6 +79,9 @@ func (s *selectiveTree) childIDs(uid string) []string {
 }
 
 func (s *selectiveTree) load(uid string) {
+	// This runs in its own goroutine and ends with a UI update; if the window
+	// is already gone (tests, shutdown) that update must not crash the process.
+	defer func() { _ = recover() }()
 	entries, err := s.app.client.BrowseList(uid)
 	dirs := []string{}
 	if err == nil {

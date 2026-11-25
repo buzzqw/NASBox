@@ -28,6 +28,7 @@ func (c *clientApp) installTray() {
 				_ = exec.Command("xdg-open", root).Start()
 			}
 		}),
+		fyne.NewMenuItem(lt("Cerca un file…", "Search a file…"), func() { c.showWindow(); c.focusSearch() }),
 		c.trayRecent,
 		fyne.NewMenuItemSeparator(),
 		fyne.NewMenuItem(tr("ui.tray.sync", nil), c.onSync),

@@ -5683,8 +5683,8 @@
     "it": "Scorciatoie da tastiera"
   },
   "ui.settings.shortcuts_value": {
-    "en": "Ctrl+S sync · Ctrl+P pause · F5 refresh · Ctrl+1…5 areas · Ctrl+L log · Ctrl+, settings",
-    "it": "Ctrl+S sincronizza · Ctrl+P pausa · F5 aggiorna · Ctrl+1…5 aree · Ctrl+L log · Ctrl+, impostazioni"
+    "en": "Ctrl+S sync · Ctrl+F search · Ctrl+P pause · F5 refresh · Ctrl+1…5 areas · Ctrl+L log · Ctrl+, settings",
+    "it": "Ctrl+S sincronizza · Ctrl+F cerca · Ctrl+P pausa · F5 aggiorna · Ctrl+1…5 aree · Ctrl+L log · Ctrl+, impostazioni"
   },
   "ui.settings.ssh_port": {
     "en": "SSH port",

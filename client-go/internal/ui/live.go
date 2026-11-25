@@ -201,9 +201,15 @@ func (c *clientApp) renderRecent() {
 		when.Importance = widget.LowImportance
 		when.SizeName = theme.SizeNameCaptionText
 		target := group.Path
-		row := newTapRow(c, container.NewBorder(nil, nil, widget.NewIcon(recentIcon(group.Kind)), when, title),
-			func() { c.openContainingFolder(target) })
-		row.tip = group.Path + "\n" + lt("Clic: apri la cartella nel file manager", "Click: open the folder in the file manager")
+		open := func() { c.openContainingFolder(target) }
+		tip := group.Path + "\n" + lt("Clic: apri la cartella nel file manager", "Click: open the folder in the file manager")
+		if group.Count == 1 && group.Kind != "del" {
+			// One file: open the file itself, like Dropbox's recent list.
+			open = func() { c.openFile(target) }
+			tip = group.Path + "\n" + lt("Clic: apri il file", "Click: open the file")
+		}
+		row := newTapRow(c, container.NewBorder(nil, nil, widget.NewIcon(recentIcon(group.Kind)), when, title), open)
+		row.tip = tip
 		c.recentBox.Add(row)
 	}
 	c.recentBox.Refresh()

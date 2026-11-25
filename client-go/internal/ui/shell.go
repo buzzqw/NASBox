@@ -278,7 +278,13 @@ func (c *clientApp) buildHeader() fyne.CanvasObject {
 	c.pauseBtn = plainButton(labelPause(false), theme.MediaPauseIcon(),
 		tr("status.pause_tooltip", nil), widget.MediumImportance, c.onPause, c.setHint)
 	c.pauseBtn.SetText(labelPause(c.runner != nil && (c.runner.IsPaused() || c.pausedForNow())))
-	actions := container.NewHBox(c.pauseBtn, syncButton)
+	searchButton := newHintButton(lt("Cerca", "Search"), theme.SearchIcon(),
+		lt("Cerca un file tra tutti quelli sincronizzati (Ctrl+F)", "Search all synced files (Ctrl+F)"),
+		widget.LowImportance, c.focusSearch, c.setHint)
+	folderButton := newHintButton(lt("Apri cartella", "Open folder"), theme.FolderOpenIcon(),
+		lt("Apri la cartella NASBox sul tuo PC", "Open the NASBox folder on your PC"),
+		widget.LowImportance, c.openLocalFolder, c.setHint)
+	actions := container.NewHBox(searchButton, folderButton, c.pauseBtn, syncButton)
 	line := canvas.NewRectangle(c.tint(theme.ColorNameSeparator))
 	line.SetMinSize(fyne.NewSize(1, 1))
 	return container.NewVBox(
