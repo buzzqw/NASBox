@@ -277,6 +277,26 @@ func (s *Store) RecordEntry(repository, path string, entry EntryState) error {
 	return err
 }
 
+// ForgetPaths drops the sync baseline and the local observation of paths, so
+// the next pass treats the NAS copy as a new file and downloads it again. It
+// is how "restore what I deleted" works.
+func (s *Store) ForgetPaths(repository string, paths []string) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	for _, path := range paths {
+		if _, err := tx.Exec(`DELETE FROM entry WHERE repository = ? AND path = ?`, repository, path); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`DELETE FROM local_observation WHERE repository = ? AND path = ?`, repository, path); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
 // BackfillIdentities records lstat identity for the whole local tree, without
 // hashing file contents. Digests already known in `entry` are preserved.
 func (s *Store) BackfillIdentities(

@@ -201,6 +201,26 @@ func TestCaptureSoftware(t *testing.T) {
 	c.renderProgress(transfer.Progress{File: "SADE/SADE/images/eltab.png", Percent: 53, Bytes: 38000000000,
 		TotalBytes: 71000000000, Rate: "16.5 MB/s", ETA: "16:14", Done: 10301, Total: 19445})
 	save("01c-status-bulk")
+	engine.Issues.BeginPass()
+	engine.Issues.Report("Documenti/Contratti/bozza.docx", engine.PhaseRead, "file instabile durante la lettura")
+	engine.Issues.Report("Foto/2026/VID_2044.mp4", engine.PhaseUpload, "rsync: send_files failed to open: Permission denied (13)")
+	engine.Issues.Report("Archivio/vecchio.zip", engine.PhaseUpload, "boh")
+	held := []string{}
+	for index := 0; index < 2034; index++ {
+		held = append(held, fmt.Sprintf("SADE/SADE/images/img%04d.png", index))
+	}
+	for index := 0; index < 150; index++ {
+		held = append(held, fmt.Sprintf("hw2304847/sistema/f%03d", index))
+	}
+	engine.PendingDeletes.Set(held)
+	c.progress = transfer.Progress{Finished: true}
+	c.setTransferCardVisible(false)
+	c.applyStatusUI(statusBlocked, "Ho trattenuto 2.184 cancellazioni: serve una tua scelta. Tutto il resto continua a sincronizzarsi.")
+	c.refreshHeld()
+	c.showSection(sectionStatus)
+	save("01d-status-held")
+	c.navigate(sectionActivity, 2)
+	save("02f-waiting")
 	c.navigate(sectionActivity, 1)
 	save("02c-transfers-live")
 	logEntries := []diagnostics.Entry{
@@ -218,7 +238,7 @@ func TestCaptureSoftware(t *testing.T) {
 		diagnostics.Entry{Timestamp: now.Add(-27 * time.Hour), Level: "INFO", Action: "MIRROR", Path: "/home/andres/RPG", Detail: "replica aggiornata in NASBox/RPG"})
 	c.logEntries = logEntries
 	c.refreshLogView()
-	c.navigate(sectionActivity, 2)
+	c.navigate(sectionActivity, 3)
 	save("02d-log")
 	c.showTip("Differenze trovate dall'ultimo controllo di integrità. Clic per aprire le impostazioni di integrità.", fyne.NewPos(700, 300))
 	save("02e-tooltip")

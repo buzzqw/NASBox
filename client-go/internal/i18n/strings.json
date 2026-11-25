@@ -5723,8 +5723,8 @@
     "it": "Controlla il Log e risolvi il problema segnalato."
   },
   "ui.status.blocked": {
-    "en": "⛔ Blocked",
-    "it": "⛔ Bloccato"
+    "en": "Needs your decision",
+    "it": "Serve una tua scelta"
   },
   "ui.status.blocked_next": {
     "en": "Read the reason in the Log, fix it and retry.",
@@ -6517,5 +6517,9 @@
   "ui.tip.nav_settings": {
     "en": "Connection, safety, integrity and advanced options (Ctrl+5)",
     "it": "Connessione, sicurezza, integrità e opzioni avanzate (Ctrl+5)"
+  },
+  "overview.reason_waiting": {
+    "en": "{count} files waiting to be retried",
+    "it": "{count} file in attesa di un nuovo tentativo"
   }
 }

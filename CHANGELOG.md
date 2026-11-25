@@ -4,6 +4,31 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 1.4.0 - 2026-11-25
+
+Client Go, "come Dropbox": un file non ferma più gli altri.
+
+- **Errori per singolo file, mai per passata.** Un upload o download che fallisce
+  viene isolato dividendo il blocco a metà finché si trova il file
+  responsabile; tutti gli altri passano. Il file problematico entra in
+  "In attesa" e viene riprovato da solo dopo 1, 2, 5, 15, 60 minuti. Errori
+  globali (rete, lock di un altro PC, disco pieno) continuano a fermare la
+  passata e a essere ritentati.
+- **File illeggibili o in uso** (permessi, documento aperto che cambia) non
+  interrompono più la scansione: vengono tenuti fermi (mai caricati e mai
+  scambiati per cancellati) e riprovati.
+- **La protezione cancellazioni ferma solo le cancellazioni.** Upload, download
+  e rename continuano; prima una cartella duplicata eliminata a mano congelava
+  l'intera sincronizzazione.
+- **Scelta in un clic** per le cancellazioni trattenute: «Elimina anche dal
+  NAS» (resta nello storico) o «Ripristina qui» (riscarica i file). Si vede
+  quanti file e in quali cartelle.
+- **Nuova tab Attività › In attesa** con un motivo in italiano per ogni file e
+  «Riprova ora»; badge sul menu e scheda nello Stato.
+- **rsync exit 24** (file sparito durante il trasferimento) non è più un errore.
+- **Messaggi di stato senza gergo tecnico**: "Il NAS non risponde…" invece di
+  "ssh: exit status 255", "Serve una tua scelta" invece di "Bloccato".
+
 ## 1.3.0 - 2026-11-25
 
 Client Go:
@@ -17,6 +42,13 @@ Client Go:
   normale protezione cancellazioni (conferma). Il rifiuto del NAS riporta il
   motivo e non viene più scambiato per "offline": Offline solo per problemi
   di connessione (ssh 255, timeout, host non raggiungibile).
+- **Un rifiuto del NAS non ferma più la sincronizzazione.** Se il NAS rifiuta
+  un singolo rename (destinazione già presente, sorgente cambiata dopo il
+  manifest) il file viene caricato col nuovo nome e il vecchio passa dalle
+  normali protezioni cancellazioni (con copia nello storico). I file che il
+  NAS ha già su disco ma il manifest non conosce vengono adottati nel journal
+  (se identici, senza ritrasferirli) o sostituiti sotto lease (se diversi)
+  invece di far fallire `staging-publish` a ogni passata.
 - **Log leggibili**: frasi complete ("Scaricato dal NAS: …", "Il NAS ha
   rifiutato un'operazione…"), icone per livello, orario breve, voci ripetute
   raggruppate ("19.445 file scaricati in …") e filtro predefinito "Eventi

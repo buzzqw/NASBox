@@ -162,6 +162,15 @@ type clientApp struct {
 	selectedDeviceLabel *widget.Label
 	wideRows            map[fyne.CanvasObject]bool
 	tipLayer            *fyne.Container
+	heldBox             *fyne.Container
+	waitingCard         fyne.CanvasObject
+	deletesCard         fyne.CanvasObject
+	waitingTitle        *widget.Label
+	deletesTitle        *widget.Label
+	deletesDetail       *widget.Label
+	waitingList         *widget.List
+	waitingRows         []engine.Issue
+	waitingEmpty        *widget.Label
 	tipTimer            *time.Timer
 	tipGen              int
 	assignDeviceBtn     *tipButton
@@ -380,6 +389,7 @@ func (c *clientApp) tickRelativeTimes(ctx context.Context) {
 				c.updateLastSync()
 				c.renderRecent()
 				c.refreshTransfersPane()
+				c.refreshHeld()
 			})
 		}
 	}
@@ -456,7 +466,7 @@ func (c *clientApp) installShortcuts() {
 	canvas.AddShortcut(&desktop.CustomShortcut{KeyName: fyne.KeyS, Modifier: fyne.KeyModifierControl}, func(fyne.Shortcut) { c.onSync() })
 	canvas.AddShortcut(&desktop.CustomShortcut{KeyName: fyne.KeyP, Modifier: fyne.KeyModifierControl}, func(fyne.Shortcut) { c.onPause() })
 	canvas.AddShortcut(&desktop.CustomShortcut{KeyName: fyne.KeyF5}, func(fyne.Shortcut) { c.refreshCurrentSection() })
-	canvas.AddShortcut(&desktop.CustomShortcut{KeyName: fyne.KeyL, Modifier: fyne.KeyModifierControl}, func(fyne.Shortcut) { c.navigate(sectionActivity, 2) })
+	canvas.AddShortcut(&desktop.CustomShortcut{KeyName: fyne.KeyL, Modifier: fyne.KeyModifierControl}, func(fyne.Shortcut) { c.navigate(sectionActivity, 3) })
 	canvas.AddShortcut(&desktop.CustomShortcut{KeyName: fyne.Key1, Modifier: fyne.KeyModifierControl}, func(fyne.Shortcut) { c.showSection(sectionStatus) })
 	canvas.AddShortcut(&desktop.CustomShortcut{KeyName: fyne.Key2, Modifier: fyne.KeyModifierControl}, func(fyne.Shortcut) { c.showSection(sectionActivity) })
 	canvas.AddShortcut(&desktop.CustomShortcut{KeyName: fyne.Key3, Modifier: fyne.KeyModifierControl}, func(fyne.Shortcut) { c.showSection(sectionFiles) })
@@ -645,6 +655,7 @@ func (c *clientApp) activityView() fyne.CanvasObject {
 	c.activityTabs = container.NewAppTabs(
 		container.NewTabItem(tr("ui.activity.recent", nil), activityPane),
 		container.NewTabItem(tr("main_window.tab_transfers", nil), transfers),
+		container.NewTabItem(lt("In attesa", "Waiting"), c.buildWaitingPane()),
 		container.NewTabItem(tr("main_window.tab_log", nil), logPane),
 	)
 	return c.activityTabs
@@ -925,10 +936,13 @@ func (c *clientApp) applyStatusUI(level statusLevel, reason string) {
 		action, goFn = tr("main_window.tab_transfers", nil), func() { c.navigate(sectionActivity, 1) }
 	case statusAttention:
 		title, next, colour = tr("overview.banner_warning", nil), tr("ui.status.attention_next", nil), theme.ColorNameWarning
-		action, goFn = tr("main_window.tab_log", nil), func() { c.navigate(sectionActivity, 2) }
+		action, goFn = tr("main_window.tab_log", nil), func() { c.navigate(sectionActivity, 3) }
 	case statusBlocked:
 		title, next, colour = tr("ui.status.blocked", nil), tr("ui.status.blocked_next", nil), theme.ColorNameError
-		action, goFn = tr("main_window.tab_log", nil), func() { c.navigate(sectionActivity, 2) }
+		if len(engine.PendingDeletes.Paths()) > 0 {
+			next = lt("scegli qui sotto se eliminarli anche dal NAS o ripristinarli.", "choose below whether to delete them from the NAS too or bring them back.")
+		}
+		action, goFn = tr("main_window.tab_log", nil), func() { c.navigate(sectionActivity, 3) }
 	case statusOffline:
 		title, next, colour = tr("overview.banner_offline", nil), tr("overview.step_unreachable", nil), theme.ColorNameError
 		action, goFn = tr("main_window.tab_settings", nil), func() { c.navigate(sectionSettings, 0) }
@@ -953,7 +967,7 @@ func (c *clientApp) applyStatusUI(level statusLevel, reason string) {
 		c.statusDot.Refresh()
 	}
 	if c.confirmDeleteBtn != nil {
-		if level == statusBlocked {
+		if level == statusBlocked && len(engine.PendingDeletes.Paths()) == 0 {
 			c.confirmDeleteBtn.Show()
 		} else {
 			c.confirmDeleteBtn.Hide()
@@ -1157,6 +1171,7 @@ func (c *clientApp) consumeEvents() {
 			c.appendActivity(reason)
 			c.appendTransfer(reason)
 			c.appendLog(reason)
+			fyne.Do(c.refreshHeld)
 			c.refreshConflicts()
 			c.refreshHistory()
 			c.refreshStats()
@@ -1171,8 +1186,15 @@ func (c *clientApp) consumeEvents() {
 			c.applyStatus(statusProgress, tr("ui.status.nas_busy", nil))
 			c.appendLog(event.Message)
 		case "blocked":
-			c.applyStatus(statusBlocked, event.Message)
-			c.appendAction(event.Message)
+			message := event.Message
+			if held := len(engine.PendingDeletes.Paths()); held > 0 {
+				message = lt(
+					fmt.Sprintf("Ho trattenuto %s cancellazioni: serve una tua scelta. Tutto il resto continua a sincronizzarsi.", formatCount(held)),
+					fmt.Sprintf("I held back %s deletions: I need your decision. Everything else keeps syncing.", formatCount(held)))
+			}
+			c.applyStatus(statusBlocked, message)
+			c.appendAction(message)
+			fyne.Do(c.refreshHeld)
 		case "notify":
 			c.appendActivity(event.Message)
 			fyne.Do(func() {
@@ -1188,8 +1210,9 @@ func (c *clientApp) consumeEvents() {
 			if looksOffline(event.Message) {
 				level = statusOffline
 			}
-			c.applyStatus(level, event.Message)
-			c.appendAction(fmt.Sprintf("%s: %s", tr("log.action.error", nil), event.Message))
+			friendly := humanError(event.Message)
+			c.applyStatus(level, friendly)
+			c.appendAction(friendly)
 		default:
 			c.appendLog(event.Message)
 		}

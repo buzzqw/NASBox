@@ -65,7 +65,8 @@ func scanIncremental(
 			continue
 		}
 		if err != nil {
-			return nil, fmt.Errorf("stat locale non riuscito per %s: %w", rel, err)
+			Issues.Report(rel, PhaseRead, err.Error())
+			continue
 		}
 		if info.IsDir() {
 			if err := scanTree(cfg, identities, rel, files, skipped); err != nil {
@@ -82,7 +83,8 @@ func scanIncremental(
 		}
 		file, err := scanFile(filepath.Join(root, filepath.FromSlash(rel)), rel, info, identities)
 		if err != nil {
-			return nil, err
+			Issues.Report(rel, PhaseRead, err.Error())
+			continue
 		}
 		files[rel] = file
 	}

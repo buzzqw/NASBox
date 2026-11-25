@@ -3,6 +3,7 @@ package transfer
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -205,5 +206,15 @@ func TestCommandsAvoidOptionsUnknownToNASRsync312(t *testing.T) {
 				t.Fatalf("download uses %s: %v", bad, *captured)
 			}
 		}
+	}
+}
+
+func TestRsyncVanishedFilesAreNotAnError(t *testing.T) {
+	err := exec.Command("sh", "-c", "exit 24").Run()
+	if err == nil || !vanishedOnly(err) {
+		t.Fatalf("exit 24 must be recognised, got %v", err)
+	}
+	if vanishedOnly(exec.Command("sh", "-c", "exit 23").Run()) {
+		t.Fatal("exit 23 (partial transfer) is a real failure")
 	}
 }

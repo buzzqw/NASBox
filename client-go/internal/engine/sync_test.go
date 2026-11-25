@@ -12,6 +12,7 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 
 	"nasbox-go/internal/causal"
 	"nasbox-go/internal/classify"
@@ -202,7 +203,11 @@ func TestPreviewIgnoresUpdateChannels(t *testing.T) {
 	}
 }
 
-func TestScanLocalFailsClosedOnUnreadableFile(t *testing.T) {
+// An unreadable file is held back (never uploaded, never taken for deleted)
+// and reported as a waiting file; the rest of the tree is still scanned.
+func TestScanLocalHoldsUnreadableFileInsteadOfAborting(t *testing.T) {
+	Issues = &issueBook{issues: map[string]*Issue{}, now: time.Now}
+	Issues.BeginPass()
 	cfg, _, root := setupTest(t)
 	path := filepath.Join(root, "locked.txt")
 	if err := os.WriteFile(path, []byte("secret"), 0o600); err != nil {
@@ -212,8 +217,18 @@ func TestScanLocalFailsClosedOnUnreadableFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer os.Chmod(path, 0o600)
-	if _, err := scanLocal(cfg, map[string]state.Identity{}, nil); err == nil {
-		t.Fatal("unreadable file must stop the scan")
+	if err := os.WriteFile(filepath.Join(root, "fine.txt"), []byte("ok"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	files, err := scanLocal(cfg, map[string]state.Identity{}, nil)
+	if err != nil {
+		t.Fatalf("an unreadable file must not stop the scan: %v", err)
+	}
+	if _, ok := files["fine.txt"]; !ok {
+		t.Fatal("readable files are still scanned")
+	}
+	if _, ok := files["locked.txt"]; ok || !Issues.Held("locked.txt") {
+		t.Fatalf("locked.txt must be held back: files=%v held=%v", files, Issues.Held("locked.txt"))
 	}
 }
 
@@ -655,6 +670,7 @@ func TestSyncOnceRenameTargetIsNotUploadedTwice(t *testing.T) {
 // A failed publish must not promote the local observation to a baseline: the
 // next pass has to retry with the identical causal.
 func TestSyncOnceStagingFailureLeavesBaselineUnchanged(t *testing.T) {
+	Issues = &issueBook{issues: map[string]*Issue{}, now: time.Now}
 	cfg, store, root := setupTest(t)
 	if err := os.WriteFile(filepath.Join(root, "pending.txt"), []byte("new"), 0o600); err != nil {
 		t.Fatal(err)
@@ -662,8 +678,11 @@ func TestSyncOnceStagingFailureLeavesBaselineUnchanged(t *testing.T) {
 	nas := &fakeNAS{config: nasConfig(), manifest: "NASBOX_MANIFEST_V1\n"}
 	transfers := &fakeTransfer{stageErr: errors.New("publish rifiutato")}
 	result, err := SyncOnce(cfg, store, nas, transfers)
-	if err == nil {
-		t.Fatal("failed staging must abort the pass")
+	if err != nil {
+		t.Fatalf("a file the NAS refuses must not abort the pass: %v", err)
+	}
+	if result.Problems != 1 || Issues.Count() != 1 {
+		t.Fatalf("the refused file must be waiting for a retry: %+v", result)
 	}
 	if result.Uploaded != 0 {
 		t.Fatalf("failed upload counted as success: %+v", result)
@@ -694,5 +713,42 @@ func TestSelectiveExcludesAreAnchoredFolderPrefixes(t *testing.T) {
 		if got := excluded(cfg, path); got != want {
 			t.Errorf("excluded(%q) = %v, want %v", path, got, want)
 		}
+	}
+}
+
+type fakeStateReader struct {
+	ConfigSource
+	states map[string]remote.FileState
+}
+
+func (f fakeStateReader) FileStatesCurrent(paths []string) (map[string]remote.FileState, error) {
+	out := map[string]remote.FileState{}
+	for _, path := range paths {
+		if state, ok := f.states[path]; ok {
+			out[path] = state
+		} else {
+			out[path] = remote.FileState{Kind: "ABSENT"}
+		}
+	}
+	return out, nil
+}
+
+// A rename onto a path the NAS already holds is refused by the server; the
+// plan must fall back to a plain missing path instead of aborting every pass.
+func TestDropRenamesOntoExistingFiles(t *testing.T) {
+	report := classify.Report{
+		MissingTotal: 2,
+		Renames: []classify.Rename{
+			{Missing: "old/a.png", Local: "new/a.png"},
+			{Missing: "old/b.png", Local: "new/b.png"},
+		},
+	}
+	client := fakeStateReader{states: map[string]remote.FileState{"new/a.png": {Kind: "FILE"}}}
+	got := dropRenamesOntoExistingFiles(client, report)
+	if len(got.Renames) != 1 || got.Renames[0].Missing != "old/b.png" {
+		t.Fatalf("renames: %+v", got.Renames)
+	}
+	if len(got.Unexplained) != 1 || got.Unexplained[0] != "old/a.png" {
+		t.Fatalf("unexplained: %+v", got.Unexplained)
 	}
 }

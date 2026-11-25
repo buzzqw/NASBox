@@ -72,6 +72,7 @@ func (c *clientApp) statusView() fyne.CanvasObject {
 	columns := container.NewGridWithColumns(2, c.buildRecentCard(), c.buildNASCard())
 	c.homeBox = container.NewVBox(
 		c.buildBanner(),
+		c.buildHeldCards(),
 		c.buildTransferCard(),
 		stats,
 		columns,

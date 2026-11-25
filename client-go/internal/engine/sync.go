@@ -69,14 +69,26 @@ func hintSizes(transfers Transferer, paths []string, size func(string) int64) {
 	hinter.HintSizes(sizes)
 }
 
+// nasStateReader is implemented by remote.Client: it reads what the NAS holds
+// on disk for some paths (also files the manifest does not know). Test fakes
+// do not implement it and skip the checks that need it.
+type nasStateReader interface {
+	FileStatesCurrent(paths []string) (map[string]remote.FileState, error)
+}
+
 type SyncResult struct {
-	Uploaded  int
-	Deleted   int
-	Blocked   string
-	Missing   int
-	Renames   int
-	Conflicts int
-	Downloads int
+	Uploaded int
+	Deleted  int
+	Blocked  string
+	Missing  int
+	Renames  int
+	// RenamesRefused counts moves the NAS refused; they fall back to
+	// upload + guarded deletion.
+	RenamesRefused int
+	Conflicts      int
+	Downloads      int
+	// Problems is the number of files waiting for a retry (see Issues).
+	Problems int
 	// Stale counts overwrites skipped because the NAS changed after planning.
 	Stale int
 	// LocalDeleted counts files removed locally because another PC deleted
@@ -170,6 +182,22 @@ func SyncPass(
 	scope *ScanScope,
 	stormTrackers ...*conflicts.StormTracker,
 ) (SyncResult, error) {
+	Issues.BeginPass()
+	result, err := syncPass(cfg, store, client, transfers, manifest, scope, stormTrackers...)
+	Issues.EndPass()
+	result.Problems = Issues.Count()
+	return result, err
+}
+
+func syncPass(
+	cfg *config.Config,
+	store *state.Store,
+	client ConfigSource,
+	transfers Transferer,
+	manifest map[string]classify.RemoteState,
+	scope *ScanScope,
+	stormTrackers ...*conflicts.StormTracker,
+) (SyncResult, error) {
 	result := SyncResult{}
 	timer := &phaseTimer{result: &result, last: time.Now()}
 	storm := (*conflicts.StormTracker)(nil)
@@ -233,7 +261,7 @@ func SyncPass(
 		if remoteState.Kind != "FILE" || excluded(cfg, path) {
 			continue
 		}
-		if _, present := local[path]; !present {
+		if _, present := local[path]; !present && !Issues.Held(path) {
 			observations[path] = state.Observation{Present: false}
 		}
 	}
@@ -305,7 +333,7 @@ func SyncPass(
 	}
 
 	for path, remoteState := range manifest {
-		if remoteState.Kind != "FILE" || excluded(cfg, path) {
+		if remoteState.Kind != "FILE" || excluded(cfg, path) || Issues.Held(path) {
 			continue
 		}
 		decision, err := plan(path, reconcile.RemoteState{
@@ -319,7 +347,9 @@ func SyncPass(
 		case reconcile.Nothing, reconcile.Adopt:
 			continue
 		case reconcile.Block:
-			return result, fmt.Errorf("sincronizzazione bloccata per %s: %s", path, decision.Detail)
+			// One file the planner will not touch must not stop the others.
+			Issues.Report(path, PhasePlan, decision.Detail)
+			continue
 		case reconcile.DeleteRemote:
 			if allowDelete {
 				missing = append(missing, path)
@@ -388,15 +418,20 @@ func SyncPass(
 		currentIdentities[path] = identity
 	}
 	report := classify.Classify(missing, manifest, currentIdentities, ratio, minFiles)
+	report = dropRenamesOntoExistingFiles(client, report)
 	result.Missing = report.MissingTotal
 	result.Renames = len(report.Renames)
+	// A safety guard holds back the deletions only. Uploads, downloads and
+	// renames are not dangerous and keep flowing: a duplicate folder removed
+	// by hand must not freeze the whole sync.
+	deletionsHeld := false
 	if message := guardMessage(cfg, report); message != "" {
 		result.Blocked = message
-		return result, nil
+		deletionsHeld = true
 	}
 	if message := localDeleteGuard(cfg, len(localDeletes)); message != "" {
 		result.Blocked = message
-		return result, nil
+		localDeletes = nil
 	}
 
 	// Renames are atomic server mutations. A failed rename must abort the pass:
@@ -411,6 +446,17 @@ func SyncPass(
 		if err != nil || !ok {
 			if err == nil {
 				err = fmt.Errorf("rename remoto rifiutato: %s -> %s", rename.Missing, rename.Local)
+			}
+			// The NAS refusing one move (destination already there, source
+			// changed since the manifest...) must not stop the whole pass for
+			// ever. The file is uploaded under its new name (uploads run
+			// first) and the old name goes through the normal deletion
+			// safeguards, which keep a copy in the NAS history: nothing can be
+			// lost this way. Connection and server failures still abort.
+			if isNASRefusal(err) {
+				report.Unexplained = append(report.Unexplained, rename.Missing)
+				result.RenamesRefused++
+				continue
 			}
 			return result, err
 		}
@@ -442,6 +488,10 @@ func SyncPass(
 		}
 	}
 
+	// Files that failed recently wait for their retry delay.
+	uploads = withoutWaiting(uploads)
+	downloads = withoutWaiting(downloads)
+
 	// Uploads first: a file that still exists locally must never be lost to a
 	// subsequent delete pass. The clock was already advanced once by Observe;
 	// staging publishes that exact version, so no second increment is allowed.
@@ -468,63 +518,151 @@ func SyncPass(
 			created = append(created, path)
 			files = append(files, staged)
 		}
-		if len(created) > 0 {
-			hintSizes(transfers, created, func(path string) int64 { return local[path].Size })
-			if err := transfers.UploadStaged(created, device, files); err != nil {
-				return result, err
-			}
-			// Only now, after the server committed the publish, promote the
-			// local observations to baselines. A failed publish leaves them
-			// untouched so the next pass retries with the very same causal.
-			for _, file := range files {
-				if err := store.RecordEntry(cfg.LocalRepositoryID(), file.Path, state.EntryState{
-					Digest: file.Digest, Size: file.Size, MTimeNS: file.MTimeNS,
-					Causal: file.Causal,
-				}); err != nil {
-					return result, err
-				}
-			}
-			result.Uploaded += len(files)
-		}
-		if len(replacements) > 0 {
-			hintSizes(transfers, uploads, func(path string) int64 { return local[path].Size })
-			replaced, err := transfers.UploadReplace(replacements, device, cfg.String("repository_id"), newRunTS())
+		if reader, ok := client.(nasStateReader); ok && len(created) > 0 {
+			// The NAS may already hold some of these paths on disk without the
+			// manifest knowing them (copied there by hand, or left by an
+			// interrupted run). staging-publish refuses them and used to abort
+			// the whole pass every time: identical files are adopted into the
+			// journal without a transfer, different ones are replaced under
+			// the NAS lease with the current NAS version as precondition.
+			states, err := reader.FileStatesCurrent(created)
 			if err != nil {
 				return result, err
 			}
-			// The baseline is what the NAS journaled. If the local file
-			// changed during the upload it differs from the local version, so
-			// the next pass uploads the newer bytes.
-			for _, put := range replaced.Replaced {
-				if err := store.RecordEntry(cfg.LocalRepositoryID(), put.Path, state.EntryState{
-					Digest: put.Digest, Size: put.Size, MTimeNS: put.MTimeNS, Causal: put.Causal,
-				}); err != nil {
+			keptCreated := created[:0:0]
+			keptFiles := files[:0:0]
+			adopted := make([]remote.JournalPut, 0)
+			for index, path := range created {
+				state, exists := states[path]
+				if !exists || state.Kind != "FILE" {
+					keptCreated = append(keptCreated, path)
+					keptFiles = append(keptFiles, files[index])
+					continue
+				}
+				staged := files[index]
+				if state.Digest == staged.Digest && state.Size == staged.Size {
+					adopted = append(adopted, remote.JournalPut{
+						Path: path, Digest: staged.Digest, Size: staged.Size,
+						MTimeNS: staged.MTimeNS, Causal: staged.Causal,
+					})
+					continue
+				}
+				replacements = append(replacements, remote.ReplaceFile{
+					StagedFile: staged, ExpectedDigest: state.Digest, ExpectedSize: state.Size,
+				})
+			}
+			if len(adopted) > 0 {
+				ok, err := client.JournalAppend(cfg.String("repository_id"), "adopt-"+newRunTS(), device, adopted)
+				if err != nil || !ok {
+					if err == nil {
+						err = fmt.Errorf("journal NAS non aggiornato per i file già presenti")
+					}
 					return result, err
 				}
+				for _, put := range adopted {
+					if err := store.RecordEntry(cfg.LocalRepositoryID(), put.Path, state.EntryState{
+						Digest: put.Digest, Size: put.Size, MTimeNS: put.MTimeNS, Causal: put.Causal,
+					}); err != nil {
+						return result, err
+					}
+				}
+				result.Uploaded += len(adopted)
 			}
-			result.Uploaded += len(replaced.Replaced)
-			result.Stale += len(replaced.Stale)
+			created, files = keptCreated, keptFiles
+		}
+		if len(created) > 0 {
+			stagedByPath := make(map[string]remote.StagedFile, len(files))
+			for _, file := range files {
+				stagedByPath[file.Path] = file
+			}
+			err := isolateBatch(created, PhaseUpload, 60, func(batch []string) error {
+				batchFiles := make([]remote.StagedFile, 0, len(batch))
+				for _, path := range batch {
+					batchFiles = append(batchFiles, stagedByPath[path])
+				}
+				hintSizes(transfers, batch, func(path string) int64 { return local[path].Size })
+				if err := transfers.UploadStaged(batch, device, batchFiles); err != nil {
+					return err
+				}
+				// Only now, after the server committed the publish, promote the
+				// local observations to baselines. A failed publish leaves them
+				// untouched so the next pass retries with the very same causal.
+				for _, file := range batchFiles {
+					if err := store.RecordEntry(cfg.LocalRepositoryID(), file.Path, state.EntryState{
+						Digest: file.Digest, Size: file.Size, MTimeNS: file.MTimeNS,
+						Causal: file.Causal,
+					}); err != nil {
+						return fatalError{err}
+					}
+				}
+				result.Uploaded += len(batchFiles)
+				return nil
+			})
+			if err != nil {
+				return result, unwrapFatal(err)
+			}
+		}
+		if len(replacements) > 0 {
+			replacementByPath := make(map[string]remote.ReplaceFile, len(replacements))
+			replacementPaths := make([]string, 0, len(replacements))
+			for _, file := range replacements {
+				replacementByPath[file.Path] = file
+				replacementPaths = append(replacementPaths, file.Path)
+			}
+			err := isolateBatch(replacementPaths, PhaseUpload, 60, func(batch []string) error {
+				subset := make([]remote.ReplaceFile, 0, len(batch))
+				for _, path := range batch {
+					subset = append(subset, replacementByPath[path])
+				}
+				hintSizes(transfers, batch, func(path string) int64 { return local[path].Size })
+				replaced, err := transfers.UploadReplace(subset, device, cfg.String("repository_id"), newRunTS())
+				if err != nil {
+					return err
+				}
+				// The baseline is what the NAS journaled. If the local file
+				// changed during the upload it differs from the local version, so
+				// the next pass uploads the newer bytes.
+				for _, put := range replaced.Replaced {
+					if err := store.RecordEntry(cfg.LocalRepositoryID(), put.Path, state.EntryState{
+						Digest: put.Digest, Size: put.Size, MTimeNS: put.MTimeNS, Causal: put.Causal,
+					}); err != nil {
+						return fatalError{err}
+					}
+				}
+				result.Uploaded += len(replaced.Replaced)
+				result.Stale += len(replaced.Stale)
+				return nil
+			})
+			if err != nil {
+				return result, unwrapFatal(err)
+			}
 		}
 	}
 	if len(downloads) > 0 {
-		hintSizes(transfers, downloads, func(path string) int64 { return manifest[path].Size })
-		if err := transfers.Download(downloads); err != nil {
-			return result, err
-		}
-		for _, path := range downloads {
-			remoteState := manifest[path]
-			remoteCausal := remoteState.Causal
-			if _, ok := causal.Parse(remoteCausal); !ok {
-				remoteCausal = ""
+		err := isolateBatch(downloads, PhaseDownload, 60, func(batch []string) error {
+			hintSizes(transfers, batch, func(path string) int64 { return manifest[path].Size })
+			if err := transfers.Download(batch); err != nil {
+				return err
 			}
-			if err := store.RecordEntry(cfg.LocalRepositoryID(), path, state.EntryState{
-				Digest: remoteState.Digest, Size: remoteState.Size,
-				MTimeNS: remoteState.MTimeNS, Causal: remoteCausal,
-			}); err != nil {
-				return result, err
+			for _, path := range batch {
+				remoteState := manifest[path]
+				remoteCausal := remoteState.Causal
+				if _, ok := causal.Parse(remoteCausal); !ok {
+					remoteCausal = ""
+				}
+				if err := store.RecordEntry(cfg.LocalRepositoryID(), path, state.EntryState{
+					Digest: remoteState.Digest, Size: remoteState.Size,
+					MTimeNS: remoteState.MTimeNS, Causal: remoteCausal,
+				}); err != nil {
+					return fatalError{err}
+				}
 			}
+			result.Downloads += len(batch)
+			return nil
+		})
+		if err != nil {
+			return result, unwrapFatal(err)
 		}
-		result.Downloads = len(downloads)
 	}
 	if len(localDeletes) > 0 {
 		deleted, err := applyRemoteDeletions(cfg, store, local, manifest, localDeletes)
@@ -534,12 +672,22 @@ func SyncPass(
 		}
 	}
 	deletions := make([]string, 0, len(report.Unexplained))
+	proposed := make([]string, 0, len(report.Unexplained))
 	for _, path := range report.Unexplained {
 		if allowDelete && deleteApproved[path] {
-			deletions = append(deletions, path)
+			proposed = append(proposed, path)
+			if !deletionsHeld {
+				deletions = append(deletions, path)
+			}
 		}
 	}
+	if deletionsHeld {
+		PendingDeletes.Set(proposed)
+	} else {
+		PendingDeletes.Set(nil)
+	}
 	if err := deletesafety.Shared().Check(cfg, len(deletions), "sync"); err != nil {
+		PendingDeletes.Set(proposed)
 		if blocked, ok := err.(*deletesafety.BlockedError); ok {
 			result.Blocked = i18n.T("safety.blocked_cumulative", map[string]any{
 				"count": blocked.Total, "limit": blocked.Limit,
@@ -668,6 +816,16 @@ func scanTree(
 	}
 	return filepath.WalkDir(base, func(path string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
+			// A folder or file NASBox cannot read right now (permissions, a
+			// file in use) is held back, not fatal: everything else syncs.
+			// "Held" keeps it from being uploaded or taken for deleted.
+			if relPath, relErr := filepath.Rel(root, path); relErr == nil && relPath != "." {
+				Issues.Report(filepath.ToSlash(relPath), PhaseRead, walkErr.Error())
+				if entry != nil && entry.IsDir() {
+					return filepath.SkipDir
+				}
+				return nil
+			}
 			return fmt.Errorf("scan locale non riuscito per %s: %w", path, walkErr)
 		}
 		rel, err := filepath.Rel(root, path)
@@ -698,11 +856,13 @@ func scanTree(
 		}
 		info, err := entry.Info()
 		if err != nil {
-			return fmt.Errorf("stat locale non riuscito per %s: %w", rel, err)
+			Issues.Report(rel, PhaseRead, err.Error())
+			return nil
 		}
 		file, err := scanFile(path, rel, info, identities)
 		if err != nil {
-			return err
+			Issues.Report(rel, PhaseRead, err.Error())
+			return nil
 		}
 		result[rel] = file
 		return nil
@@ -808,4 +968,57 @@ func applyRemoteDeletions(
 		deleted++
 	}
 	return deleted, nil
+}
+
+// dropRenamesOntoExistingFiles turns a rename whose destination the NAS
+// already holds on disk into an ordinary missing path: the server refuses such
+// a move ("esiste gia un percorso") and the refusal used to abort every pass.
+// The vanished source then goes through the normal deletion safeguards.
+func dropRenamesOntoExistingFiles(client ConfigSource, report classify.Report) classify.Report {
+	reader, ok := client.(nasStateReader)
+	if !ok || len(report.Renames) == 0 {
+		return report
+	}
+	targets := make([]string, 0, len(report.Renames))
+	for _, rename := range report.Renames {
+		targets = append(targets, rename.Local)
+	}
+	states, err := reader.FileStatesCurrent(targets)
+	if err != nil {
+		return report // keep the plan; a real NAS problem surfaces on the rename itself
+	}
+	kept := report.Renames[:0:0]
+	for _, rename := range report.Renames {
+		if state, exists := states[rename.Local]; exists && state.Kind == "FILE" {
+			report.Unexplained = append(report.Unexplained, rename.Missing)
+			continue
+		}
+		kept = append(kept, rename)
+	}
+	report.Renames = kept
+	return report
+}
+
+// isNASRefusal reports whether the error is the NAS answering "no" to one
+// rename (as opposed to a connection or server failure).
+func isNASRefusal(err error) bool {
+	if err == nil {
+		return false
+	}
+	text := err.Error()
+	return strings.Contains(text, "il NAS ha rifiutato lo spostamento") ||
+		strings.Contains(text, "rename remoto fallito") ||
+		strings.Contains(text, "rename remoto rifiutato")
+}
+
+// withoutWaiting drops the files that failed recently and are still inside
+// their retry delay; they are tried again by a later pass.
+func withoutWaiting(paths []string) []string {
+	kept := paths[:0:0]
+	for _, path := range paths {
+		if !Issues.Waiting(path) {
+			kept = append(kept, path)
+		}
+	}
+	return kept
 }

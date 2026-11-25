@@ -30,6 +30,9 @@ var runRsync = func(ctx context.Context, stdin []byte, args ...string) ([]byte, 
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
+		if vanishedOnly(err) {
+			return nil, nil
+		}
 		return stderr.Bytes(), fmt.Errorf("rsync: %w: %s", err, strings.TrimSpace(stderr.String()))
 	}
 	return nil, nil

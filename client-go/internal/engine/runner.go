@@ -124,6 +124,37 @@ func (r *Runner) SyncNow() {
 	r.notify()
 }
 
+// SyncNowForce starts a pass right away, ignoring any retry delay.
+func (r *Runner) SyncNowForce() {
+	r.mu.Lock()
+	r.backoff = 0
+	r.nextTry = time.Time{}
+	r.mu.Unlock()
+	r.SyncNow()
+}
+
+// RetryWaiting retries every waiting file at once.
+func (r *Runner) RetryWaiting() {
+	Issues.RetryNow()
+	r.SyncNowForce()
+}
+
+// RestoreHeldDeletions brings back the files a safety guard was about to
+// delete from the NAS: their baseline is forgotten, so the next pass sees the
+// NAS copies as new files and downloads them. It returns how many.
+func (r *Runner) RestoreHeldDeletions() (int, error) {
+	paths := PendingDeletes.Paths()
+	if len(paths) == 0 {
+		return 0, nil
+	}
+	if err := r.store.ForgetPaths(r.cfg.LocalRepositoryID(), paths); err != nil {
+		return 0, err
+	}
+	PendingDeletes.Set(nil)
+	r.SyncNowForce()
+	return len(paths), nil
+}
+
 func (r *Runner) notify() {
 	select {
 	case r.wake <- struct{}{}:
@@ -387,6 +418,13 @@ func (r *Runner) Run(ctx context.Context) error {
 			_ = r.logger.Event("PERF", "-", "sync: "+strings.Join(result.Timings, ", "))
 		}
 		if result.Blocked != "" {
+			// Only the deletions are held back; whatever else was transferred in
+			// this pass is reported first, then the decision the user must take.
+			if result.Uploaded+result.Downloads > 0 {
+				r.emit("notify", i18n.T("assurance.activity", map[string]any{
+					"uploads": result.Uploaded, "downloads": result.Downloads, "deletes": result.Deleted,
+				}))
+			}
 			r.emit("blocked", result.Blocked)
 			r.mu.Lock()
 			r.backoff = 5 * time.Minute
@@ -404,6 +442,9 @@ func (r *Runner) Run(ctx context.Context) error {
 		summary := i18n.T("assurance.activity", map[string]any{
 			"uploads": result.Uploaded, "downloads": result.Downloads, "deletes": result.Deleted,
 		}) + ", " + i18n.T("overview.reason_conflicts", map[string]any{"count": result.Conflicts})
+		if result.Problems > 0 {
+			summary += ", " + i18n.T("overview.reason_waiting", map[string]any{"count": result.Problems})
+		}
 		r.emit("sync", summary)
 		if r.cfg.Bool("notify_sync_completion") &&
 			(result.Uploaded+result.Downloads+result.Deleted > 0) {

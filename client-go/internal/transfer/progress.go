@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -86,6 +87,9 @@ var runRsyncStreaming = func(ctx context.Context, stdin []byte, onLine func(stri
 	}
 	scanLines(stdout, onLine)
 	if err := cmd.Wait(); err != nil {
+		if vanishedOnly(err) {
+			return nil, nil
+		}
 		return stderr.Bytes(), fmt.Errorf("rsync: %w: %s", err, strings.TrimSpace(stderr.String()))
 	}
 	return nil, nil
@@ -429,4 +433,13 @@ func (t *Transfer) takeSizeHint(payload []byte) int64 {
 		total += size
 	}
 	return total
+}
+
+// vanishedOnly tells rsync's exit code 24 ("some files vanished before they
+// could be transferred") from a real failure. A file deleted or renamed while
+// the batch runs is normal life on a busy folder, not an error: the next pass
+// sees the deletion or the new name.
+func vanishedOnly(err error) bool {
+	var exit *exec.ExitError
+	return errors.As(err, &exit) && exit.ExitCode() == 24
 }

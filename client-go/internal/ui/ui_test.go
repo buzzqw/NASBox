@@ -140,7 +140,7 @@ func TestBannerActionNavigatesToGuidance(t *testing.T) {
 	if c.active != sectionActivity {
 		t.Fatalf("active = %v, want activity", c.active)
 	}
-	if got := c.activityTabs.SelectedIndex(); got != 2 {
+	if got := c.activityTabs.SelectedIndex(); got != 3 {
 		t.Fatalf("selected activity tab = %d, want log", got)
 	}
 }
