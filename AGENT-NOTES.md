@@ -3,6 +3,23 @@
 Scritte il 2026-11-15 da un agente, dopo aver verificato ogni comando su questa macchina.
 Se qualcosa non torna, valgono i comandi in fondo.
 
+## Stato al 2026-11-25 (verificato su dati veri)
+
+- Client Go **1.9.0**, server **3.29.0**; 122 e 134 aggiornati, GUI riavviata.
+- Rilascio fatto: commit `eb8196e`, canale `go-stable` con 1.9.0 e 1.8.0
+  (retention 2), server riavviato e `VERSION=3.29.0`.
+- Misure sul NAS vero: cancellazione di 300 file da **37,97 s a 10,81 s** (un
+  solo append al journal e una sola revisione); rinomina di una cartella da
+  30 MB in **una** richiesta con il secondo PC che sposta i file in locale
+  (inode invariati, **zero** download); dopo la cancellazione della cartella
+  sul NAS non resta nessuna directory vuota.
+- Delta rsync sulle sostituzioni (già attivo): 200 MB con 1 MB cambiato =
+  14.480 byte inviati, 5,8 s contro 19,6 s a file intero. Sui file **nuovi**
+  non c'è base: nessun delta possibile senza un archivio a blocchi.
+- Difetti aperti: la protezione cartella non è sbloccabile con
+  `confirm-delete` (vedi `CLAUDE.md`); differenza di file tracciati tra 122
+  (119.066) e 134 (119.745).
+
 ## Dove vive cosa
 
 | Cosa | Percorso |
