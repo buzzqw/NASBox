@@ -33,7 +33,7 @@
 #
 set -uo pipefail
 
-VERSION="3.31.0"
+VERSION="3.32.0"
 SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -887,7 +887,8 @@ cmd_manifest_export() {
     # other readers or rewriting anything. Writers still take the exclusive
     # side, so an export cannot observe half an append.
     if command -v flock >/dev/null 2>&1; then
-        exec 9>>"$JOURNAL_LOCK_FILE" 2>/dev/null || true
+        # No "2>/dev/null" on the exec line: it would silence this command.
+        exec 9>>"$JOURNAL_LOCK_FILE"
         if flock -s 9 2>/dev/null; then
             lock_held="true"
         fi
@@ -1779,6 +1780,171 @@ prune_empty_dirs_unlocked() {
             dir="${dir%/*}"
         done
     done
+    return 0
+}
+
+# A file can reach the share without a journal transaction: restored from a
+# backup, copied by hand, written before a crash that lost the append. The
+# manifest is written only by the journal, so such a file stays invisible -- no
+# client downloads it, no deletion or version is tracked, and a client starting
+# from scratch never sees it.
+#
+# --audit-orphans lists them (read-only); --audit-adopt journals them with the
+# digest and metadata they have on disk, so they become ordinary tracked files.
+# Adoption moves no bytes: it only writes the transaction that should have
+# happened when the file arrived.
+audit_path_ignored() {
+    local rel="$1" base
+    case "$rel" in
+        "$TRASH_DIRNAME"/*|"$STAGING_DIRNAME"/*|.nasbox-client-update/*|.nasbox-client-update-go/*)
+            return 0 ;;
+        "@eaDir"/*|*/@eaDir/*|.sync-partial/*|*/.sync-partial/*)
+            return 0 ;;
+        "$REPOSITORY_MARKER_NAME")
+            return 0 ;;
+    esac
+    # rsync stages new content in ".<name>.<6 random chars>" next to the target;
+    # adopting one of those would journal bytes that are about to vanish.
+    base="${rel##*/}"
+    [[ "$base" =~ ^\..+\.[A-Za-z0-9]{6}$ ]] && return 0
+    return 1
+}
+
+decode_journal_field() {
+    local value="$1"
+    value="${value//%09/$'\t'}"
+    value="${value//%0A/$'\n'}"
+    value="${value//%0D/$'\r'}"
+    value="${value//%25/%}"
+    printf '%s' "$value"
+}
+
+# Encoded paths on disk that no live manifest row describes, one per line.
+# Everything stays encoded while comparing: encoding is what keeps a filename
+# with a newline a single line, and the manifest is stored encoded too.
+audit_orphan_encoded_list() {
+    local encoded_disk="$1" encoded_live="$2" orphans="$3"
+    render_manifest_unlocked 2>/dev/null \
+        | awk -F '\t' 'NR > 1 && length($2) == 64 { print $1 }' \
+        | sort > "$encoded_live" || return 1
+    : > "$encoded_disk" || return 1
+    local abs rel
+    while IFS= read -r -d '' abs; do
+        rel="${abs#"$SHARE_ROOT"/}"
+        audit_path_ignored "$rel" && continue
+        encode_journal_field "$rel"
+        printf '\n'
+    done < <(find "$SHARE_ROOT" -type f -print0 2>/dev/null) > "$encoded_disk" || return 1
+    sort -o "$encoded_disk" "$encoded_disk"
+    # FILENAME, not NR == FNR: with an empty live list (a fresh repository) NR
+    # equals FNR on the first line of the second file and that line was lost.
+    awk 'FILENAME == ARGV[1] { live[$0] = 1; next } !($0 in live) { print }' \
+        "$encoded_live" "$encoded_disk" > "$orphans"
+    return 0
+}
+
+cmd_audit_orphans() {
+    local list="${1:-}" tmpdir encoded_live encoded_disk orphans count encoded raw
+    tmpdir=$(mktemp -d "${STATE_DIR}/.audit-orphans.XXXXXX") || return 1
+    encoded_live="$tmpdir/live"
+    encoded_disk="$tmpdir/disk"
+    orphans="$tmpdir/orphans"
+    if command -v flock >/dev/null 2>&1; then
+        # Note: no "2>/dev/null" on an exec line -- it would silence the whole
+        # shell for the rest of the command, hiding every later error.
+        exec 9>>"$JOURNAL_LOCK_FILE"
+        flock -s 9 2>/dev/null || true
+    fi
+    if ! audit_orphan_encoded_list "$encoded_disk" "$encoded_live" "$orphans"; then
+        rm -rf "$tmpdir"; exec 9>&- 2>/dev/null
+        printf 'audit-orphans: scansione fallita\n' >&2
+        return 1
+    fi
+    if command -v flock >/dev/null 2>&1; then
+        flock -u 9 2>/dev/null || true
+        exec 9>&-
+    fi
+    count=$(wc -l < "$orphans" 2>/dev/null || echo 0)
+    # Header terminated by NUL, then one NUL-terminated path each: the same
+    # streaming shape as the other batch commands (a path may contain spaces).
+    printf 'ORPHANS_V1\nCOUNT=%s\n\0' "${count//[[:space:]]/}"
+    if [[ "$list" == "--list" ]]; then
+        while IFS= read -r encoded; do
+            [[ -n "$encoded" ]] || continue
+            decode_journal_field "$encoded"
+            printf '\0'
+        done < "$orphans"
+        printf '\0'
+    fi
+    rm -rf "$tmpdir"
+    return 0
+}
+
+cmd_audit_adopt() {
+    local tmpdir encoded_live encoded_disk orphans encoded raw digest size mtime count=0
+    local record_file txid run_ts
+    tmpdir=$(mktemp -d "${STATE_DIR}/.audit-adopt.XXXXXX") || return 1
+    encoded_live="$tmpdir/live"
+    encoded_disk="$tmpdir/disk"
+    orphans="$tmpdir/orphans"
+    record_file="$tmpdir/records"
+    if command -v flock >/dev/null 2>&1; then
+        # Note: no "2>/dev/null" on an exec line -- it would silence the whole
+        # shell for the rest of the command, hiding every later error.
+        exec 9>>"$JOURNAL_LOCK_FILE"
+        flock -s 9 2>/dev/null || true
+    fi
+    if ! audit_orphan_encoded_list "$encoded_disk" "$encoded_live" "$orphans"; then
+        rm -rf "$tmpdir"; exec 9>&- 2>/dev/null
+        printf 'audit-adopt: scansione fallita\n' >&2
+        return 1
+    fi
+    if command -v flock >/dev/null 2>&1; then
+        flock -u 9 2>/dev/null || true
+        exec 9>&-
+    fi
+    : > "$record_file" || { rm -rf "$tmpdir"; return 1; }
+    local now
+    now=$(date '+%s')
+    while IFS= read -r encoded; do
+        [[ -n "$encoded" ]] || continue
+        raw=$(decode_journal_field "$encoded")
+        # A file written in the last minutes may still be an in-flight transfer:
+        # leave it for the next run instead of journaling half-written bytes.
+        mtime=$(portable_file_mtime "$SHARE_ROOT/$raw" || true)
+        if [[ "$mtime" =~ ^[0-9]+$ ]] && (( now - mtime < 120 )); then
+            continue
+        fi
+        size=$(portable_file_size "$SHARE_ROOT/$raw" || true)
+        digest=$(portable_sha256 "$SHARE_ROOT/$raw" || true)
+        [[ "$size" =~ ^[0-9]+$ && "$digest" =~ ^[0-9a-f]{64}$ ]] || continue
+        printf '%s\0%s\0%s\0%s\0' "$raw" "$digest" "$size" "$mtime" >> "$record_file" || {
+            rm -rf "$tmpdir"; return 1; }
+        (( count++ ))
+    done < "$orphans"
+    if (( count == 0 )); then
+        rm -rf "$tmpdir"
+        printf 'ADOPTED=0\n'
+        return 0
+    fi
+    if [[ "$DRY_RUN" == "true" ]]; then
+        rm -rf "$tmpdir"
+        printf 'ADOPTED=0\nWOULD_ADOPT=%s\n' "$count"
+        return 0
+    fi
+    run_ts=$(date -u '+%Y-%m-%d--%H-%M-%S-%6NZ' 2>/dev/null || date -u '+%Y-%m-%d--%H-%M-%S-000000Z')
+    txid="audit-adopt-${run_ts}-$$"
+    exec 9>>"$JOURNAL_LOCK_FILE"
+    flock -x 9 || { exec 9>&-; rm -rf "$tmpdir"; return 1; }
+    ensure_journal_files
+    if ! append_put_journal_batch_unlocked "$record_file" "audit" "$txid"; then
+        flock -u 9; exec 9>&-; rm -rf "$tmpdir"
+        printf 'ADOPTED=0\nERROR=journal non aggiornato\n'
+        return 1
+    fi
+    flock -u 9; exec 9>&-
+    rm -rf "$tmpdir"
+    printf 'ADOPTED=%s\n' "$count"
     return 0
 }
 
@@ -3719,6 +3885,8 @@ Uso:
                                                    Attende solo manifest.revision
   $(basename "$0") --print-config              Dump KEY=VALUE (per l'auto-configurazione dei client)
   $(basename "$0") --capabilities              Cosa sa fare questo NAS (KEY=VALUE)
+  $(basename "$0") --audit-orphans [--list]    File sul disco senza riga nel manifest
+  $(basename "$0") --audit-adopt [--dry-run]   Registra nel journal quei file (digest reali)
   $(basename "$0") --init-repository           Crea il marker persistente del repository
   $(basename "$0") --journal-append             Registra una transazione (input NUL)
   $(basename "$0") --journal-compact            Compatta il journal nel manifest
@@ -3777,6 +3945,9 @@ while [[ $# -gt 0 ]]; do
         --history-list) ACTION="history_list" ;;
         --diagnostics) ACTION="diagnostics" ;;
         --capabilities) ACTION="capabilities" ;;
+        --audit-orphans) ACTION="audit_orphans" ;;
+        --audit-adopt) ACTION="audit_adopt" ;;
+        --list) AUDIT_LIST="--list" ;;
         --transfer-wait) ACTION="transfer_wait" ;;
         -c|--config) shift; CONFIG_FILE="${1:?}" ;;
         --help|-h) cmd_help; exit 0 ;;
@@ -3838,5 +4009,7 @@ case "$ACTION" in
     history_list) cmd_history_list; exit $? ;;
     diagnostics) cmd_diagnostics; exit $? ;;
     capabilities) cmd_capabilities; exit $? ;;
+    audit_orphans) cmd_audit_orphans "${AUDIT_LIST:-}"; exit $? ;;
+    audit_adopt) cmd_audit_adopt; exit $? ;;
     transfer_wait) cmd_transfer_wait; exit $? ;;
 esac

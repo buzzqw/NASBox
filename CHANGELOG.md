@@ -4,6 +4,36 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 3.32.0 - 2026-11-25
+
+Server:
+
+- **Riallineamento manifest↔disco.** Un file può arrivare nella share senza
+  transazione nel journal (backup ripristinato, copia a mano, append perso in un
+  crash). Il manifest è scritto solo dal journal, quindi quel file resta
+  invisibile: nessun client lo scarica, nessun altro PC lo vede, e un client
+  nuovo non lo riceve mai.
+  - `--audit-orphans [--list]` elenca i file sul disco senza riga viva nel
+    manifest (sola lettura; esclude cestino, staging, canali di update, `@eaDir`
+    e i temporanei di rsync).
+  - `--audit-adopt [--dry-run]` scrive per loro una transazione con digest,
+    dimensione e data reali: diventano file tracciati normali, con versioni e
+    cancellazioni, senza spostare un byte. I file scritti negli ultimi 2 minuti
+    sono lasciati al giro successivo (potrebbero essere trasferimenti in corso).
+  - In più: `exec 9>>... 2>/dev/null` nella lettura del journal silenziava
+    stderr per il resto del comando, nascondendo ogni errore successivo.
+
+## 1.13.0 - 2026-11-25
+
+Client Go:
+
+- **Un file che il NAS non conosce viene caricato.** Se un percorso locale non ha
+  nessuna riga nel manifest, il pianificatore rispondeva "vince il remoto" e il
+  ciclo non faceva nulla: il file restava solo su quel PC, il riepilogo diceva
+  "0 operazioni" e un client nuovo non l'avrebbe mai visto. Ora viene caricato
+  (se i byte sono già sul disco del NAS la pubblicazione lo adotta senza
+  trasferire nulla).
+
 ## 1.12.0 - 2026-11-25
 
 Client Go:

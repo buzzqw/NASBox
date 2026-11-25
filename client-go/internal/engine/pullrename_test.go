@@ -225,3 +225,45 @@ func TestExcludedRowsArePrunedOncePerRuleSet(t *testing.T) {
 		t.Fatalf("stato non vuoto: %v", entries)
 	}
 }
+
+// A local file whose path has no row in the NAS manifest used to be ignored
+// forever: the baseline said "synced once", the planner trusted a remote
+// deletion that never happened, and the loop only handled uploads. It exists
+// only here, so it must be uploaded (the NAS adoption path makes that free when
+// the bytes are already on its disk).
+func TestSyncOnceUploadsFilesTheNasNeverHeardOf(t *testing.T) {
+	cfg, store, root := setupTest(t)
+	cfg.Set("delete_enabled", true, false)
+	body := "solo qui"
+	if err := os.WriteFile(filepath.Join(root, "LoreKeep", "AGENTS.md"), nil, 0o600); err != nil {
+		if err := os.MkdirAll(filepath.Join(root, "LoreKeep"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, "LoreKeep", "AGENTS.md"), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	info, err := os.Stat(filepath.Join(root, "LoreKeep", "AGENTS.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Live baseline, as left by an import or a NAS that lost the row.
+	if err := store.RecordEntry(cfg.LocalRepositoryID(), "LoreKeep/AGENTS.md", state.EntryState{
+		Digest: digest(body), Size: info.Size(), MTimeNS: info.ModTime().UnixNano(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	nas := &fakeNAS{config: nasConfig(), manifest: "NASBOX_MANIFEST_V1\n"}
+	transfers := &fakeTransfer{}
+	result, err := SyncOnce(cfg, store, nas, transfers)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Uploaded != 1 {
+		t.Fatalf("file sconosciuto al NAS non caricato: %+v (staged=%v)",
+			result, transfers.stagedPaths)
+	}
+	if len(transfers.stagedPaths) != 1 || transfers.stagedPaths[0] != "LoreKeep/AGENTS.md" {
+		t.Fatalf("percorso caricato errato: %v", transfers.stagedPaths)
+	}
+}

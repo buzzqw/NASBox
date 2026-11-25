@@ -429,6 +429,18 @@ func syncPass(
 			if err != nil {
 				return result, err
 			}
+			// No row for this path at all. A live baseline does not prove the NAS
+			// has the file: after an import, a restored NAS or a lost journal
+			// append it says "synced once" while the NAS has no record. Plan
+			// answers RemoteWins ("trust the remote deletion"), but there is no
+			// deletion to trust -- and the pass used to do nothing with it, so a
+			// file that lived only here stayed unbacked and, on a fresh PC, absent
+			// forever. Uploading is idempotent (an identical file already on the
+			// NAS disk is adopted without moving bytes) and it is the only way
+			// such a file gets tracked.
+			if decision.Action == reconcile.RemoteWins {
+				decision.Action = reconcile.Upload
+			}
 			if decision.Action == reconcile.Upload || decision.Action == reconcile.ConflictLocalWins {
 				if !uploadSeen[path] {
 					uploads = append(uploads, path)
