@@ -3,6 +3,7 @@ package ui
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -24,6 +25,12 @@ func showSetupWizard(fyneApp fyne.App, window fyne.Window, cfg *config.Config, o
 
 	localEntry := widget.NewEntry()
 	localEntry.SetText(cfg.LocalRoot())
+	if strings.TrimSpace(localEntry.Text) == "" {
+		// A sensible default: most people want a NASBox folder in their home.
+		if home, err := os.UserHomeDir(); err == nil {
+			localEntry.SetText(filepath.Join(home, "NASBox"))
+		}
+	}
 	hostEntry := widget.NewEntry()
 	hostEntry.SetText(cfg.String("nas_lan"))
 	userEntry := widget.NewEntry()
@@ -83,118 +90,176 @@ func showSetupWizard(fyneApp fyne.App, window fyne.Window, cfg *config.Config, o
 		}, window)
 	})
 
-	detect := newHintButton(tr("setup.server_title", nil), theme.SearchIcon(),
-		tr("setup.server_intro", nil), widget.MediumImportance, func() {
-			if err := apply(); err != nil {
-				status.SetText(err.Error())
-				return
-			}
-			status.SetText(tr("setup.testing", nil))
-			go func() {
-				client := remote.New(cfg)
-				scripts, err := client.DiscoverServerScripts()
-				fyne.Do(func() {
-					if err != nil {
-						status.SetText(tr("setup.detect_failed", map[string]any{"detail": err.Error()}))
-						return
-					}
-					if len(scripts) == 0 {
-						status.SetText(tr("setup.detect_failed", map[string]any{
-							"detail": tr("setup.server_intro", nil),
-						}))
-						return
-					}
-					scriptEntry.SetText(scripts[0])
-					_ = cfg.Set("remote_server_script", scripts[0], false)
-					values, err := remote.New(cfg).PrintConfig()
-					if err == nil && values["SHARE_ROOT"] != "" {
-						prefixEntry.SetText(values["SHARE_ROOT"])
-						_ = cfg.Set("remote_prefix", values["SHARE_ROOT"], false)
-					}
-					status.SetText(tr("setup.detect_ok", nil))
-				})
-			}()
-		}, func(string) {})
-
-	test := newHintButton(tr("setup.test_connection", nil), theme.ComputerIcon(),
-		tr("setup.connection_intro", nil), widget.MediumImportance, func() {
-			if err := apply(); err != nil {
-				status.SetText(err.Error())
-				return
-			}
-			status.SetText(tr("setup.testing", nil))
-			go func() {
-				values, err := remote.New(cfg).PrintConfig()
-				fyne.Do(func() {
-					if err != nil {
-						status.SetText(tr("setup.test_failed", map[string]any{"detail": err.Error()}))
-						return
-					}
-					status.SetText(tr("setup.test_ok", map[string]any{"host": cfg.String("nas_lan")}) +
-						" · " + tr("settings.info_version_label", nil) + " " + values["VERSION"])
-				})
-			}()
-		}, func(string) {})
-
-	save := newHintButton(tr("ui.setup.save", nil), theme.ConfirmIcon(),
-		tr("ui.setup.save_hint", nil), widget.HighImportance, func() {
-			if err := apply(); err != nil {
-				status.SetText(err.Error())
-				return
-			}
-			status.SetText(tr("setup.testing", nil))
-			go func() {
-				bootstrapErr := remote.New(cfg).Bootstrap()
-				fyne.Do(func() {
-					finish := func() {
-						if err := persist(); err != nil {
-							status.SetText(tr("setup.local_failed_title", nil) + ": " + err.Error())
-							return
-						}
-						onDone()
-					}
-					if bootstrapErr != nil {
-						dialog.ShowConfirm(tr("setup.detect_failed", map[string]any{
-							"detail": bootstrapErr.Error(),
-						}),
-							tr("setup.detect_optional", nil), func(ok bool) {
-								if ok {
-									finish()
-								}
-							}, window)
-						return
-					}
-					finish()
-				})
-			}()
-		}, func(string) {})
-
-	row := func(label string, object fyne.CanvasObject) fyne.CanvasObject {
-		return container.NewBorder(nil, nil, minWidth(widget.NewLabel(label), 170), nil, object)
+	// ---- three simple steps instead of one long form -------------------------
+	// 1. where the files live on this PC   2. connect to the NAS   3. start.
+	// Port, NAS folder and server script are detected; they stay available
+	// under "Advanced" for the rare NAS that needs them.
+	stepTitle := widget.NewLabelWithStyle("", fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
+	stepTitle.SizeName = theme.SizeNameSubHeadingText
+	stepBox := container.NewVBox()
+	var showStep func(int)
+	field := func(label string, object fyne.CanvasObject) fyne.CanvasObject {
+		caption := widget.NewLabelWithStyle(label, fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
+		return container.NewVBox(caption, object)
+	}
+	setStep := func(index int, title string, items ...fyne.CanvasObject) {
+		stepTitle.SetText(lt(fmt.Sprintf("Passo %d di 3 — %s", index, title), fmt.Sprintf("Step %d of 3 — %s", index, title)))
+		stepBox.Objects = items
+		stepBox.Refresh()
 	}
 
-	content := container.NewVScroll(container.NewVBox(
-		widget.NewLabelWithStyle(tr("setup.title", nil), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-		cnote(tr("setup.local_intro", nil)),
-		row(tr("setup.local_title", nil), container.NewBorder(nil, nil, nil, browse, localEntry)),
+	advanced := widget.NewAccordion(widget.NewAccordionItem(lt("Impostazioni avanzate (di solito non servono)", "Advanced settings (usually not needed)"),
 		container.NewVBox(
-			widget.NewLabelWithStyle(tr("setup.connection_title", nil), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-			cnote(tr("setup.connection_intro", nil)),
-			row(tr("ui.setup.nas_lan", nil), hostEntry),
-			row(tr("ui.setup.nas_user", nil), userEntry),
-			row(tr("ui.setup.ssh_port", nil), portEntry),
-		),
-		container.NewVBox(
-			widget.NewLabelWithStyle(tr("setup.server_title", nil), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-			cnote(tr("setup.server_intro", nil)),
-			row(tr("ui.setup.prefix", nil), prefixEntry),
-			row(tr("ui.setup.script", nil), scriptEntry),
-		),
-		cnote(tr("setup.advanced_later", nil)),
+			field(lt("Porta SSH", "SSH port"), portEntry),
+			field(lt("Cartella sul NAS", "Folder on the NAS"), prefixEntry),
+			field(lt("Script del server sul NAS", "Server script on the NAS"), scriptEntry),
+		)))
+
+	connect := plainButton(lt("Collegati al NAS", "Connect to the NAS"), theme.ComputerIcon(),
+		lt("Prova la connessione e cerca da solo le impostazioni del NAS", "Test the connection and find the NAS settings by itself"),
+		widget.HighImportance, nil, func(string) {})
+	connect.OnTapped = func() {
+		if err := apply(); err != nil {
+			status.SetText(err.Error())
+			return
+		}
+		connect.Disable()
+		status.SetText(lt("Mi collego al NAS…", "Connecting to the NAS…"))
+		go func() {
+			client := remote.New(cfg)
+			values, err := client.PrintConfig()
+			if err != nil {
+				// The server script path may simply be different: look for it.
+				if scripts, derr := client.DiscoverServerScripts(); derr == nil && len(scripts) > 0 {
+					_ = cfg.Set("remote_server_script", scripts[0], false)
+					scriptEntry.SetText(scripts[0])
+					values, err = remote.New(cfg).PrintConfig()
+				}
+			}
+			if err == nil && values["SHARE_ROOT"] != "" {
+				_ = cfg.Set("remote_prefix", values["SHARE_ROOT"], false)
+				prefixEntry.SetText(values["SHARE_ROOT"])
+			}
+			fyne.Do(func() {
+				connect.Enable()
+				if err != nil {
+					status.SetText(lt("Non riesco a collegarmi. ", "I cannot connect. ") + humanSetupError(err.Error()))
+					advanced.Open(0)
+					return
+				}
+				status.SetText("")
+				showStep(3)
+			})
+		}()
+	}
+
+	start := plainButton(lt("Inizia a sincronizzare", "Start syncing"), theme.ConfirmIcon(),
+		lt("Salva le impostazioni e avvia la sincronizzazione", "Save the settings and start syncing"),
+		widget.HighImportance, nil, func(string) {})
+	start.OnTapped = func() {
+		start.Disable()
+		status.SetText(lt("Preparo il NAS…", "Preparing the NAS…"))
+		go func() {
+			bootstrapErr := remote.New(cfg).Bootstrap()
+			fyne.Do(func() {
+				start.Enable()
+				finish := func() {
+					if err := persist(); err != nil {
+						status.SetText(tr("setup.local_failed_title", nil) + ": " + err.Error())
+						return
+					}
+					onDone()
+				}
+				if bootstrapErr != nil {
+					dialog.ShowConfirm(lt("Il NAS non ha risposto del tutto", "The NAS did not fully answer"),
+						lt("Posso comunque continuare: NASBox riproverà da solo. Continuare?", "I can still continue: NASBox will retry by itself. Continue?"),
+						func(ok bool) {
+							if ok {
+								finish()
+							}
+						}, window)
+					return
+				}
+				finish()
+			})
+		}()
+	}
+
+	showStep = func(step int) {
+		switch step {
+		case 1:
+			setStep(1, lt("Dove tieni i file", "Where your files live"),
+				cnote(lt("Scegli la cartella del tuo PC che NASBox terrà allineata con il NAS. Se non esiste la creo io.",
+					"Pick the folder on this PC that NASBox keeps in line with the NAS. I create it if it does not exist.")),
+				container.NewBorder(nil, nil, nil, browse, localEntry),
+				container.NewHBox(plainButton(lt("Avanti", "Next"), theme.NavigateNextIcon(), lt("Passa al collegamento con il NAS", "Go on to connect to the NAS"),
+					widget.HighImportance, func() {
+						if strings.TrimSpace(localEntry.Text) == "" {
+							status.SetText(lt("Scegli una cartella.", "Pick a folder."))
+							return
+						}
+						status.SetText("")
+						showStep(2)
+					}, func(string) {})),
+			)
+		case 2:
+			setStep(2, lt("Collegati al tuo NAS", "Connect to your NAS"),
+				cnote(lt("Indirizzo e utente del NAS, gli stessi che usi per entrarci via SSH. Il resto lo trovo da solo.",
+					"Address and user of the NAS, the same you use to log in over SSH. I find the rest by myself.")),
+				field(lt("Indirizzo del NAS (nome o IP)", "NAS address (name or IP)"), hostEntry),
+				field(lt("Utente", "User"), userEntry),
+				advanced,
+				container.NewHBox(
+					plainButton(lt("Indietro", "Back"), theme.NavigateBackIcon(), lt("Torna alla scelta della cartella", "Back to the folder choice"),
+						widget.LowImportance, func() { status.SetText(""); showStep(1) }, func(string) {}),
+					connect,
+				),
+			)
+		default:
+			setStep(3, lt("Tutto pronto", "All set"),
+				cnote(lt(fmt.Sprintf("Collegato a %s. I file di %s verranno sincronizzati con il NAS: i nuovi si caricano, quelli degli altri PC si scaricano.",
+					cfg.String("nas_lan"), strings.TrimSpace(localEntry.Text)),
+					fmt.Sprintf("Connected to %s. The files in %s will be synced with the NAS: new ones upload, other PCs' files download.",
+						cfg.String("nas_lan"), strings.TrimSpace(localEntry.Text)))),
+				cnote(lt("Puoi cambiare tutto più tardi da Impostazioni.", "You can change everything later in Settings.")),
+				container.NewHBox(
+					plainButton(lt("Indietro", "Back"), theme.NavigateBackIcon(), lt("Torna ai dati del NAS", "Back to the NAS details"),
+						widget.LowImportance, func() { status.SetText(""); showStep(2) }, func(string) {}),
+					start,
+				),
+			)
+		}
+	}
+	status.SetText("")
+	showStep(1)
+	title := widget.NewLabelWithStyle(lt("Benvenuto in NASBox", "Welcome to NASBox"), fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
+	title.SizeName = theme.SizeNameHeadingText
+	window.SetContent(container.NewPadded(container.NewVScroll(container.NewVBox(
+		title,
+		cnote(lt("Il tuo cloud, sul tuo NAS. Tre passi e hai finito.", "Your cloud, on your NAS. Three steps and you are done.")),
+		widget.NewSeparator(),
+		stepTitle,
+		stepBox,
 		status,
-		container.NewHBox(detect, test, save),
-	))
-	window.SetContent(container.NewPadded(content))
+	))))
+}
+
+// humanSetupError turns a connection failure into what to check next.
+func humanSetupError(detail string) string {
+	low := strings.ToLower(detail)
+	switch {
+	case strings.Contains(low, "permission denied"):
+		return lt("Il NAS ha rifiutato l'accesso: controlla l'utente e che la chiave SSH di questo PC sia autorizzata sul NAS.",
+			"The NAS refused the login: check the user and that this PC's SSH key is authorised on the NAS.")
+	case strings.Contains(low, "could not resolve"), strings.Contains(low, "no route"), strings.Contains(low, "timed out"),
+		strings.Contains(low, "connection refused"), strings.Contains(low, "exit status 255"):
+		return lt("Il NAS non risponde: controlla l'indirizzo, che sia acceso e che l'SSH sia attivo (DSM › Terminale e SNMP).",
+			"The NAS does not answer: check the address, that it is on and that SSH is enabled (DSM › Terminal & SNMP).")
+	case strings.Contains(low, "host key"):
+		return lt("La chiave del NAS non coincide con quella già salvata: verifica che sia il NAS giusto.",
+			"The NAS key does not match the saved one: check it is the right NAS.")
+	}
+	return lt("Dettaglio: ", "Detail: ") + detail
 }
 
 // cnote is the setup wizard's secondary text helper (the clientApp one is not

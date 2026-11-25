@@ -4,6 +4,21 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 1.6.0 - 2026-11-25
+
+Client Go:
+
+- **File eliminati ripristinabili in un clic.** File › Storico / Cestino ora
+  si apre su «File eliminati di recente»: i file spariti da questo PC, l'ultima
+  copia di ciascuno, con "Eliminato · ieri 18:05 · 1,5 MB". Un menu permette di
+  passare a «Tutte le versioni precedenti». Dopo il ripristino un messaggio
+  conferma e offre «Mostra cartella».
+- **Primo avvio in tre passi**: dove tieni i file (cartella proposta
+  `~/NASBox`), collegati al NAS (solo indirizzo e utente: porta, cartella e
+  script del server vengono trovati da soli e restano sotto «Impostazioni
+  avanzate»), tutto pronto. Se il collegamento fallisce il messaggio dice cosa
+  controllare (accesso SSH, NAS spento, chiave diversa).
+
 ## 1.5.0 - 2026-11-25
 
 Client Go, più pratico e più vicino a Dropbox:

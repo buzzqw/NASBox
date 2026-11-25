@@ -94,6 +94,9 @@ func List() ([]Version, error) {
 	return versions, nil
 }
 
+// VersionTime is the moment a version was moved to the trash.
+func VersionTime(timestamp string) (time.Time, error) { return versionTime(timestamp) }
+
 func versionTime(timestamp string) (time.Time, error) {
 	if strings.HasSuffix(timestamp, "Z") {
 		// "2026-11-23--08-26-32-851296Z": Go's layouts only know fractional

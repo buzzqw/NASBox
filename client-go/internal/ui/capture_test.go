@@ -108,6 +108,7 @@ func TestCaptureSoftware(t *testing.T) {
 		Original:  "Documenti/Progetti/preventivo.txt",
 		Timestamp: "2026-11-23--18-05-00-000000Z", Size: 1536,
 	}}
+	c.versionDeleted = map[string]bool{"Documenti/Progetti/preventivo.txt": true}
 	c.selectiveDirs = []string{"Documenti", "Documenti/Progetti", "Foto", "Musica"}
 	window.SetContent(c.buildRoot())
 	c.showSection(sectionStatus)
@@ -413,4 +414,34 @@ func TestRealStateMinSize(t *testing.T) {
 		t.Logf("  activity tab %s min: %v", item.Text, item.Content.MinSize())
 	}
 	t.Logf("recent=%d logRows=%d", len(c.recent), len(c.logRows))
+}
+
+func TestCaptureSetupWizard(t *testing.T) {
+	dir := os.Getenv("NASBOX_UI_CAPTURE")
+	if dir == "" {
+		t.Skip()
+	}
+	i18n.Language = "it"
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	cfg := config.New("")
+	a := test.NewTempApp(t)
+	window := test.NewWindow(nil)
+	window.Resize(fyne.NewSize(760, 560))
+	showSetupWizard(a, window, cfg, func() {})
+	save := func(name string) {
+		file, err := os.Create(filepath.Join(dir, name+".png"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer file.Close()
+		_ = png.Encode(file, window.Canvas().Capture())
+	}
+	save("00-setup-1")
+	for _, button := range findUI[*tipButton](window.Content()) {
+		if button.Text == "Avanti" {
+			test.Tap(button)
+		}
+	}
+	save("00-setup-2")
 }

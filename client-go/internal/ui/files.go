@@ -265,10 +265,10 @@ func (c *clientApp) buildConflictPane() fyne.CanvasObject {
 
 func (c *clientApp) buildHistoryPane() fyne.CanvasObject {
 	c.historyFilter = widget.NewEntry()
-	c.historyFilter.SetPlaceHolder(tr("browse.search_placeholder", nil))
+	c.historyFilter.SetPlaceHolder(lt("Cerca tra i file eliminati…", "Search the deleted files…"))
 	c.historyFilter.OnChanged = func(string) { c.histList.Refresh() }
 	c.histList = newRowList(
-		func() int { return len(c.filteredVersions()) }, 280, 180,
+		func() int { return len(c.filteredVersions()) }, 220, 250,
 		func(id int, row *listRow) {
 			versions := c.filteredVersions()
 			if id >= len(versions) {
@@ -276,8 +276,17 @@ func (c *clientApp) buildHistoryPane() fyne.CanvasObject {
 			}
 			item := versions[id]
 			row.icon.SetResource(theme.HistoryIcon())
-			row.name.SetText(item.Original)
-			row.meta.SetText(fmt.Sprintf("%s · %s", shortTimestamp(item.Timestamp), humanBytes(item.Size)))
+			name, folder := splitPath(item.Original)
+			row.name.SetText(name + "  —  " + folder)
+			kind := lt("Sostituito", "Replaced")
+			if c.versionDeleted[item.Original] {
+				kind = lt("Eliminato", "Deleted")
+			}
+			when := shortTimestamp(item.Timestamp)
+			if at, err := history.VersionTime(item.Timestamp); err == nil {
+				when = relativeTime(at, time.Now())
+			}
+			row.meta.SetText(fmt.Sprintf("%s · %s · %s", kind, when, humanBytes(item.Size)))
 		},
 	)
 	c.histList.OnSelected = func(id widget.ListItemID) {
@@ -287,12 +296,24 @@ func (c *clientApp) buildHistoryPane() fyne.CanvasObject {
 			c.updateHistorySelection()
 		}
 	}
+	c.historyMode = widget.NewSelect([]string{
+		lt("File eliminati di recente", "Recently deleted files"),
+		lt("Tutte le versioni precedenti", "All earlier versions"),
+	}, func(string) {
+		c.selectedVersion = ""
+		c.updateHistorySelection()
+		c.histList.UnselectAll()
+		c.histList.Refresh()
+	})
+	c.historyMode.SetSelected(lt("File eliminati di recente", "Recently deleted files"))
 	c.histDetail = widget.NewLabel(tr("ui.history.none_selected", nil))
 	c.histDetail.Wrapping = fyne.TextWrapWord
 	c.restoreBtn = plainButton(tr("ui.action.restore", nil), theme.ContentRedoIcon(),
 		tr("history.restore_tooltip", nil), widget.HighImportance, c.onRestoreVersion, c.setHint)
 	header := container.NewVBox(
-		c.sectionTitle("", tr("ui.history.note", nil)),
+		c.sectionTitle("", lt("File eliminati o sostituiti, ripristinabili in un clic. Le copie restano per il numero di giorni impostato.",
+			"Deleted or replaced files, restorable in one click. Copies are kept for the number of days you set.")),
+		container.NewHBox(minWidth(c.historyMode, 260)),
 		c.historyFilter,
 		c.histDetail,
 		buttonRows(3,

@@ -6,6 +6,7 @@ import (
 	_ "embed"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -163,6 +164,8 @@ type clientApp struct {
 	wideRows            map[fyne.CanvasObject]bool
 	tipLayer            *fyne.Container
 	searchIdx           searchIndex
+	historyMode         *widget.Select
+	versionDeleted      map[string]bool
 	searchEntry         *widget.Entry
 	searchInfo          *widget.Label
 	searchList          *widget.List
@@ -577,14 +580,22 @@ func (c *clientApp) filteredVersions() []history.Version {
 	if c.historyFilter != nil {
 		query = strings.ToLower(strings.TrimSpace(c.historyFilter.Text))
 	}
-	if query == "" {
-		return c.versions
-	}
-	result := make([]history.Version, 0)
+	onlyDeleted := c.historyMode == nil || c.historyMode.Selected == lt("File eliminati di recente", "Recently deleted files")
+	result := make([]history.Version, 0, len(c.versions))
+	seen := map[string]bool{}
 	for _, version := range c.versions {
-		if strings.Contains(strings.ToLower(version.Original), query) {
-			result = append(result, version)
+		if query != "" && !strings.Contains(strings.ToLower(version.Original), query) {
+			continue
 		}
+		if onlyDeleted {
+			// Files that are gone from this PC, newest copy of each only: the
+			// list reads like a recycle bin, not like a changelog.
+			if !c.versionDeleted[version.Original] || seen[version.Original] {
+				continue
+			}
+			seen[version.Original] = true
+		}
+		result = append(result, version)
 	}
 	return result
 }
@@ -1323,7 +1334,17 @@ func (c *clientApp) refreshHistory() {
 	if err != nil {
 		return
 	}
+	deleted := make(map[string]bool, len(versions))
+	root := c.cfg.LocalRoot()
+	for _, version := range versions {
+		if _, known := deleted[version.Original]; known {
+			continue
+		}
+		_, statErr := os.Stat(filepath.Join(root, filepath.FromSlash(version.Original)))
+		deleted[version.Original] = os.IsNotExist(statErr)
+	}
 	fyne.Do(func() {
+		c.versionDeleted = deleted
 		c.versions = versions
 		if c.selectedVersion != "" {
 			if _, ok := c.historyVersion(c.selectedVersion); !ok {
@@ -1854,6 +1875,18 @@ func (c *clientApp) onRestoreVersion() {
 					c.appendLog(tr("history.restore_done_body", map[string]any{"path": target.Original}))
 					c.selectedVersion = ""
 					c.refreshHistory()
+					fyne.Do(func() {
+						done := dialog.NewConfirm(lt("File ripristinato", "File restored"),
+							lt(target.Original+" è tornato nella tua cartella.", target.Original+" is back in your folder."),
+							func(show bool) {
+								if show {
+									c.openContainingFolder(target.Original)
+								}
+							}, c.window)
+						done.SetConfirmText(lt("Mostra cartella", "Show folder"))
+						done.SetDismissText(lt("Chiudi", "Close"))
+						done.Show()
+					})
 				}
 			}()
 		}, c.window)
