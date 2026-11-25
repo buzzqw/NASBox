@@ -4,6 +4,14 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 1.11.1 - 2026-11-25
+
+Client Go:
+
+- `doctor` mostra il rsync che i trasferimenti usano davvero: con il rsync
+  privato del NAS stampa `NAS 3.5.1 privato, sistema 3.1.2` invece del solo
+  3.1.2 letto dalla shell di login (che resta la versione di sistema).
+
 ## 3.31.0 - 2026-11-25
 
 Server:

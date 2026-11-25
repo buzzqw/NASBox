@@ -414,6 +414,7 @@ func (c *Client) Bootstrap() error {
 	// A private rsync on the NAS (newer than the system one): the client asks
 	// for it with --rsync-path, so the system binary is never replaced.
 	c.cfg.Set("nas_rsync_path", strings.TrimSpace(values["RSYNC_PATH"]), true)
+	c.cfg.Set("nas_rsync_system_version", strings.TrimSpace(values["RSYNC_SYSTEM_VERSION"]), true)
 	c.cfg.Set("nas_fs_type", strings.TrimSpace(values["FS_TYPE"]), true)
 	c.cfg.Set("nas_file_states_parallelism", atoiOr(values["FILE_STATES_PARALLELISM"], 0), true)
 	return nil

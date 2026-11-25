@@ -287,6 +287,20 @@ func doctor(args []string) int {
 	report.Lock.Remote = probe.RemoteLock
 	report.RsyncNAS = probe.RsyncNAS
 	report.RsyncLocal = transfer.LocalRsyncVersion()
+	// The probe asks the login shell, which finds the system rsync. Transfers
+	// may use a newer private one that the server advertises: show both, or the
+	// line would contradict the capabilities right below it.
+	if private := strings.TrimSpace(cfg.String("nas_rsync_path")); private != "" {
+		effective := strings.TrimSpace(cfg.String("nas_rsync_version"))
+		system := strings.TrimSpace(cfg.String("nas_rsync_system_version"))
+		if effective != "" {
+			if system != "" && system != effective {
+				report.RsyncNAS = effective + " privato, sistema " + system
+			} else {
+				report.RsyncNAS = effective + " privato"
+			}
+		}
+	}
 	report.Realtime = engine.RealtimeSummary(cfg)
 	report.NasCapabilities = cfg.String("nas_capabilities")
 	report.NasHardware = engine.CapabilitiesSummary(cfg)
