@@ -890,10 +890,16 @@ func (c *Client) RenameV2(
 	output, err := c.RunLocked(
 		[]string{c.script(), "--browse-rename"}, nulJoin(fields), device, 5*time.Minute,
 	)
+	parts := bytes.Split(output, []byte{0})
 	if err != nil {
+		// The server explains a refusal on stdout ("ERROR\0reason") and exits
+		// 1 with an empty stderr: surface its reason instead of a bare
+		// "ssh: exit status 1".
+		if len(parts) > 2 && string(parts[0]) == "BROWSE_RENAME_V2" && string(parts[1]) == "ERROR" {
+			return false, fmt.Errorf("il NAS ha rifiutato lo spostamento %s → %s: %s", src, dst, string(parts[2]))
+		}
 		return false, err
 	}
-	parts := bytes.Split(output, []byte{0})
 	if len(parts) < 2 || string(parts[0]) != "BROWSE_RENAME_V2" {
 		return false, fmt.Errorf("risposta rename non valida")
 	}

@@ -114,6 +114,14 @@ func Classify(
 			if consumed[localPath] || localPath == path {
 				continue
 			}
+			// A rename target must be a new name. A local file the NAS
+			// already tracks (a duplicate copy of the same bytes, e.g.
+			// SADE/images next to SADE/SADE/images) is not a destination:
+			// the server refuses it ("esiste gia un percorso") and the
+			// rename used to abort every sync pass from then on.
+			if known, exists := remote[localPath]; exists && known.Kind == "FILE" {
+				continue
+			}
 			info := identity[localPath]
 			if info.Size != state.Size && state.Size != 0 {
 				continue

@@ -198,12 +198,12 @@ func TestMetricsAndAssignedDeviceNameAreReadable(t *testing.T) {
 func TestSettingsChoicesUseDropdowns(t *testing.T) {
 	c := newTestClient(t)
 	general := findUI[*widget.Select](c.settingsAppearance())
-	if len(general) != 2 {
-		t.Fatalf("general dropdown count = %d, want language and theme", len(general))
+	if len(general) != 3 {
+		t.Fatalf("general dropdown count = %d, want language, theme and backend on one row", len(general))
 	}
 	advanced := findUI[*widget.Select](c.settingsAdvanced())
-	if len(advanced) < 2 {
-		t.Fatalf("advanced dropdown count = %d, want tray and backend choices", len(advanced))
+	if len(advanced) < 1 {
+		t.Fatalf("advanced dropdown count = %d, want the tray choice", len(advanced))
 	}
 	scheduleAdd := false
 	for _, button := range findUI[*widget.Button](c.settingsAdvanced()) {

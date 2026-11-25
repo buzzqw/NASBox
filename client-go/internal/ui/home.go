@@ -42,13 +42,13 @@ func (c *clientApp) statusView() fyne.CanvasObject {
 			}
 		}, c.setHint)
 
-	numberTracked, trackedTile := c.kpiTile(theme.DocumentIcon(), tr("assurance.stat_tracked", nil),
+	numberTracked, trackedTile := c.kpiTile(theme.DocumentIcon(), tr("assurance.stat_tracked", nil), tr("ui.tip.tracked", nil),
 		func() { c.navigate(sectionFiles, 0) })
-	numberConflicts, conflictsTile := c.kpiTile(theme.WarningIcon(), tr("assurance.stat_conflicts", nil),
+	numberConflicts, conflictsTile := c.kpiTile(theme.WarningIcon(), tr("assurance.stat_conflicts", nil), tr("ui.tip.conflicts", nil),
 		func() { c.navigate(sectionFiles, 1) })
-	numberUndo, undoTile := c.kpiTile(theme.ContentUndoIcon(), tr("ui.stat.undo", nil),
+	numberUndo, undoTile := c.kpiTile(theme.ContentUndoIcon(), tr("ui.stat.undo", nil), tr("ui.tip.undo", nil),
 		func() { c.navigate(sectionFiles, 2) })
-	numberAudit, auditTile := c.kpiTile(theme.ConfirmIcon(), tr("overview.stat_audit", nil),
+	numberAudit, auditTile := c.kpiTile(theme.ConfirmIcon(), tr("overview.stat_audit", nil), tr("ui.tip.audit", nil),
 		func() { c.navigate(sectionSettings, 2) })
 	c.statTracked, c.statConflicts, c.statUndo, c.statAudit = numberTracked, numberConflicts, numberUndo, numberAudit
 	stats := container.NewGridWithColumns(4, trackedTile, conflictsTile, undoTile, auditTile)
@@ -151,7 +151,7 @@ func (c *clientApp) setTransferCardVisible(visible bool) {
 }
 
 // kpiTile is a clickable KPI card: icon, big number, caption.
-func (c *clientApp) kpiTile(icon fyne.Resource, caption string, onTap func()) (*widget.Label, fyne.CanvasObject) {
+func (c *clientApp) kpiTile(icon fyne.Resource, caption, tip string, onTap func()) (*widget.Label, fyne.CanvasObject) {
 	number := widget.NewLabelWithStyle("—", fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
 	number.SizeName = theme.SizeNameSubHeadingText
 	label := widget.NewLabel(caption)
@@ -159,7 +159,9 @@ func (c *clientApp) kpiTile(icon fyne.Resource, caption string, onTap func()) (*
 	label.Truncation = fyne.TextTruncateEllipsis
 	content := container.NewBorder(nil, nil, nil, widget.NewIcon(theme.NewPrimaryThemedResource(icon)),
 		container.NewVBox(number, label))
-	return number, newTapCard(c, content, onTap)
+	card := newTapCard(c, content, onTap)
+	card.tip = tip
+	return number, card
 }
 
 func (c *clientApp) cardTitle(text string) fyne.CanvasObject {
@@ -221,6 +223,7 @@ type tapCard struct {
 	onTap   func()
 	bg      *canvas.Rectangle
 	hovered bool
+	tip     string
 }
 
 // newTapRow is a borderless clickable list row.
@@ -242,14 +245,30 @@ func newTapCard(c *clientApp, content fyne.CanvasObject, onTap func()) *tapCard 
 }
 
 func (t *tapCard) Tapped(*fyne.PointEvent) {
+	if t.tip != "" {
+		t.app.setHint("")
+	}
 	if t.onTap != nil {
 		t.onTap()
 	}
 }
-func (t *tapCard) MouseIn(*desktop.MouseEvent)    { t.hovered = true; t.Refresh() }
-func (t *tapCard) MouseMoved(*desktop.MouseEvent) {}
-func (t *tapCard) MouseOut()                      { t.hovered = false; t.Refresh() }
-func (t *tapCard) Cursor() desktop.Cursor         { return desktop.PointerCursor }
+func (t *tapCard) MouseIn(event *desktop.MouseEvent) {
+	t.hovered = true
+	t.Refresh()
+	if t.tip != "" {
+		tipPointer = event.AbsolutePosition
+		t.app.setHint(t.tip)
+	}
+}
+func (t *tapCard) MouseMoved(event *desktop.MouseEvent) { tipPointer = event.AbsolutePosition }
+func (t *tapCard) MouseOut() {
+	t.hovered = false
+	t.Refresh()
+	if t.tip != "" {
+		t.app.setHint("")
+	}
+}
+func (t *tapCard) Cursor() desktop.Cursor { return desktop.PointerCursor }
 
 func (t *tapCard) CreateRenderer() fyne.WidgetRenderer {
 	// List rows (plain) carry no extra padding: the labels already have inner

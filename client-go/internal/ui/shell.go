@@ -58,15 +58,45 @@ func (c *clientApp) newNavButton(id sectionID, label string, icon fyne.Resource)
 }
 
 func (n *navButton) Tapped(*fyne.PointEvent) {
+	if n.app != nil && n.app.setHint != nil {
+		n.app.setHint("")
+	}
 	if n.app != nil {
 		n.app.showSection(n.section)
 	}
 }
 
-func (n *navButton) MouseIn(*desktop.MouseEvent)    { n.hovered = true; n.Refresh() }
-func (n *navButton) MouseMoved(*desktop.MouseEvent) {}
-func (n *navButton) MouseOut()                      { n.hovered = false; n.Refresh() }
-func (n *navButton) Cursor() desktop.Cursor         { return desktop.PointerCursor }
+func (n *navButton) MouseIn(event *desktop.MouseEvent) {
+	n.hovered = true
+	n.Refresh()
+	if n.app != nil && n.app.setHint != nil {
+		tipPointer = event.AbsolutePosition
+		n.app.setHint(tr("ui.tip.nav_"+navKey(n.section), nil))
+	}
+}
+func (n *navButton) MouseMoved(event *desktop.MouseEvent) { tipPointer = event.AbsolutePosition }
+func (n *navButton) MouseOut() {
+	n.hovered = false
+	n.Refresh()
+	if n.app != nil && n.app.setHint != nil {
+		n.app.setHint("")
+	}
+}
+
+func navKey(id sectionID) string {
+	switch id {
+	case sectionActivity:
+		return "activity"
+	case sectionFiles:
+		return "files"
+	case sectionNAS:
+		return "nas"
+	case sectionSettings:
+		return "settings"
+	}
+	return "status"
+}
+func (n *navButton) Cursor() desktop.Cursor { return desktop.PointerCursor }
 
 func (n *navButton) setSelected(selected bool) {
 	n.selected = selected
@@ -230,7 +260,8 @@ func (c *clientApp) buildSidebarStatus() fyne.CanvasObject {
 		container.NewBorder(nil, nil, container.NewCenter(dot), nil, c.headerStatus),
 		c.lastSyncLabel,
 	), "")
-	return container.NewVBox(c.hintLabel, card, versionLabel)
+	c.hintLabel.Hide() // tooltips replaced the footer hint line
+	return container.NewVBox(card, versionLabel)
 }
 
 // ---------------------------------------------------------------------------

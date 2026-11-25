@@ -104,8 +104,8 @@ func (c *clientApp) scheduleSetting() fyne.CanvasObject {
 		}, c.setHint)
 	refresh()
 
-	return c.settingRow(tr("settings.schedule_title", nil), container.NewVBox(
-		widget.NewLabel(tr("settings.schedule_note", nil)),
+	return c.settingCell(tr("settings.schedule_title", nil), container.NewVBox(
+		c.note(tr("settings.schedule_note", nil)),
 		summary,
 		container.NewGridWrap(fyne.NewSize(1, 110), list),
 		container.NewHBox(add, edit, remove),

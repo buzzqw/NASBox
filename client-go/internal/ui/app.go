@@ -101,8 +101,8 @@ type clientApp struct {
 	statUndo      *widget.Label
 	statAudit     *widget.Label
 
-	pauseBtn       *widget.Button
-	pauseBtnStatus *widget.Button
+	pauseBtn       *tipButton
+	pauseBtnStatus *tipButton
 	detailsBtn     *hintButton
 	logger         *diagnostics.Logger
 	logLines       []string
@@ -111,6 +111,7 @@ type clientApp struct {
 	logList        *widget.List
 	logEntries     []diagnostics.Entry
 	logFiltered    []diagnostics.Entry
+	logRows        []logRow
 	logFilter      *widget.Select
 	logSearch      *widget.Entry
 	logCount       *widget.Label
@@ -133,17 +134,17 @@ type clientApp struct {
 	downloadPathEntry   *widget.Entry
 	browseEntries       []remote.BrowseEntry
 	browseList          *widget.List
-	browseDeleteBtn     *widget.Button
-	browseRenameBtn     *widget.Button
-	browseDownloadBtn   *widget.Button
-	browseVersionsBtn   *widget.Button
-	browseUpBtn         *widget.Button
+	browseDeleteBtn     *tipButton
+	browseRenameBtn     *tipButton
+	browseDownloadBtn   *tipButton
+	browseVersionsBtn   *tipButton
+	browseUpBtn         *tipButton
 	mirrorLabel         *widget.Label
 	mirrorList          *widget.List
 	mirrorEntries       []mirror.Mirror
 	selectedMirror      int
-	mirrorRemoveBtn     *widget.Button
-	mirrorToggleBtn     *widget.Button
+	mirrorRemoveBtn     *tipButton
+	mirrorToggleBtn     *tipButton
 	selectiveDirs       []string
 	selectiveList       *widget.List
 	nasLabel            *widget.Label
@@ -159,7 +160,11 @@ type clientApp struct {
 	deviceEntries       []deviceEntry
 	selectedDevice      string
 	selectedDeviceLabel *widget.Label
-	assignDeviceBtn     *widget.Button
+	wideRows            map[fyne.CanvasObject]bool
+	tipLayer            *fyne.Container
+	tipTimer            *time.Timer
+	tipGen              int
+	assignDeviceBtn     *tipButton
 	monitorDevicesLabel *widget.Label
 	metricsCollector    metrics.Collector
 	cpuChart            *metricChart
@@ -183,13 +188,13 @@ type clientApp struct {
 	storageTrash        *widget.Label
 	storageProgress     *widget.ProgressBar
 	storageBox          *fyne.Container
-	storageAnalyzeBtn   *widget.Button
-	storageCleanupBtn   *widget.Button
+	storageAnalyzeBtn   *tipButton
+	storageCleanupBtn   *tipButton
 	logReload           *hintButton
 
-	resolveBtn  *widget.Button
-	keepBothBtn *widget.Button
-	restoreBtn  *widget.Button
+	resolveBtn  *tipButton
+	keepBothBtn *tipButton
+	restoreBtn  *tipButton
 
 	activityTabs *container.AppTabs
 	fileTabs     *container.AppTabs
@@ -214,7 +219,7 @@ type clientApp struct {
 	tabTransferIdle  *widget.Label
 	tabTransferBox   *fyne.Container
 	transferHistory  *widget.List
-	confirmDeleteBtn *widget.Button
+	confirmDeleteBtn *tipButton
 	recentBox        *fyne.Container
 	recent           []recentItem
 	homeNASLabel     *widget.Label
@@ -254,7 +259,7 @@ func Run(cfg *config.Config, store *state.Store, loggers ...*diagnostics.Logger)
 	detectLanguage(cfg)
 	fyneApp := app.NewWithID("it.nasbox.client")
 	window := fyneApp.NewWindow(fmt.Sprintf("%s %s", version.AppName, version.AppVersion))
-	window.Resize(fyne.NewSize(1120, 760))
+	window.Resize(fyne.NewSize(980, 700))
 
 	var application *clientApp
 	openedBySetup := store == nil
@@ -439,7 +444,8 @@ func (c *clientApp) buildRoot() fyne.CanvasObject {
 	c.showSection(c.active)
 	c.installShortcuts()
 	main := container.NewBorder(header, nil, nil, nil, container.NewPadded(c.content))
-	return container.NewBorder(nil, nil, sidebar, nil, main)
+	c.tipLayer = container.NewWithoutLayout()
+	return container.NewStack(container.NewBorder(nil, nil, sidebar, nil, main), c.tipLayer)
 }
 
 func (c *clientApp) installShortcuts() {
@@ -596,20 +602,24 @@ func (c *clientApp) activityView() fyne.CanvasObject {
 		func() int { return len(c.transferLines) },
 		func(id int, label *widget.Label) { label.SetText(c.transferLines[id]) },
 	)
-	c.logList = newTextList(
-		func() int { return len(c.logFiltered) },
-		func(id int, label *widget.Label) {
-			if id < len(c.logFiltered) {
-				label.SetText(diagnostics.FormatEntry(c.logFiltered[id]))
+	c.logList = newRowList(
+		func() int { return len(c.logRows) }, 220, 110,
+		func(id int, row *listRow) {
+			if id >= len(c.logRows) {
+				return
 			}
+			item := c.logRows[id]
+			row.icon.SetResource(item.Icon)
+			row.name.SetText(item.Text)
+			row.meta.SetText(item.When)
 		},
 	)
 	c.logFilter = widget.NewSelect([]string{
-		tr("log.all_filter", nil), tr("log.group.transfers", nil),
+		tr("log.group.main", nil), tr("log.all_filter", nil), tr("log.group.transfers", nil),
 		tr("log.group.errors", nil), tr("log.group.safety", nil),
 		tr("log.group.history", nil),
 	}, func(string) { c.refreshLogView() })
-	c.logFilter.SetSelected(tr("log.all_filter", nil))
+	c.logFilter.SetSelected(tr("log.group.main", nil))
 	c.logSearch = widget.NewEntry()
 	c.logSearch.SetPlaceHolder(tr("log.search_placeholder", nil))
 	c.logSearch.OnChanged = func(string) { c.refreshLogView() }
@@ -627,8 +637,8 @@ func (c *clientApp) activityView() fyne.CanvasObject {
 	logPane := container.NewBorder(
 		container.NewVBox(
 			c.sectionTitle("", tr("ui.activity.log_note", nil)),
-			container.NewBorder(nil, nil, container.NewHBox(minWidth(c.logFilter, 160), c.logReload), c.logCount,
-				minWidth(c.logSearch, 220)),
+			container.NewBorder(nil, nil, container.NewHBox(minWidth(c.logFilter, 150), c.logReload), c.logCount,
+				minWidth(c.logSearch, 140)),
 		),
 		nil, nil, nil, container.NewVScroll(c.logList),
 	)
@@ -702,7 +712,7 @@ func (c *clientApp) nasView() fyne.CanvasObject {
 		summary,
 		container.NewGridWithColumns(3, cpuCard, loadCard, netCard),
 		diskCard,
-		tileRows(3, memoryTile, swapTile, uptimeTile, ioTile, lockTile, queueTile, stagingTile, metadataTile),
+		tileRows(4, memoryTile, swapTile, uptimeTile, ioTile, lockTile, queueTile, stagingTile, metadataTile),
 		c.surface(container.NewVBox(
 			widget.NewLabelWithStyle(tr("status.nas_overview_title", nil), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 			c.monitorDevicesLabel,
@@ -711,7 +721,7 @@ func (c *clientApp) nasView() fyne.CanvasObject {
 			tr("ui.action.server_check_hint", nil), widget.MediumImportance, c.onServerCheck, c.setHint)),
 	)
 	c.deviceList = newRowList(
-		func() int { return len(c.deviceEntries) }, 220, 320,
+		func() int { return len(c.deviceEntries) }, 160, 220,
 		func(id int, row *listRow) {
 			entry := c.deviceEntries[id]
 			row.icon.SetResource(theme.ComputerIcon())
@@ -746,7 +756,7 @@ func (c *clientApp) nasView() fyne.CanvasObject {
 		nil, nil, nil, c.deviceList,
 	)
 	c.nasTabs = container.NewAppTabs(
-		container.NewTabItem(tr("main_window.tab_metrics", nil), container.NewVScroll(inset(monitorPane))),
+		container.NewTabItem(tr("main_window.tab_metrics", nil), container.NewVScroll(inset(capWidth(monitorPane, 760)))),
 		container.NewTabItem(tr("devices.title", nil), devicesPane),
 		container.NewTabItem(tr("storage.title", nil), c.buildStoragePane()),
 	)
@@ -816,7 +826,7 @@ func (c *clientApp) settingsView() fyne.CanvasObject {
 		c.settingsDesktop(),
 		c.settingsConnection(),
 		c.settingsSync(),
-		c.settingsGroup(tr("ui.settings.info_title", nil), "",
+		c.listGroup(tr("ui.settings.info_title", nil), "",
 			widget.NewLabel(fmt.Sprintf("%s: %s", tr("settings.info_config_label", nil), valueOrDash(c.cfg.Path))),
 			widget.NewLabel(fmt.Sprintf("%s: %s", tr("status.config_local_folder", nil), valueOrDash(c.cfg.LocalRoot()))),
 		),
@@ -828,7 +838,7 @@ func (c *clientApp) settingsView() fyne.CanvasObject {
 			c.note(tr("ui.dialog.mirror_note", nil)),
 			c.mirrorLabel,
 			container.NewGridWrap(fyne.NewSize(1, 140), c.mirrorList),
-			container.NewHBox(
+			buttonRows(2,
 				newHintButton(tr("ui.action.sync_folders", nil), theme.ViewRefreshIcon(),
 					tr("mirrors.sync_now_tooltip", nil), widget.MediumImportance, c.onMirrorSync, c.setHint),
 				newHintButton(tr("ui.action.add_mirror", nil), theme.ContentAddIcon(),
@@ -844,7 +854,7 @@ func (c *clientApp) settingsView() fyne.CanvasObject {
 		), ""),
 		c.surface(c.excludePatternsSetting(), ""),
 	)
-	about := c.settingsGroup(tr("ui.group.about", nil), "",
+	about := c.listGroup(tr("ui.group.about", nil), "",
 		widget.NewLabel(fmt.Sprintf("%s: %s %s", strings.TrimSuffix(tr("settings.info_version_label", nil), ":"), version.AppName, version.AppVersion)),
 		widget.NewLabel(fmt.Sprintf("%s: %s", strings.TrimSuffix(tr("settings.info_min_server_label", nil), ":"), valueOrDash(c.cfg.String("min_server_version")))),
 		container.NewGridWithColumns(2,
@@ -976,11 +986,17 @@ func (c *clientApp) applyStatusUI(level statusLevel, reason string) {
 	}
 }
 
+// looksOffline tells a connection problem from an error the NAS itself
+// reported. A bare "ssh" in the text used to count: any remote command that
+// exited 1 ("ssh: exit status 1") was shown as "Offline" although the NAS was
+// reachable. ssh exits 255 when it cannot connect.
 func looksOffline(message string) bool {
 	lower := strings.ToLower(message)
 	for _, token := range []string{
-		"offline", "unreachable", "raggiungibile", "connection refused",
-		"no such host", "timeout", "ssh", "network", "rete",
+		"offline", "unreachable", "irraggiungibile", "non raggiungibile", "connection refused",
+		"connection timed out", "connection closed", "connection reset", "no route to host",
+		"no such host", "could not resolve", "network is", "broken pipe", "timeout",
+		"exit status 255", "host key", "permission denied",
 	} {
 		if strings.Contains(lower, token) {
 			return true
@@ -1086,10 +1102,15 @@ func (c *clientApp) refreshLogView() {
 	if c.logSearch != nil {
 		query = c.logSearch.Text
 	}
-	c.logFiltered = diagnostics.Filter(c.logEntries, group, query)
+	entries := c.logEntries
+	if c.logFilter != nil && c.logFilter.Selected == tr("log.group.main", nil) {
+		entries = dropNoise(entries)
+	}
+	c.logFiltered = diagnostics.Filter(entries, group, query)
+	c.logRows = buildLogRows(c.logFiltered, time.Now())
 	if c.logCount != nil {
 		c.logCount.SetText(tr("ui.log.count", map[string]any{
-			"shown": len(c.logFiltered), "total": len(c.logEntries),
+			"shown": formatCount(len(c.logFiltered)), "total": formatCount(len(c.logEntries)),
 		}))
 	}
 	c.logList.Refresh()
@@ -1122,18 +1143,6 @@ func shortHint(text string) string {
 		cut = cut[:index]
 	}
 	return cut + "…"
-}
-
-func (c *clientApp) setHintText(text string) {
-	fyne.Do(func() {
-		if text == "" {
-			text = tr("ui.footer.hint", nil)
-		}
-		text = shortHint(text)
-		if c.hintLabel != nil {
-			c.hintLabel.SetText(text)
-		}
-	})
 }
 
 func (c *clientApp) consumeEvents() {
@@ -1284,7 +1293,7 @@ func (c *clientApp) refreshBrowse() {
 		return
 	}
 	fyne.Do(func() {
-		c.browseEntries = entries
+		c.browseEntries = sortBrowse(entries, c.cfg.String("browse_sort"))
 		if c.selectedBrowse != "" {
 			found := false
 			for _, entry := range entries {

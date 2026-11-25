@@ -10,11 +10,13 @@ import (
 	"time"
 
 	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/test"
 	"fyne.io/fyne/v2/theme"
 
 	"nasbox-go/internal/config"
 	"nasbox-go/internal/conflicts"
+	"nasbox-go/internal/diagnostics"
 	"nasbox-go/internal/engine"
 	"nasbox-go/internal/history"
 	"nasbox-go/internal/i18n"
@@ -201,6 +203,26 @@ func TestCaptureSoftware(t *testing.T) {
 	save("01c-status-bulk")
 	c.navigate(sectionActivity, 1)
 	save("02c-transfers-live")
+	logEntries := []diagnostics.Entry{
+		{Timestamp: now, Level: "ERROR", Action: "ERROR", Path: "-", Detail: "ssh: exit status 1: "},
+		{Timestamp: now, Level: "INFO", Action: "SYNC", Path: "-", Detail: "Ultime 24h: ↑ 0 caricamenti · ↓ 0 download · ✕ 0 eliminazioni, 0 conflitti"},
+		{Timestamp: now, Level: "INFO", Action: "PERF", Path: "-", Detail: "manifest: 0.17s (completo=false)"},
+		{Timestamp: now, Level: "WARN", Action: "SAFETY_BLOCK", Path: "-", Detail: "Operazione bloccata: 8743 cancellazioni nell'ultima ora, limite 1000"},
+	}
+	for index := 0; index < 300; index++ {
+		logEntries = append(logEntries, diagnostics.Entry{Timestamp: now.Add(-time.Duration(index) * time.Second),
+			Level: "INFO", Action: "DOWNLOAD", Path: fmt.Sprintf("SADE/SADE/images/img%04d.png", index)})
+	}
+	logEntries = append(logEntries,
+		diagnostics.Entry{Timestamp: now.Add(-26 * time.Hour), Level: "INFO", Action: "UPLOAD", Path: "Documenti/Progetti/preventivo.txt"},
+		diagnostics.Entry{Timestamp: now.Add(-27 * time.Hour), Level: "INFO", Action: "MIRROR", Path: "/home/andres/RPG", Detail: "replica aggiornata in NASBox/RPG"})
+	c.logEntries = logEntries
+	c.refreshLogView()
+	c.navigate(sectionActivity, 2)
+	save("02d-log")
+	c.showTip("Differenze trovate dall'ultimo controllo di integrità. Clic per aprire le impostazioni di integrità.", fyne.NewPos(700, 300))
+	save("02e-tooltip")
+	c.hideTip()
 	c.navigate(sectionStatus, 0)
 	c.applyStatusUI(statusOK, "Tutto sincronizzato. Nessuna modifica in sospeso.")
 	c.progress = transfer.Progress{Finished: true}
@@ -234,4 +256,87 @@ func TestCaptureSoftware(t *testing.T) {
 	c.showSection(sectionStatus)
 	save("10-status-dark")
 	_ = a
+}
+
+// TestReportMinSize prints the minimum window size per section (run with -v):
+// it is how the "window too wide" regression is found.
+func TestReportMinSize(t *testing.T) {
+	if os.Getenv("NASBOX_UI_MINSIZE") == "" {
+		t.Skip("set NASBOX_UI_MINSIZE=1")
+	}
+	i18n.Language = "it"
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	cfg := config.New("")
+	cfg.Set("local_root", t.TempDir(), false)
+	store, _ := state.Open(cfg)
+	t.Cleanup(func() { _ = store.Close() })
+	client := remote.New(cfg)
+	a := test.NewTempApp(t)
+	window := test.NewWindow(nil)
+	window.Resize(fyne.NewSize(1180, 800))
+	c := &clientApp{
+		cfg: cfg, store: store, client: client, transfers: transfer.New(cfg, client),
+		runner:  engine.NewRunner(cfg, store, client, transfer.New(cfg, client)),
+		fyneApp: a, window: window, uiTheme: newNAStheme(theme.VariantLight), level: statusOK,
+	}
+	c.setHint = c.setHintText
+	a.Settings().SetTheme(c.uiTheme)
+	c.bannerGo = func() {}
+	window.SetContent(c.buildRoot())
+	t.Logf("root min: %v", window.Content().MinSize())
+	for name, view := range map[string]sectionID{"status": sectionStatus, "activity": sectionActivity, "files": sectionFiles, "nas": sectionNAS, "settings": sectionSettings} {
+		t.Logf("%-9s min: %v", name, c.views[view].MinSize())
+	}
+	for name, tabs := range map[string]*container.AppTabs{"settings": c.settingsTabs, "files": c.fileTabs, "nas": c.nasTabs, "activity": c.activityTabs} {
+		for _, item := range tabs.Items {
+			t.Logf("  tab %s/%s min: %v", name, item.Text, item.Content.MinSize())
+		}
+	}
+	t.Logf("  appearance %v desktop %v connection %v sync %v", c.settingsAppearance().MinSize(), c.settingsDesktop().MinSize(), c.settingsConnection().MinSize(), c.settingsSync().MinSize())
+	sb := c.buildSidebar()
+	t.Logf("sidebar min: %v header: %v", sb.MinSize(), c.buildHeader().MinSize())
+}
+
+func TestReportAdvancedRows(t *testing.T) {
+	if os.Getenv("NASBOX_UI_MINSIZE") == "" {
+		t.Skip()
+	}
+	i18n.Language = "it"
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	cfg := config.New("")
+	store, _ := state.Open(cfg)
+	t.Cleanup(func() { _ = store.Close() })
+	client := remote.New(cfg)
+	a := test.NewTempApp(t)
+	c := &clientApp{cfg: cfg, store: store, client: client, transfers: transfer.New(cfg, client),
+		runner: engine.NewRunner(cfg, store, client, transfer.New(cfg, client)), fyneApp: a,
+		uiTheme: newNAStheme(theme.VariantLight), views: map[sectionID]fyne.CanvasObject{}}
+	c.setHint = c.setHintText
+	a.Settings().SetTheme(c.uiTheme)
+	group := c.settingsAdvanced().(*fyne.Container)
+	card := group.Objects[1]
+	rows := test.WidgetRenderer(card.(fyne.Widget)).Objects()
+	var walk func(o fyne.CanvasObject, d int)
+	walk = func(o fyne.CanvasObject, d int) {
+		if ct, ok := o.(*fyne.Container); ok {
+			if d == 0 {
+				for _, ch := range ct.Objects {
+					t.Logf("row %T min %v", ch, ch.MinSize())
+				}
+			}
+			for _, ch := range ct.Objects {
+				walk(ch, d+1)
+			}
+		}
+	}
+	for _, r := range rows {
+		walk(r, 0)
+		if w, ok := r.(fyne.Widget); ok {
+			for _, ro := range test.WidgetRenderer(w).Objects() {
+				walk(ro, 0)
+			}
+		}
+	}
 }

@@ -195,7 +195,7 @@ func (c *clientApp) buildHealthPane() fyne.CanvasObject {
 		}()
 	})
 	run.Importance = widget.HighImportance
-	return c.settingsGroup(tr("ui.health.title", nil), tr("ui.health.subtitle", nil),
+	return c.listGroup(tr("ui.health.title", nil), tr("ui.health.subtitle", nil),
 		container.NewBorder(nil, nil, nil, run, status), results)
 }
 

@@ -4,6 +4,36 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 1.3.0 - 2026-11-25
+
+Client Go:
+
+- **Corretto "Offline / ssh exit status 1" che bloccava ogni sincronizzazione.**
+  Il rilevamento dei rename considerava come destinazione anche un file che il
+  NAS già conosceva (una copia identica in un'altra cartella, es.
+  `SADE/images` accanto a `SADE/SADE/images`). Il server rifiutava lo
+  spostamento con exit 1 e la passata veniva interrotta a ogni ciclo. Ora una
+  destinazione già tracciata non è un rename: i file mancanti passano dalla
+  normale protezione cancellazioni (conferma). Il rifiuto del NAS riporta il
+  motivo e non viene più scambiato per "offline": Offline solo per problemi
+  di connessione (ssh 255, timeout, host non raggiungibile).
+- **Log leggibili**: frasi complete ("Scaricato dal NAS: …", "Il NAS ha
+  rifiutato un'operazione…"), icone per livello, orario breve, voci ripetute
+  raggruppate ("19.445 file scaricati in …") e filtro predefinito "Eventi
+  principali" che nasconde la diagnostica (PERF, DOCTOR).
+- **Sfoglia NAS ordinabile**: cartelle prima, file prima, nome A→Z / Z→A,
+  dimensione, data. La scelta viene ricordata; compare anche la data.
+- **Tooltip veri** su pulsanti, voci del menu, tessere dello stato e righe
+  recenti (nuvoletta vicino al puntatore, non intercetta i clic).
+- **Finestra meno larga**: larghezza minima da circa 1210 a circa 810 px e
+  dimensione iniziale 980×700. Le barre di pulsanti vanno su più righe e le
+  liste hanno colonne più strette.
+- **Scheda NAS più stretta**: contenuto limitato a 760 px, tessere su quattro
+  colonne.
+- **Impostazioni**: lingua, tema e backend su un'unica riga; i parametri in
+  due colonne (le righe lunghe, come la pausa programmata, restano a tutta
+  larghezza). Il backend è stato spostato da Avanzate.
+
 ## 1.2.1 - 2026-11-25
 
 Client Go:

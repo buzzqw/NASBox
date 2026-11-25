@@ -224,13 +224,24 @@ func newHintButton(
 // referenced (SetText/Disable) and placed in containers. The embedded Button
 // of a hintButton must never be added to a container on its own: its
 // renderer belongs to the outer widget and it would draw without background.
-func plainButton(label string, icon fyne.Resource, _ string, importance widget.Importance, onTap func(), _ func(string)) *widget.Button {
-	button := widget.NewButtonWithIcon(label, icon, onTap)
-	if icon == nil {
-		button = widget.NewButton(label, onTap)
+func plainButton(label string, icon fyne.Resource, hint string, importance widget.Importance, onTap func(), setHint func(string)) *tipButton {
+	if hint == "" {
+		hint = label
 	}
+	button := &tipButton{hint: hint, setHint: setHint}
+	button.Text = label
+	button.Icon = icon
+	button.OnTapped = onTap
 	button.Importance = importance
+	button.ExtendBaseWidget(button)
 	return button
+}
+
+func (b *hintButton) Tapped(event *fyne.PointEvent) {
+	if b.setHint != nil {
+		b.setHint("")
+	}
+	b.Button.Tapped(event)
 }
 
 // Btn exposes the underlying button for SetText/Enable/Disable.
@@ -238,12 +249,16 @@ func (b *hintButton) Btn() *widget.Button { return &b.Button }
 
 func (b *hintButton) MouseIn(event *desktop.MouseEvent) {
 	b.Button.MouseIn(event)
+	tipPointer = event.AbsolutePosition
 	if b.setHint != nil {
 		b.setHint(b.hint)
 	}
 }
 
-func (b *hintButton) MouseMoved(event *desktop.MouseEvent) { b.Button.MouseMoved(event) }
+func (b *hintButton) MouseMoved(event *desktop.MouseEvent) {
+	b.Button.MouseMoved(event)
+	tipPointer = event.AbsolutePosition
+}
 
 func (b *hintButton) MouseOut() {
 	b.Button.MouseOut()
@@ -412,4 +427,51 @@ func placeholder(text string) fyne.CanvasObject {
 // small left margin, so cards do not touch the window edge.
 func inset(object fyne.CanvasObject) fyne.CanvasObject {
 	return container.New(layout.NewCustomPaddedLayout(2, 12, 2, 14), object)
+}
+
+// buttonRows lays buttons out `perRow` to a row. A single row of five or six
+// buttons made whole panes (and with them the window) wider than 800 px.
+func buttonRows(perRow int, buttons ...fyne.CanvasObject) fyne.CanvasObject {
+	rows := container.NewVBox()
+	for start := 0; start < len(buttons); start += perRow {
+		end := start + perRow
+		if end > len(buttons) {
+			end = len(buttons)
+		}
+		rows.Add(container.NewHBox(buttons[start:end]...))
+	}
+	return rows
+}
+
+// capWidth keeps a page from stretching across a wide window: the child gets
+// at most maxWidth and stays left-aligned (dashboards read better narrow).
+type capLayout struct{ maxWidth float32 }
+
+func (l capLayout) Layout(objects []fyne.CanvasObject, size fyne.Size) {
+	width := size.Width
+	if width > l.maxWidth {
+		width = l.maxWidth
+	}
+	for _, object := range objects {
+		object.Resize(fyne.NewSize(width, size.Height))
+		object.Move(fyne.NewPos(0, 0))
+	}
+}
+
+func (l capLayout) MinSize(objects []fyne.CanvasObject) fyne.Size {
+	var min fyne.Size
+	for _, object := range objects {
+		size := object.MinSize()
+		if size.Width > min.Width {
+			min.Width = size.Width
+		}
+		if size.Height > min.Height {
+			min.Height = size.Height
+		}
+	}
+	return min
+}
+
+func capWidth(object fyne.CanvasObject, maxWidth float32) fyne.CanvasObject {
+	return container.New(capLayout{maxWidth: maxWidth}, object)
 }

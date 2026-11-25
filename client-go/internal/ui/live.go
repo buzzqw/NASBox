@@ -203,6 +203,7 @@ func (c *clientApp) renderRecent() {
 		target := group.Path
 		row := newTapRow(c, container.NewBorder(nil, nil, widget.NewIcon(recentIcon(group.Kind)), when, title),
 			func() { c.openContainingFolder(target) })
+		row.tip = group.Path + "\n" + lt("Clic: apri la cartella nel file manager", "Click: open the folder in the file manager")
 		c.recentBox.Add(row)
 	}
 	c.recentBox.Refresh()
@@ -426,7 +427,7 @@ func (c *clientApp) buildTransfersPane() fyne.CanvasObject {
 	c.tabTransferIdle.Importance = widget.LowImportance
 	c.tabTransferBox = container.NewVBox(c.tabTransferIdle)
 	c.transferHistory = newRowList(
-		func() int { return len(c.recent) }, 260, 220,
+		func() int { return len(c.recent) }, 200, 170,
 		func(id int, row *listRow) {
 			if id >= len(c.recent) {
 				return

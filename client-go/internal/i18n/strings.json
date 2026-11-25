@@ -4908,8 +4908,8 @@
     "it": "(via bastione)"
   },
   "ui.activity.log_note": {
-    "en": "Technical events, errors and diagnostics. Nothing is filtered here.",
-    "it": "Eventi tecnici, errori e diagnostica. Qui nulla viene filtrato."
+    "en": "What happened, in plain words. Technical details are in client.log.",
+    "it": "Cosa è successo, in parole semplici. I dettagli tecnici sono in client.log."
   },
   "ui.activity.recent": {
     "en": "Recent",
@@ -6477,5 +6477,45 @@
   "ui.home.trash_full": {
     "en": "quota full: the oldest versions are deleted first",
     "it": "quota piena: le versioni più vecchie vengono eliminate"
+  },
+  "log.group.main": {
+    "en": "Main events",
+    "it": "Eventi principali"
+  },
+  "ui.tip.tracked": {
+    "en": "Files NASBox keeps in sync. Click to browse them on the NAS.",
+    "it": "File che NASBox tiene sincronizzati. Clic per sfogliarli sul NAS."
+  },
+  "ui.tip.conflicts": {
+    "en": "Copies made when the same file changed on two PCs. Click to resolve them.",
+    "it": "Copie create quando lo stesso file è cambiato su due PC. Clic per risolverle."
+  },
+  "ui.tip.undo": {
+    "en": "Deletions from the last 24 hours that can still be restored. Click to see them.",
+    "it": "Eliminazioni delle ultime 24 ore ancora ripristinabili. Clic per vederle."
+  },
+  "ui.tip.audit": {
+    "en": "Differences found by the last integrity check. Click to open the integrity settings.",
+    "it": "Differenze trovate dall'ultimo controllo di integrità. Clic per aprire le impostazioni di integrità."
+  },
+  "ui.tip.nav_status": {
+    "en": "Sync status and what is happening now (Ctrl+1)",
+    "it": "Stato della sincronizzazione e attività in corso (Ctrl+1)"
+  },
+  "ui.tip.nav_activity": {
+    "en": "Recent activity, transfers and log (Ctrl+2)",
+    "it": "Attività recenti, trasferimenti e log (Ctrl+2)"
+  },
+  "ui.tip.nav_files": {
+    "en": "Browse the NAS, resolve conflicts, restore versions (Ctrl+3)",
+    "it": "Sfoglia il NAS, risolvi conflitti, ripristina versioni (Ctrl+3)"
+  },
+  "ui.tip.nav_nas": {
+    "en": "NAS health, devices and disk space (Ctrl+4)",
+    "it": "Salute del NAS, dispositivi e spazio disco (Ctrl+4)"
+  },
+  "ui.tip.nav_settings": {
+    "en": "Connection, safety, integrity and advanced options (Ctrl+5)",
+    "it": "Connessione, sicurezza, integrità e opzioni avanzate (Ctrl+5)"
   }
 }

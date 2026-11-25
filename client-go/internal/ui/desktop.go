@@ -149,7 +149,7 @@ func (c *clientApp) settingsDesktop() fyne.CanvasObject {
 		refresh()
 	})
 	refresh()
-	emblems := widget.NewCheck(tr("ui.desktop.emblems", nil), func(on bool) {
+	emblems := widget.NewCheck("", func(on bool) {
 		c.persistSetting("go_emblems", on)
 		if on {
 			c.emblemMu.Lock()
@@ -161,6 +161,7 @@ func (c *clientApp) settingsDesktop() fyne.CanvasObject {
 		}
 	})
 	emblems.SetChecked(c.emblemsEnabled())
-	return c.settingsGroup(tr("ui.desktop.title", nil), tr("ui.desktop.subtitle", nil),
-		container.NewBorder(nil, nil, nil, toggle, state), emblems)
+	return c.listGroup(tr("ui.desktop.title", nil), tr("ui.desktop.subtitle", nil),
+		container.NewBorder(nil, nil, nil, toggle, state),
+		container.NewBorder(nil, nil, emblems, nil, c.note(tr("ui.desktop.emblems", nil))))
 }

@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
+	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
@@ -13,7 +15,102 @@ import (
 
 	"nasbox-go/internal/conflicts"
 	"nasbox-go/internal/history"
+	"nasbox-go/internal/remote"
 )
+
+// Sort modes of the NAS browser (stored in config key browse_sort).
+const (
+	sortFoldersFirst = "folders"
+	sortFilesFirst   = "files"
+	sortNameAsc      = "name"
+	sortNameDesc     = "name_desc"
+	sortSize         = "size"
+	sortNewest       = "newest"
+)
+
+func browseSortOptions() []settingOption {
+	return []settingOption{
+		{value: sortFoldersFirst, label: lt("Cartelle prima", "Folders first")},
+		{value: sortFilesFirst, label: lt("File prima", "Files first")},
+		{value: sortNameAsc, label: lt("Nome A → Z", "Name A → Z")},
+		{value: sortNameDesc, label: lt("Nome Z → A", "Name Z → A")},
+		{value: sortSize, label: lt("Dimensione (grandi prima)", "Size (largest first)")},
+		{value: sortNewest, label: lt("Data (recenti prima)", "Date (newest first)")},
+	}
+}
+
+// sortBrowse orders a folder listing. Names compare case-insensitively with
+// the original spelling as tie-breaker, so the order is stable.
+func sortBrowse(entries []remote.BrowseEntry, mode string) []remote.BrowseEntry {
+	sorted := append([]remote.BrowseEntry(nil), entries...)
+	isDir := func(e remote.BrowseEntry) bool { return e.Kind == "DIR" }
+	byName := func(a, b remote.BrowseEntry) bool {
+		la, lb := strings.ToLower(a.Name), strings.ToLower(b.Name)
+		if la != lb {
+			return la < lb
+		}
+		return a.Name < b.Name
+	}
+	sort.SliceStable(sorted, func(i, j int) bool {
+		a, b := sorted[i], sorted[j]
+		switch mode {
+		case sortFilesFirst:
+			if isDir(a) != isDir(b) {
+				return !isDir(a)
+			}
+		case sortNameAsc:
+			return byName(a, b)
+		case sortNameDesc:
+			return byName(b, a)
+		case sortSize:
+			if isDir(a) != isDir(b) {
+				return isDir(a)
+			}
+			if a.Size != b.Size {
+				return a.Size > b.Size
+			}
+		case sortNewest:
+			if a.MTime != b.MTime {
+				return a.MTime > b.MTime
+			}
+		default: // folders first
+			if isDir(a) != isDir(b) {
+				return isDir(a)
+			}
+		}
+		return byName(a, b)
+	})
+	return sorted
+}
+
+func (c *clientApp) browseSortSelect() fyne.CanvasObject {
+	options := browseSortOptions()
+	labels := make([]string, 0, len(options))
+	selected := options[0].label
+	current := c.cfg.String("browse_sort")
+	for _, option := range options {
+		labels = append(labels, option.label)
+		if option.value == current {
+			selected = option.label
+		}
+	}
+	selectWidget := widget.NewSelect(labels, nil)
+	selectWidget.SetSelected(selected)
+	selectWidget.OnChanged = func(value string) {
+		for _, option := range options {
+			if option.label == value {
+				_ = c.cfg.Set("browse_sort", option.value, true)
+				c.browseEntries = sortBrowse(c.browseEntries, option.value)
+				if c.browseList != nil {
+					c.browseList.UnselectAll()
+					c.browseList.Refresh()
+				}
+				return
+			}
+		}
+	}
+	return selectWidget
+}
 
 func (c *clientApp) buildBrowsePane() fyne.CanvasObject {
 	c.browseList = newRowList(
@@ -28,7 +125,11 @@ func (c *clientApp) buildBrowsePane() fyne.CanvasObject {
 				return
 			}
 			row.name.SetText(entry.Name)
-			row.meta.SetText(humanBytes(entry.Size))
+			meta := humanBytes(entry.Size)
+			if entry.MTime > 0 {
+				meta += " · " + time.Unix(entry.MTime, 0).Format("02/01/2006")
+			}
+			row.meta.SetText(meta)
 		},
 	)
 	c.browseList.OnSelected = func(id widget.ListItemID) {
@@ -71,8 +172,9 @@ func (c *clientApp) buildBrowsePane() fyne.CanvasObject {
 		c.sectionTitle("", tr("ui.file.browse_note", nil)),
 		c.browsePathLabel,
 		c.breadcrumbs,
+		container.NewBorder(nil, nil, widget.NewLabel(lt("Ordina per", "Sort by")), nil, container.NewHBox(minWidth(c.browseSortSelect(), 220))),
 		c.browseSelectedLabel,
-		container.NewHBox(
+		buttonRows(3,
 			c.browseUpBtn,
 			newHintButton(tr("browse.refresh_btn", nil), theme.ViewRefreshIcon(),
 				tr("ui.file.refresh_hint", nil), widget.LowImportance, func() {
@@ -98,7 +200,7 @@ func (c *clientApp) buildBrowsePane() fyne.CanvasObject {
 
 func (c *clientApp) buildConflictPane() fyne.CanvasObject {
 	c.confList = newRowList(
-		func() int { return len(c.confGroups) }, 200, 40,
+		func() int { return len(c.confGroups) }, 120, 30,
 		func(id int, row *listRow) {
 			group := c.confGroups[id]
 			row.icon.SetResource(theme.WarningIcon())
@@ -112,7 +214,7 @@ func (c *clientApp) buildConflictPane() fyne.CanvasObject {
 		}
 	}
 	c.confChoiceList = newRowList(
-		func() int { return len(c.confChoices) }, 180, 160,
+		func() int { return len(c.confChoices) }, 120, 110,
 		func(id int, row *listRow) {
 			path := c.confChoices[id]
 			row.icon.SetResource(theme.FileIcon())
@@ -148,7 +250,7 @@ func (c *clientApp) buildConflictPane() fyne.CanvasObject {
 		),
 		nil, nil, nil, c.confChoiceList,
 	)
-	actions := container.NewHBox(
+	actions := buttonRows(3,
 		newHintButton(tr("conflicts.refresh_btn", nil), theme.ViewRefreshIcon(),
 			tr("ui.file.refresh_hint", nil), widget.LowImportance, func() {
 				c.appendAction(tr("conflicts.refresh_btn", nil))
@@ -193,7 +295,7 @@ func (c *clientApp) buildHistoryPane() fyne.CanvasObject {
 		c.sectionTitle("", tr("ui.history.note", nil)),
 		c.historyFilter,
 		c.histDetail,
-		container.NewHBox(
+		buttonRows(3,
 			newHintButton(tr("history.refresh_btn", nil), theme.ViewRefreshIcon(),
 				tr("ui.file.refresh_hint", nil), widget.LowImportance, func() {
 					c.appendAction(tr("history.refresh_btn", nil))

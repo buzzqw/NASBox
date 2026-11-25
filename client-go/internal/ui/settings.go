@@ -103,7 +103,45 @@ func compactField(object fyne.CanvasObject, width float32) fyne.CanvasObject {
 	return container.NewHBox(minWidth(object, width))
 }
 
-func (c *clientApp) settingsGroup(title, subtitle string, rows ...fyne.CanvasObject) fyne.CanvasObject {
+// settingCell is a compact, stacked setting (label, control, help) meant to
+// sit in a two-column grid. Booleans show the checkbox next to the label.
+func (c *clientApp) settingCell(label string, object fyne.CanvasObject, helpKey string) fyne.CanvasObject {
+	name := widget.NewLabelWithStyle(label, fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
+	name.Wrapping = fyne.TextWrapWord
+	var head fyne.CanvasObject = name
+	body := []fyne.CanvasObject{}
+	if check, ok := object.(*widget.Check); ok {
+		head = container.NewBorder(nil, nil, check, nil, name)
+	} else {
+		body = append(body, object)
+	}
+	items := append([]fyne.CanvasObject{head}, body...)
+	if info, ok := settingHelp[helpKey]; ok {
+		text := info.it
+		if strings.EqualFold(i18n.Language, "en") {
+			text = info.en
+		}
+		help := widget.NewLabel(text)
+		help.Wrapping = fyne.TextWrapWord
+		help.Importance = widget.LowImportance
+		help.SizeName = theme.SizeNameCaptionText
+		items = append(items, help)
+	}
+	return container.NewPadded(container.NewVBox(items...))
+}
+
+// wideSetting marks rows that need the full width (lists, long editors).
+func (c *clientApp) wideSetting(object fyne.CanvasObject) fyne.CanvasObject {
+	if c.wideRows == nil {
+		c.wideRows = map[fyne.CanvasObject]bool{}
+	}
+	c.wideRows[object] = true
+	return object
+}
+
+// listGroup is a single-column card for non-setting content (info lines,
+// buttons, results).
+func (c *clientApp) listGroup(title, subtitle string, rows ...fyne.CanvasObject) fyne.CanvasObject {
 	items := make([]fyne.CanvasObject, 0, len(rows)*2)
 	for index, row := range rows {
 		if index > 0 {
@@ -111,6 +149,39 @@ func (c *clientApp) settingsGroup(title, subtitle string, rows ...fyne.CanvasObj
 		}
 		items = append(items, row)
 	}
+	return container.NewVBox(
+		c.sectionTitle(title, subtitle),
+		c.surface(container.NewVBox(items...), ""),
+	)
+}
+
+// settingsGroup lays the settings out in two columns; rows marked with
+// wideSetting take the whole width. Each pair is as tall as its taller cell.
+func (c *clientApp) settingsGroup(title, subtitle string, rows ...fyne.CanvasObject) fyne.CanvasObject {
+	items := []fyne.CanvasObject{}
+	pending := []fyne.CanvasObject{}
+	flush := func() {
+		if len(pending) == 0 {
+			return
+		}
+		if len(items) > 0 {
+			items = append(items, widget.NewSeparator())
+		}
+		items = append(items, tileRows(2, pending...))
+		pending = nil
+	}
+	for _, row := range rows {
+		if c.wideRows[row] {
+			flush()
+			if len(items) > 0 {
+				items = append(items, widget.NewSeparator())
+			}
+			items = append(items, row)
+			continue
+		}
+		pending = append(pending, row)
+	}
+	flush()
 	return container.NewVBox(
 		c.sectionTitle(title, subtitle),
 		c.surface(container.NewVBox(items...), ""),
@@ -138,7 +209,7 @@ func (c *clientApp) stringSetting(label, key string) fyne.CanvasObject {
 			c.settingSaved(label, strings.TrimSpace(value))
 		}
 	}
-	return c.settingRow(label, entry, key)
+	return c.settingCell(label, entry, key)
 }
 
 func (c *clientApp) intSetting(label, key string) fyne.CanvasObject {
@@ -159,7 +230,7 @@ func (c *clientApp) intSetting(label, key string) fyne.CanvasObject {
 			c.settingSaved(label, parsed)
 		}
 	}
-	return c.settingRow(label, compactField(entry, 160), key)
+	return c.settingCell(label, compactField(entry, 150), key)
 }
 
 func (c *clientApp) floatSetting(label, key string, fallback float64) fyne.CanvasObject {
@@ -184,7 +255,7 @@ func (c *clientApp) floatSetting(label, key string, fallback float64) fyne.Canva
 			c.settingSaved(label, parsed)
 		}
 	}
-	return c.settingRow(label, compactField(entry, 160), key)
+	return c.settingCell(label, compactField(entry, 150), key)
 }
 
 type settingOption struct {
@@ -227,7 +298,7 @@ func (c *clientApp) choiceSettingLabels(label, key string, options []settingOpti
 			}
 		}
 	}
-	return c.settingRow(label, compactField(selectWidget, 280), key)
+	return c.settingCell(label, selectWidget, key)
 }
 
 func (c *clientApp) boolSetting(label, key string) fyne.CanvasObject {
@@ -242,7 +313,7 @@ func (c *clientApp) boolSetting(label, key string) fyne.CanvasObject {
 			c.settingSaved(label, state)
 		}
 	}
-	return c.settingRow(label, check, key)
+	return c.settingCell(label, check, key)
 }
 
 func scheduleTimes(current string) []string {
@@ -316,10 +387,10 @@ func (c *clientApp) deviceLabelsSetting() fyne.CanvasObject {
 	button := newHintButton(tr("ui.settings.open_devices", nil), theme.ComputerIcon(),
 		tr("ui.settings.open_devices_hint", nil), widget.MediumImportance,
 		func() { c.navigate(sectionNAS, 1) }, c.setHint)
-	return c.settingRow(tr("ui.settings.device_labels", nil), container.NewVBox(label, button), "device_labels")
+	return c.wideSetting(c.settingCell(tr("ui.settings.device_labels", nil), container.NewVBox(label, container.NewHBox(button)), "device_labels"))
 }
 
-func (c *clientApp) languageSetting() fyne.CanvasObject {
+func (c *clientApp) languageSelect() fyne.CanvasObject {
 	selectWidget := widget.NewSelect([]string{"Italiano", "English"}, nil)
 	selectWidget.SetSelected("Italiano")
 	if strings.EqualFold(i18n.Language, "en") {
@@ -332,10 +403,10 @@ func (c *clientApp) languageSetting() fyne.CanvasObject {
 		}
 		c.setLanguage(language)
 	}
-	return c.settingRow(tr("settings.language_title", nil), compactField(selectWidget, 280), "language")
+	return selectWidget
 }
 
-func (c *clientApp) themeSetting() fyne.CanvasObject {
+func (c *clientApp) themeSelect() fyne.CanvasObject {
 	selectWidget := widget.NewSelect([]string{
 		tr("settings.theme_light", nil), tr("settings.theme_dark", nil),
 	}, nil)
@@ -350,17 +421,54 @@ func (c *clientApp) themeSetting() fyne.CanvasObject {
 			c.setTheme("light")
 		}
 	}
-	return c.settingRow(tr("settings.theme_title", nil), compactField(selectWidget, 280), "go_theme")
+	return selectWidget
 }
 
+func (c *clientApp) backendSelect() fyne.CanvasObject {
+	options := []settingOption{
+		{value: "auto", label: "Auto"},
+		{value: "x11", label: "X11"},
+		{value: "wayland", label: "Wayland"},
+	}
+	labels := make([]string, 0, len(options))
+	selected := options[0].label
+	for _, option := range options {
+		labels = append(labels, option.label)
+		if option.value == c.cfg.String("go_display_backend") {
+			selected = option.label
+		}
+	}
+	selectWidget := widget.NewSelect(labels, nil)
+	selectWidget.SetSelected(selected)
+	selectWidget.OnChanged = func(value string) {
+		for _, option := range options {
+			if option.label == value && c.persistSetting("go_display_backend", option.value) {
+				c.settingSaved(tr("ui.settings.backend", nil), value)
+			}
+		}
+	}
+	return selectWidget
+}
+
+// appearanceCell is a caption above a control, for the single appearance row.
+func (c *clientApp) appearanceCell(label string, object fyne.CanvasObject) fyne.CanvasObject {
+	caption := widget.NewLabelWithStyle(label, fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
+	caption.Truncation = fyne.TextTruncateEllipsis
+	return container.NewVBox(caption, object)
+}
+
+// settingsAppearance puts language, theme and display backend on one row.
 func (c *clientApp) settingsAppearance() fyne.CanvasObject {
-	return c.settingsGroup("", tr("ui.settings.appearance_note", nil),
-		c.languageSetting(),
-		c.themeSetting(),
-		c.settingRow(tr("ui.settings.display_backend", nil),
-			widget.NewLabel(displayBackend(c.cfg)), "go_display_backend"),
-		c.settingRow(tr("ui.settings.shortcuts", nil),
-			c.note(tr("ui.settings.shortcuts_value", nil)), "shortcuts"),
+	row := container.NewGridWithColumns(3,
+		c.appearanceCell(tr("settings.language_title", nil), c.languageSelect()),
+		c.appearanceCell(tr("settings.theme_title", nil), c.themeSelect()),
+		c.appearanceCell(tr("ui.settings.backend", nil), c.backendSelect()),
+	)
+	shortcuts := c.note(tr("ui.settings.shortcuts", nil) + ": " + tr("ui.settings.shortcuts_value", nil))
+	shortcuts.Importance = widget.LowImportance
+	return container.NewVBox(
+		c.sectionTitle("", tr("ui.settings.appearance_note", nil)),
+		c.surface(container.NewVBox(container.NewPadded(row), shortcuts), ""),
 	)
 }
 
@@ -451,13 +559,8 @@ func (c *clientApp) settingsAdvanced() fyne.CanvasObject {
 			{value: "menu", label: tr("settings.tray_click_menu", nil)},
 			{value: "window", label: tr("settings.tray_click_window", nil)},
 		}),
-		c.choiceSettingLabels(tr("ui.settings.backend", nil), "go_display_backend", []settingOption{
-			{value: "auto", label: tr("ui.settings.backend_auto", nil)},
-			{value: "x11", label: "X11"},
-			{value: "wayland", label: "Wayland"},
-		}),
 		c.boolSetting(tr("ui.settings.pause_enabled", nil), "pause_schedule_enabled"),
-		c.scheduleSetting(),
+		c.wideSetting(c.scheduleSetting()),
 		c.stringSetting(tr("ui.settings.update_python", nil), "client_update_remote_path"),
 		c.stringSetting(tr("ui.settings.update_go", nil), "client_update_remote_path_go"),
 		c.stringSetting(tr("ui.settings.min_server", nil), "min_server_version"),

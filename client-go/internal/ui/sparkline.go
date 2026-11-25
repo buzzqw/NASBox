@@ -26,7 +26,7 @@ type sparkline struct {
 }
 
 func newSparkline(limit int, fixedMax float64, stroke, grid color.Color) *sparkline {
-	s := &sparkline{limit: limit, max: fixedMax, stroke: stroke, grid: grid, minSize: fyne.NewSize(120, 56)}
+	s := &sparkline{limit: limit, max: fixedMax, stroke: stroke, grid: grid, minSize: fyne.NewSize(100, 44)}
 	s.base = canvas.NewLine(grid)
 	s.base.StrokeWidth = 1
 	s.ExtendBaseWidget(s)
