@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -76,6 +77,13 @@ type nasStateReader interface {
 	FileStatesCurrent(paths []string) (map[string]remote.FileState, error)
 }
 
+// deleteChunk is how many files one CheckedDelete request carries and
+// deletionBudget how long a pass keeps deleting before it yields.
+const (
+	deleteChunk    = 100
+	deletionBudget = 4 * time.Minute
+)
+
 type SyncResult struct {
 	Uploaded int
 	Deleted  int
@@ -87,6 +95,9 @@ type SyncResult struct {
 	RenamesRefused int
 	Conflicts      int
 	Downloads      int
+	// DeletesLeft counts approved deletions not yet done when the pass time
+	// budget ended; the next pass continues them.
+	DeletesLeft int
 	// Problems is the number of files waiting for a retry (see Issues).
 	Problems int
 	// Stale counts overwrites skipped because the NAS changed after planning.
@@ -698,42 +709,65 @@ func syncPass(
 		return result, nil
 	}
 	if len(deletions) > 0 {
+		// The NAS deletes file by file (move to history, journal, fsync): a
+		// weak NAS manages a few files per second, so one request for
+		// thousands of files outlived its timeout and was killed. Deletions
+		// go in chunks, each recorded as soon as it is done; whatever is left
+		// when the pass time budget ends is simply continued by the next one.
 		runTS := newRunTS()
 		device := store.DeviceID()
-		requests := make([]remote.CheckedRequest, 0, len(deletions))
-		for _, path := range deletions {
-			remoteState := manifest[path]
-			requests = append(requests, remote.CheckedRequest{
-				Path: path, Digest: remoteState.Digest,
-				MTimeSeconds: remoteState.MTimeNS / 1_000_000_000,
-			})
-		}
-		statuses, err := client.CheckedDelete(requests, runTS, device)
-		if err != nil {
-			return result, err
-		}
-		done := make([]string, 0, len(statuses))
-		for path, status := range statuses {
-			if status == "DELETED" || status == "ABSENT" {
-				done = append(done, path)
+		sort.Strings(deletions)
+		budget := time.Now().Add(deletionBudget)
+		for start := 0; start < len(deletions); start += deleteChunk {
+			if start > 0 && time.Now().After(budget) {
+				break
 			}
-		}
-		if err := store.RecordUndo(cfg.LocalRepositoryID(), done, runTS); err != nil {
-			return result, err
-		}
-		// Record the confirmed deletion as a tombstone carrying the local
-		// absence observation's causal, not a freshly bumped clock: the server
-		// already wrote the matching journal entry under that same version.
-		for _, path := range done {
-			if err := store.RecordEntry(cfg.LocalRepositoryID(), path, state.EntryState{
-				Causal: localCausals[path],
-			}); err != nil {
+			end := start + deleteChunk
+			if end > len(deletions) {
+				end = len(deletions)
+			}
+			chunk := deletions[start:end]
+			requests := make([]remote.CheckedRequest, 0, len(chunk))
+			for _, path := range chunk {
+				remoteState := manifest[path]
+				requests = append(requests, remote.CheckedRequest{
+					Path: path, Digest: remoteState.Digest,
+					MTimeSeconds: remoteState.MTimeNS / 1_000_000_000,
+				})
+			}
+			statuses, err := client.CheckedDelete(requests, runTS, device)
+			if err != nil {
+				return result, err
+			}
+			done := make([]string, 0, len(statuses))
+			for path, status := range statuses {
+				if status == "DELETED" || status == "ABSENT" {
+					done = append(done, path)
+				}
+			}
+			if err := store.RecordUndo(cfg.LocalRepositoryID(), done, runTS); err != nil {
+				return result, err
+			}
+			// Record the confirmed deletion as a tombstone carrying the local
+			// absence observation's causal, not a freshly bumped clock: the
+			// server already wrote the matching journal entry under that same
+			// version.
+			for _, path := range done {
+				if err := store.RecordEntry(cfg.LocalRepositoryID(), path, state.EntryState{
+					Causal: localCausals[path],
+				}); err != nil {
+					return result, err
+				}
+			}
+			result.Deleted += len(done)
+			if err := deletesafety.Shared().Record(cfg, len(done), "sync"); err != nil {
 				return result, err
 			}
 		}
-		result.Deleted = len(done)
-		if err := deletesafety.Shared().Record(cfg, len(done), "sync"); err != nil {
-			return result, err
+		if result.Deleted < len(deletions) {
+			// Not an error: the rest continues in the next pass.
+			PendingDeletes.Set(nil)
+			result.DeletesLeft = len(deletions) - result.Deleted
 		}
 	}
 	return result, nil
