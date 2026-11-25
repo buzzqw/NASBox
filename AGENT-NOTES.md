@@ -5,20 +5,28 @@ Se qualcosa non torna, valgono i comandi in fondo.
 
 ## Stato al 2026-11-25 (verificato su dati veri)
 
-- Client Go **1.9.0**, server **3.29.0**; 122 e 134 aggiornati, GUI riavviata.
-- Rilascio fatto: commit `eb8196e`, canale `go-stable` con 1.9.0 e 1.8.0
-  (retention 2), server riavviato e `VERSION=3.29.0`.
+- Client Go **1.10.0**, server **3.30.1**; 122 e 134 aggiornati, GUI riavviata.
+- Rilasci fatti: `eb8196e` (1.9.0/3.29.0), `61a5582` (1.10.0/3.30.0),
+  `a0cde1c` (server 3.30.1). Canale `go-stable` con 1.10.0 e 1.9.0 (retention 2).
+- Il NAS dichiara le proprie capacità (`--capabilities`): 4 core, 987 MB,
+  dischi rotanti, rsync 3.1.2, ext4, hatching 4 file alla volta. Il client ne
+  deriva tempo reale, risparmio energetico e (lato NAS) il parallelismo.
+- `doctor` lo mostra: `tempo reale: attivo · change feed NAS (attesa 55 s) +
+  eventi locali` e `capacità NAS: 4 core · 987 MB · dischi rotanti · rsync
+  3.1.2 · ext4`.
 - Misure sul NAS vero: cancellazione di 300 file da **37,97 s a 10,81 s** (un
   solo append al journal e una sola revisione); rinomina di una cartella da
   30 MB in **una** richiesta con il secondo PC che sposta i file in locale
-  (inode invariati, **zero** download); dopo la cancellazione della cartella
-  sul NAS non resta nessuna directory vuota.
+  (inode invariati, **zero** download); nessuna directory vuota lasciata sul
+  NAS; delta del manifest da **6,9 s a 2,2 s**; tempo reale 122→NAS→134 in
+  **9-12 s** (prima 16-22 s).
 - Delta rsync sulle sostituzioni (già attivo): 200 MB con 1 MB cambiato =
   14.480 byte inviati, 5,8 s contro 19,6 s a file intero. Sui file **nuovi**
   non c'è base: nessun delta possibile senza un archivio a blocchi.
 - Difetti aperti: la protezione cartella non è sbloccabile con
-  `confirm-delete` (vedi `CLAUDE.md`); differenza di file tracciati tra 122
-  (119.066) e 134 (119.745).
+  `confirm-delete`; delta del manifest non ancora per client (indice
+  revisione→offset); differenza di file tracciati tra 122 (119.066) e 134
+  (119.745).
 
 ## Dove vive cosa
 
