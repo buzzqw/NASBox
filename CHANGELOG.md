@@ -4,6 +4,20 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 1.4.3 - 2026-11-25
+
+Client Go:
+
+- **«Pulisci storico» non faceva nulla — corretto.** Le date delle versioni nel
+  cestino ("…-851296Z", con i microsecondi) non venivano lette (il formato
+  Go non accetta i microsecondi dopo un "-"), quindi la pulizia le scartava
+  tutte in silenzio, anche quella automatica giornaliera. Ora le date sono
+  lette correttamente (anche l'ordinamento dello storico).
+- **La pulizia dice cosa ha fatto**: scelta tra "solo le versioni più vecchie
+  di N giorni" e "tutto lo storico", con numero di versioni e spazio; al
+  termine un riepilogo ("Rimosse 120 versioni, liberati 3,4 GB") oppure il
+  motivo per cui non c'era nulla da rimuovere.
+
 ## 1.4.2 - 2026-11-25
 
 Client Go:

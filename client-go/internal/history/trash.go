@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -95,7 +96,26 @@ func List() ([]Version, error) {
 
 func versionTime(timestamp string) (time.Time, error) {
 	if strings.HasSuffix(timestamp, "Z") {
-		return time.ParseInLocation("2006-01-02--15-04-05-000000Z", timestamp, time.UTC)
+		// "2026-11-23--08-26-32-851296Z": Go's layouts only know fractional
+		// seconds after a '.' or ',', so a "-000000" layout matched nothing
+		// but a literal "-000000" and every real version failed to parse (and
+		// was skipped by Prune, Stats and the restore lists). The microseconds
+		// are read by hand.
+		body := strings.TrimSuffix(timestamp, "Z")
+		micros := 0
+		if cut := strings.LastIndex(body, "-"); cut > len("2006-01-02--15-04-05")-1 && len(body)-cut-1 == 6 {
+			value, err := strconv.Atoi(body[cut+1:])
+			if err != nil {
+				return time.Time{}, err
+			}
+			micros = value
+			body = body[:cut]
+		}
+		parsed, err := time.ParseInLocation("2006-01-02--15-04-05", body, time.UTC)
+		if err != nil {
+			return time.Time{}, err
+		}
+		return parsed.Add(time.Duration(micros) * time.Microsecond), nil
 	}
 	return time.ParseInLocation("2006-01-02--15-04-05", timestamp, time.Local)
 }
@@ -205,12 +225,20 @@ func Prune(retentionDays int) (int, error) {
 	if retentionDays <= 0 {
 		retentionDays = 30
 	}
-	cutoff := time.Now().AddDate(0, 0, -retentionDays)
+	removed, _, err := PruneBefore(time.Now().AddDate(0, 0, -retentionDays))
+	return removed, err
+}
+
+// PruneBefore removes every version older than cutoff and returns how many
+// were removed and how many bytes they freed. A cutoff in the future empties
+// the whole history.
+func PruneBefore(cutoff time.Time) (int, int64, error) {
 	versions, err := List()
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 	removed := 0
+	var freed int64
 	for _, version := range versions {
 		stamp, err := versionTime(version.Timestamp)
 		if err != nil || stamp.After(cutoff) {
@@ -218,9 +246,31 @@ func Prune(retentionDays int) (int, error) {
 		}
 		if err := os.Remove(version.TrashPath); err == nil {
 			removed++
+			freed += version.Size
 		}
 	}
-	return removed, nil
+	return removed, freed, nil
+}
+
+// Summary describes the local history: how many versions, their total size
+// and how many are older than retentionDays.
+func Summary(retentionDays int) (count int, bytes int64, older int, err error) {
+	if retentionDays <= 0 {
+		retentionDays = 30
+	}
+	cutoff := time.Now().AddDate(0, 0, -retentionDays)
+	versions, err := List()
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	for _, version := range versions {
+		count++
+		bytes += version.Size
+		if stamp, perr := versionTime(version.Timestamp); perr == nil && !stamp.After(cutoff) {
+			older++
+		}
+	}
+	return count, bytes, older, nil
 }
 
 // FindByOriginal returns versions for a given original relative path.

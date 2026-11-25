@@ -1961,19 +1961,58 @@ func (c *clientApp) onRemoteRestore() {
 
 func (c *clientApp) onPrune() {
 	c.appendAction(tr("ui.action.prune", nil))
-	dialog.ShowConfirm(tr("ui.confirm.prune_title", nil), tr("ui.confirm.prune_body", nil), func(ok bool) {
+	days := c.cfg.Int("retention_days_local")
+	if days <= 0 {
+		days = 30
+	}
+	count, size, older, err := history.Summary(days)
+	if err != nil {
+		c.appendLog(tr("ui.history.prune_failed", map[string]any{"detail": err.Error()}))
+		return
+	}
+	if count == 0 {
+		dialog.ShowInformation(lt("Storico vuoto", "History is empty"),
+			lt("Non ci sono versioni nel cestino di questo PC: non c'è nulla da pulire.",
+				"There are no versions in this PC's trash: nothing to clean."), c.window)
+		return
+	}
+	oldChoice := lt(fmt.Sprintf("Solo le versioni più vecchie di %d giorni (%s)", days, formatCount(older)),
+		fmt.Sprintf("Only versions older than %d days (%s)", days, formatCount(older)))
+	allChoice := lt(fmt.Sprintf("Tutto lo storico (%s versioni, %s)", formatCount(count), humanBytes(size)),
+		fmt.Sprintf("The whole history (%s versions, %s)", formatCount(count), humanBytes(size)))
+	choice := widget.NewRadioGroup([]string{oldChoice, allChoice}, nil)
+	choice.SetSelected(oldChoice)
+	note := widget.NewLabel(lt("Sono le copie dei file sostituiti o eliminati, tenute su questo PC. I file attuali non vengono toccati.",
+		"These are copies of replaced or deleted files kept on this PC. Current files are not touched."))
+	note.Wrapping = fyne.TextWrapWord
+	content := container.NewVBox(note, choice)
+	dialog.ShowCustomConfirm(lt("Pulisci storico", "Clean history"), lt("Pulisci", "Clean"), lt("Annulla", "Cancel"), content, func(ok bool) {
 		if !ok {
 			c.appendAction(tr("ui.action.cancelled", nil))
 			return
 		}
+		everything := choice.Selected == allChoice
 		go func() {
-			removed, err := history.Prune(c.cfg.Int("retention_days_local"))
-			if err != nil {
-				c.appendLog(tr("ui.history.prune_failed", map[string]any{"detail": err.Error()}))
-				return
+			cutoff := time.Now().AddDate(0, 0, -days)
+			if everything {
+				cutoff = time.Now().Add(24 * time.Hour)
 			}
-			c.appendAction(tr("ui.history.prune_done", map[string]any{"count": removed}))
-			c.refreshHistory()
+			removed, freed, err := history.PruneBefore(cutoff)
+			fyne.Do(func() {
+				if err != nil {
+					c.appendLog(tr("ui.history.prune_failed", map[string]any{"detail": err.Error()}))
+					return
+				}
+				message := lt(fmt.Sprintf("Rimosse %s versioni, liberati %s.", formatCount(removed), humanBytes(freed)),
+					fmt.Sprintf("Removed %s versions, freed %s.", formatCount(removed), humanBytes(freed)))
+				if removed == 0 {
+					message = lt(fmt.Sprintf("Nessuna versione è più vecchia di %d giorni: non c'era nulla da rimuovere. Puoi cambiare il periodo in Impostazioni › Avanzate, oppure scegliere «Tutto lo storico».", days),
+						fmt.Sprintf("No version is older than %d days: nothing to remove. You can change the period in Settings › Advanced, or choose “The whole history”.", days))
+				}
+				c.appendAction(message)
+				dialog.ShowInformation(lt("Pulisci storico", "Clean history"), message, c.window)
+				go c.refreshHistory()
+			})
 		}()
 	}, c.window)
 }
