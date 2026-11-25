@@ -5,7 +5,11 @@ Se qualcosa non torna, valgono i comandi in fondo.
 
 ## Stato al 2026-11-25 (verificato su dati veri)
 
-- Client Go **1.11.1**, server **3.31.0**; 122 e 134 aggiornati, GUI riavviata.
+- Client Go **1.13.0**, server **3.32.4**; 122 e 134 aggiornati, GUI riavviata.
+- Manifest e disco allineati con `--audit-orphans` (3.738 file adottati) e
+  `--audit-phantoms --forget` (2.554 righe senza file messe a tombstone): ora
+  31.051 righe vive contro 31.050 file, 0 orphan, 0 phantom. Il render non
+  esporta mai percorsi interni (`.sync-trash` anche annidata).
 - rsync privato 3.5.1 in `server/bin/` (`tools/install_server_rsync.sh`), usato
   dai client con `--rsync-path`; il rsync di sistema resta 3.1.2. `doctor`
   stampa `NAS 3.5.1 privato, sistema 3.1.2`.
