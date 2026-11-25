@@ -4,6 +4,46 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 1.2.0 - 2026-11-25
+
+Client Go, interfaccia e avanzamento (dalla revisione degli screenshot della 1.1.1):
+
+- **Avanzamento dei trasferimenti coerente.** Prima la barra seguiva la stima di
+  rsync (79%) mentre il contatore dei file diceva 53% e il tempo residuo
+  implicava circa metà dei byte ancora da fare. Ora il client conosce la
+  dimensione pianificata di ogni batch: percentuale, velocità (media mobile) e
+  tempo residuo derivano dagli stessi byte, la percentuale non torna mai
+  indietro e resta al 99% finché il batch non termina. Il contatore "N di M
+  file" usa `xfr#N` di rsync (file realmente completati) invece dei nomi
+  stampati, che andavano un file avanti. Il dettaglio mostra "35,4 GB di 66,1 GB".
+- **Il file corrente non resta più indietro.** Ogni file faceva scrivere
+  `events.jsonl` in modo sincrono e ricostruire i widget, nello stesso thread
+  che legge rsync: con 25 file/s l'interfaccia accumulava ritardo (e rallentava
+  rsync). Ora i file sono accodati e applicati a 4 Hz; l'ultimo
+  aggiornamento di una raffica viene sempre disegnato.
+- **Attività recente compatta e raggruppata**: righe da una riga, e una serie
+  di file dello stesso tipo e cartella diventa una voce ("1.240 file
+  scaricati · SADE/SADE/images"). La tab Trasferimenti ha lo stesso blocco di
+  avanzamento della Stato (con barra).
+- **Impostazioni**: i campi non si allungano più fino all'altezza della
+  descrizione (box da 90 px per scrivere "22"); numeri e scelte sono compatti,
+  righe separate, descrizioni piccole. Unità corrette: i limiti di banda sono
+  KB/s (l'etichetta diceva kbps). Esclusioni: parte dalla prima riga.
+- **Scheda NAS**: schede di altezza naturale (la griglia uniforme le faceva
+  alte quanto la più alta), valore sotto l'etichetta, grafici a tutta
+  larghezza con riga di dettaglio (iowait, carico 5/15 min, rete) al posto dei
+  riquadri duplicati, barra disco senza percentuale sovrapposta, versione del
+  server sempre visibile (non più "—"), "Questo PC" nei dispositivi, "Assegna"
+  attivo solo con un dispositivo selezionato, tab con scorrimento proprio.
+- **Storage**: "Non ancora analizzato" invece di "Nessun file duplicato" prima
+  dell'analisi; barra visibile solo durante l'analisi.
+- **Stato**: separatori delle migliaia, plurale corretto, "Differenze audit"
+  (il numero è quello delle differenze), avviso a quota storico piena,
+  percentuale e velocità nella barra laterale durante il trasferimento,
+  pulsanti "Ripristina eliminati" e "Ferma trasferimento" non più ambigui.
+- Intestazioni delle tab non più ripetute; margini a destra delle pagine
+  scorrevoli; separatore sotto le tab più leggero.
+
 ## 1.1.1 - 2026-11-25
 
 Client Go:

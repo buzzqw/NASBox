@@ -2,11 +2,14 @@ package ui
 
 import (
 	"image/color"
+	"strconv"
+	"strings"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/driver/desktop"
+	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
@@ -109,26 +112,76 @@ func (c *clientApp) bannerTint(name fyne.ThemeColorName) color.Color {
 	}
 }
 
-// sectionTitle builds a consistent heading with a hairline separator.
+// sectionTitle builds a consistent heading with a hairline separator. The
+// heading is optional: inside a tab the tab label already names the page, so
+// repeating it only costs vertical space. The subtitle is a muted one-liner.
 func (c *clientApp) sectionTitle(title, subtitle string) fyne.CanvasObject {
-	heading := widget.NewLabelWithStyle(title, fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
-	objects := []fyne.CanvasObject{heading}
+	objects := []fyne.CanvasObject{}
+	if title != "" {
+		objects = append(objects, widget.NewLabelWithStyle(title, fyne.TextAlignLeading, fyne.TextStyle{Bold: true}))
+	}
 	if subtitle != "" {
-		sub := widget.NewLabelWithStyle(subtitle, fyne.TextAlignLeading, fyne.TextStyle{Italic: true})
+		sub := widget.NewLabel(subtitle)
+		sub.Importance = widget.LowImportance
 		sub.Wrapping = fyne.TextWrapWord
 		objects = append(objects, sub)
 	}
-	line := canvas.NewRectangle(c.tint(theme.ColorNameSeparator))
-	line.SetMinSize(fyne.NewSize(1, 1))
-	objects = append(objects, line)
+	if title != "" {
+		line := canvas.NewRectangle(c.tint(theme.ColorNameSeparator))
+		line.SetMinSize(fyne.NewSize(1, 1))
+		objects = append(objects, line)
+	}
 	return container.NewVBox(objects...)
 }
 
-// statTile is a compact KPI tile: big value, small caption.
+// statTile is a compact tile: small muted caption on top, the value below.
+// Its height follows its content (never use it inside a uniform grid next to
+// a taller tile: GridLayout makes every cell as tall as the tallest one).
 func (c *clientApp) statTile(value, caption string) (*widget.Label, fyne.CanvasObject) {
 	number := widget.NewLabelWithStyle(value, fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
-	label := widget.NewLabelWithStyle(caption, fyne.TextAlignLeading, fyne.TextStyle{Italic: true})
-	return number, c.surface(container.NewVBox(number, label), "")
+	number.Wrapping = fyne.TextWrapWord
+	label := widget.NewLabel(caption)
+	label.Importance = widget.LowImportance
+	label.SizeName = theme.SizeNameCaptionText
+	label.Truncation = fyne.TextTruncateEllipsis
+	return number, c.surface(container.NewVBox(label, number), "")
+}
+
+// tileRows lays tiles out in rows of `columns`, each row as tall as its own
+// tallest tile (container.NewGridWithColumns would use one height for all).
+func tileRows(columns int, tiles ...fyne.CanvasObject) fyne.CanvasObject {
+	rows := container.NewVBox()
+	for start := 0; start < len(tiles); start += columns {
+		end := start + columns
+		row := append([]fyne.CanvasObject{}, tiles[start:minInt(end, len(tiles))]...)
+		for len(row) < columns {
+			row = append(row, layout.NewSpacer())
+		}
+		rows.Add(container.NewGridWithColumns(columns, row...))
+	}
+	return rows
+}
+
+// formatCount groups digits ("111.402" in Italian, "111,402" in English).
+func formatCount(value int) string {
+	separator := "."
+	if strings.EqualFold(i18n.Language, "en") {
+		separator = ","
+	}
+	digits := strconv.Itoa(value)
+	negative := strings.HasPrefix(digits, "-")
+	digits = strings.TrimPrefix(digits, "-")
+	var out []byte
+	for index := range digits {
+		if index > 0 && (len(digits)-index)%3 == 0 {
+			out = append(out, separator...)
+		}
+		out = append(out, digits[index])
+	}
+	if negative {
+		return "-" + string(out)
+	}
+	return string(out)
 }
 
 // hintArea is kept only for compatibility with older call sites: wrapping a
@@ -353,4 +406,10 @@ func placeholder(text string) fyne.CanvasObject {
 	label := widget.NewLabelWithStyle(text, fyne.TextAlignCenter, fyne.TextStyle{})
 	label.Wrapping = fyne.TextWrapWord
 	return container.NewPadded(label)
+}
+
+// inset gives scrolling pages a right margin that clears the scroll bar and a
+// small left margin, so cards do not touch the window edge.
+func inset(object fyne.CanvasObject) fyne.CanvasObject {
+	return container.New(layout.NewCustomPaddedLayout(2, 12, 2, 14), object)
 }

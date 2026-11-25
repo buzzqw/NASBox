@@ -68,7 +68,7 @@ func (c *clientApp) buildBrowsePane() fyne.CanvasObject {
 		tr("ui.file.up_hint", nil), widget.LowImportance, c.onBrowseUp, c.setHint)
 
 	header := container.NewVBox(
-		c.sectionTitle(tr("main_window.tab_browse", nil), tr("ui.file.browse_note", nil)),
+		c.sectionTitle("", tr("ui.file.browse_note", nil)),
 		c.browsePathLabel,
 		c.breadcrumbs,
 		c.browseSelectedLabel,
@@ -190,7 +190,7 @@ func (c *clientApp) buildHistoryPane() fyne.CanvasObject {
 	c.restoreBtn = plainButton(tr("ui.action.restore", nil), theme.ContentRedoIcon(),
 		tr("history.restore_tooltip", nil), widget.HighImportance, c.onRestoreVersion, c.setHint)
 	header := container.NewVBox(
-		c.sectionTitle(tr("main_window.tab_history", nil), tr("ui.history.note", nil)),
+		c.sectionTitle("", tr("ui.history.note", nil)),
 		c.historyFilter,
 		c.histDetail,
 		container.NewHBox(

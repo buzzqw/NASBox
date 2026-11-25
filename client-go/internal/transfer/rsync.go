@@ -46,6 +46,9 @@ type Transfer struct {
 	observerMu sync.Mutex
 	onProgress ProgressHandler
 	onFile     FileHandler
+
+	hintMu    sync.Mutex
+	sizeHints map[string]int64
 }
 
 func New(cfg *config.Config, client *remote.Client) *Transfer {

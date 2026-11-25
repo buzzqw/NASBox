@@ -26,7 +26,7 @@ type sparkline struct {
 }
 
 func newSparkline(limit int, fixedMax float64, stroke, grid color.Color) *sparkline {
-	s := &sparkline{limit: limit, max: fixedMax, stroke: stroke, grid: grid, minSize: fyne.NewSize(160, 48)}
+	s := &sparkline{limit: limit, max: fixedMax, stroke: stroke, grid: grid, minSize: fyne.NewSize(120, 56)}
 	s.base = canvas.NewLine(grid)
 	s.base.StrokeWidth = 1
 	s.ExtendBaseWidget(s)
@@ -90,7 +90,14 @@ func (r *sparklineRenderer) Layout(size fyne.Size) {
 		}
 		top *= 1.15
 	}
-	step := size.Width / float32(maxInt(s.limit-1, 1))
+	// A young series is stretched over the whole card (and compresses as it
+	// grows to the limit); right-aligned fixed steps left it as a tiny
+	// squiggle in the corner for the first hour.
+	visible := count
+	if visible > s.limit {
+		visible = s.limit
+	}
+	step := size.Width / float32(maxInt(visible-1, 1))
 	offset := size.Width - step*float32(segments)
 	point := func(index int) fyne.Position {
 		value := s.values[index]
@@ -124,14 +131,15 @@ func maxInt(a, b int) int {
 	return b
 }
 
-// metricChart is a titled card with a sparkline and its current value.
+// metricChart is a titled card with a sparkline, its current value and an
+// optional detail line under the chart.
 type metricChart struct {
 	line  *sparkline
 	value *widget.Label
 	unit  string
 }
 
-func (c *clientApp) newMetricChart(title, unit string, fixedMax float64) (*metricChart, fyne.CanvasObject) {
+func (c *clientApp) newMetricChart(title, unit string, fixedMax float64) (*metricChart, fyne.CanvasObject, *widget.Label) {
 	chart := &metricChart{
 		line:  newSparkline(120, fixedMax, c.tint(theme.ColorNamePrimary), c.tint(theme.ColorNameSeparator)),
 		value: widget.NewLabelWithStyle("—", fyne.TextAlignTrailing, fyne.TextStyle{Bold: true}),
@@ -139,8 +147,16 @@ func (c *clientApp) newMetricChart(title, unit string, fixedMax float64) (*metri
 	}
 	caption := widget.NewLabel(title)
 	caption.Importance = widget.LowImportance
-	return chart, c.surface(container.NewBorder(
-		container.NewBorder(nil, nil, caption, chart.value), nil, nil, nil, chart.line), "")
+	caption.SizeName = theme.SizeNameCaptionText
+	detail := widget.NewLabel("")
+	detail.Importance = widget.LowImportance
+	detail.SizeName = theme.SizeNameCaptionText
+	detail.Truncation = fyne.TextTruncateEllipsis
+	return chart, c.surface(container.NewVBox(
+		container.NewBorder(nil, nil, caption, chart.value),
+		chart.line,
+		detail,
+	), ""), detail
 }
 
 func (m *metricChart) add(value float64) {

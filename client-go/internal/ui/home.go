@@ -127,21 +127,8 @@ func heroStyle(level statusLevel) (fyne.Resource, fyne.ThemeColorName) {
 
 // buildTransferCard shows the live rsync progress; hidden while idle.
 func (c *clientApp) buildTransferCard() fyne.CanvasObject {
-	c.transferTitle = widget.NewLabelWithStyle(tr("ui.transfer.idle", nil), fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
-	c.transferPercent = widget.NewLabelWithStyle("", fyne.TextAlignTrailing, fyne.TextStyle{Bold: true})
-	c.transferFile = widget.NewLabel("")
-	c.transferFile.Truncation = fyne.TextTruncateEllipsis
-	c.transferBar = widget.NewProgressBar()
-	c.transferBar.TextFormatter = func() string { return "" }
-	c.transferMeta = widget.NewLabel("")
-	c.transferMeta.Importance = widget.LowImportance
-	c.transferIcon = widget.NewIcon(theme.UploadIcon())
-	card := c.surface(container.NewVBox(
-		container.NewBorder(nil, nil, c.transferIcon, c.transferPercent, c.transferTitle),
-		c.transferFile,
-		c.transferBar,
-		c.transferMeta,
-	), theme.ColorNamePrimary)
+	c.homeTransfer = newTransferView()
+	card := c.surface(c.homeTransfer.content, theme.ColorNamePrimary)
 	c.transferCard = container.NewVBox(card)
 	c.transferCard.Hide()
 	return c.transferCard

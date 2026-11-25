@@ -50,6 +50,25 @@ type Transferer interface {
 	SetContext(ctx context.Context)
 }
 
+// sizeHinter is implemented by transfer.Transfer: the planned size of every
+// file lets the UI compute percentage and ETA from one source. Fakes in tests
+// do not implement it and nothing changes for them.
+type sizeHinter interface {
+	HintSizes(sizes map[string]int64)
+}
+
+func hintSizes(transfers Transferer, paths []string, size func(string) int64) {
+	hinter, ok := transfers.(sizeHinter)
+	if !ok {
+		return
+	}
+	sizes := make(map[string]int64, len(paths))
+	for _, path := range paths {
+		sizes[path] = size(path)
+	}
+	hinter.HintSizes(sizes)
+}
+
 type SyncResult struct {
 	Uploaded  int
 	Deleted   int
@@ -450,6 +469,7 @@ func SyncPass(
 			files = append(files, staged)
 		}
 		if len(created) > 0 {
+			hintSizes(transfers, created, func(path string) int64 { return local[path].Size })
 			if err := transfers.UploadStaged(created, device, files); err != nil {
 				return result, err
 			}
@@ -467,6 +487,7 @@ func SyncPass(
 			result.Uploaded += len(files)
 		}
 		if len(replacements) > 0 {
+			hintSizes(transfers, uploads, func(path string) int64 { return local[path].Size })
 			replaced, err := transfers.UploadReplace(replacements, device, cfg.String("repository_id"), newRunTS())
 			if err != nil {
 				return result, err
@@ -486,6 +507,7 @@ func SyncPass(
 		}
 	}
 	if len(downloads) > 0 {
+		hintSizes(transfers, downloads, func(path string) int64 { return manifest[path].Size })
 		if err := transfers.Download(downloads); err != nil {
 			return result, err
 		}

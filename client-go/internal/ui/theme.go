@@ -67,7 +67,7 @@ func (t *nasTheme) loadLight() {
 		theme.ColorNameScrollBar:           color.NRGBA{R: 0x0f, G: 0x17, B: 0x2a, A: 0x55},
 		theme.ColorNameScrollBarBackground: color.NRGBA{A: 0},
 		theme.ColorNameSeparator:           nr(0xe4, 0xe8, 0xef),
-		theme.ColorNameShadow:              color.NRGBA{R: 0x0f, G: 0x17, B: 0x2a, A: 0x22},
+		theme.ColorNameShadow:              color.NRGBA{R: 0x0f, G: 0x17, B: 0x2a, A: 0x12},
 		theme.ColorNameSuccess:             nr(0x16, 0xa3, 0x4a),
 		theme.ColorNameWarning:             nr(0xd9, 0x77, 0x06),
 		theme.ColorNamePrimary:             nr(0x25, 0x63, 0xeb),

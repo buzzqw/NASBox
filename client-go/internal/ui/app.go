@@ -159,6 +159,7 @@ type clientApp struct {
 	deviceEntries       []deviceEntry
 	selectedDevice      string
 	selectedDeviceLabel *widget.Label
+	assignDeviceBtn     *widget.Button
 	monitorDevicesLabel *widget.Label
 	metricsCollector    metrics.Collector
 	cpuChart            *metricChart
@@ -181,6 +182,7 @@ type clientApp struct {
 	storageDuplicates   *widget.Label
 	storageTrash        *widget.Label
 	storageProgress     *widget.ProgressBar
+	storageBox          *fyne.Container
 	storageAnalyzeBtn   *widget.Button
 	storageCleanupBtn   *widget.Button
 	logReload           *hintButton
@@ -207,13 +209,10 @@ type clientApp struct {
 	heroIcon         *widget.Icon
 	transferCard     *fyne.Container
 	homeBox          *fyne.Container
-	transferIcon     *widget.Icon
-	transferTitle    *widget.Label
-	transferPercent  *widget.Label
-	transferFile     *widget.Label
-	transferBar      *widget.ProgressBar
-	transferMeta     *widget.Label
-	transferNowLabel *widget.Label
+	homeTransfer     *transferView
+	tabTransfer      *transferView
+	tabTransferIdle  *widget.Label
+	tabTransferBox   *fyne.Container
 	transferHistory  *widget.List
 	confirmDeleteBtn *widget.Button
 	recentBox        *fyne.Container
@@ -224,9 +223,15 @@ type clientApp struct {
 	homeDevicesLabel *widget.Label
 	homeTrashLabel   *widget.Label
 
-	progressMu    sync.Mutex
-	progress      transfer.Progress
-	progressShown time.Time
+	progressMu       sync.Mutex
+	progress         transfer.Progress
+	progressShown    time.Time
+	progressTrailing bool
+
+	recentMu       sync.Mutex
+	recentPending  []recentItem
+	recentFlushing bool
+	serverVersion  string
 
 	trayMenu      *fyne.Menu
 	trayStatus    *fyne.MenuItem
@@ -333,6 +338,7 @@ func startClient(
 		fyne.Do(func() {
 			c.nasLabel.SetText(fmt.Sprintf(tr("ui.nas.config", nil),
 				c.cfg.String("nas_lan"), values["VERSION"], values["REPOSITORY_ID"]))
+			c.setServerVersion(values["VERSION"])
 			c.updateTrashUsage(values)
 		})
 	}()
@@ -533,7 +539,7 @@ func (c *clientApp) buildSections() {
 	c.views[sectionStatus] = container.NewVScroll(c.statusView())
 	c.views[sectionActivity] = c.activityView()
 	c.views[sectionFiles] = c.filesView()
-	c.views[sectionNAS] = container.NewVScroll(c.nasView())
+	c.views[sectionNAS] = c.nasView() // each tab scrolls on its own: the tab bar stays put
 	c.views[sectionSettings] = c.settingsView()
 }
 
@@ -614,13 +620,13 @@ func (c *clientApp) activityView() fyne.CanvasObject {
 			c.appendAction(tr("log.refresh_btn", nil))
 		}, c.setHint)
 	activityPane := container.NewBorder(
-		container.NewVBox(c.sectionTitle(tr("ui.activity.recent_title", nil), tr("ui.activity.recent_note", nil))),
+		container.NewVBox(c.sectionTitle("", tr("ui.activity.recent_note", nil))),
 		nil, nil, nil, container.NewVScroll(c.activityList),
 	)
 	transfers := c.buildTransfersPane()
 	logPane := container.NewBorder(
 		container.NewVBox(
-			c.sectionTitle(tr("main_window.tab_log", nil), tr("ui.activity.log_note", nil)),
+			c.sectionTitle("", tr("ui.activity.log_note", nil)),
 			container.NewBorder(nil, nil, container.NewHBox(minWidth(c.logFilter, 160), c.logReload), c.logCount,
 				minWidth(c.logSearch, 220)),
 		),
@@ -652,17 +658,20 @@ func (c *clientApp) nasView() fyne.CanvasObject {
 	c.monitorDevicesLabel = widget.NewLabel(tr("devices.empty", nil))
 	c.monitorDevicesLabel.Wrapping = fyne.TextWrapWord
 
-	c.diskValue, _ = c.statTile("—", tr("metrics.disk_title", nil))
+	// Disk: caption, value and a slim bar (no percentage painted over it: the
+	// value already says "77% usato").
 	c.diskBar = widget.NewProgressBar()
-	diskCaption := widget.NewLabelWithStyle(tr("metrics.disk_title", nil), fyne.TextAlignLeading, fyne.TextStyle{Italic: true})
-	var loadTile, cpuTile, memoryTile, swapTile fyne.CanvasObject
-	var netTile, ioTile, uptimeTile, lockTile fyne.CanvasObject
+	c.diskBar.TextFormatter = func() string { return "" }
+	diskCaption := widget.NewLabel(tr("metrics.disk_title", nil))
+	diskCaption.Importance = widget.LowImportance
+	diskCaption.SizeName = theme.SizeNameCaptionText
+	c.diskValue = widget.NewLabelWithStyle("—", fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
+	diskCard := c.surface(container.NewVBox(diskCaption, c.diskValue, c.diskBar), "")
+
+	var memoryTile, swapTile, ioTile, uptimeTile, lockTile fyne.CanvasObject
 	var queueTile, stagingTile, metadataTile fyne.CanvasObject
-	c.loadValue, loadTile = c.statTile("—", tr("metrics.load_title", nil))
-	c.cpuValue, cpuTile = c.statTile("—", tr("metrics.cpu_title", nil))
 	c.memoryValue, memoryTile = c.statTile("—", tr("metrics.memory_title", nil))
 	c.swapValue, swapTile = c.statTile("—", tr("metrics.swap_title", nil))
-	c.netValue, netTile = c.statTile("—", tr("metrics.network_title", nil))
 	c.ioValue, ioTile = c.statTile("—", tr("metrics.io_title", nil))
 	c.uptimeValue, uptimeTile = c.statTile("—", tr("metrics.uptime_title", nil))
 	c.lockValue, lockTile = c.statTile("—", tr("settings.nas_fact_lock_label", nil))
@@ -673,26 +682,33 @@ func (c *clientApp) nasView() fyne.CanvasObject {
 	c.healthValue.Wrapping = fyne.TextWrapWord
 	c.activityValue = widget.NewLabel(tr("metrics.activity_idle", nil))
 	c.activityValue.Wrapping = fyne.TextWrapWord
-	metrics := container.NewGridWithColumns(2,
-		c.surface(container.NewVBox(c.diskValue, diskCaption, c.diskBar), ""),
-		loadTile, cpuTile, memoryTile, swapTile, netTile, ioTile, uptimeTile,
-		lockTile, queueTile, stagingTile, metadataTile,
-	)
+	c.activityValue.Importance = widget.LowImportance
+	c.nasUpdatedLabel.Importance = widget.LowImportance
+	c.nasUpdatedLabel.SizeName = theme.SizeNameCaptionText
+
+	// The CPU, load and network cards carry their detail line (I/O wait,
+	// 5/15 min load, down/up rates) under the chart: the same numbers used to
+	// be repeated in separate tiles.
 	var cpuCard, loadCard, netCard fyne.CanvasObject
-	c.cpuChart, cpuCard = c.newMetricChart(tr("ui.chart.cpu", nil), " %", 100)
-	c.loadChart, loadCard = c.newMetricChart(tr("ui.chart.load", nil), "", 0)
-	c.netChart, netCard = c.newMetricChart(tr("ui.chart.net", nil), " MB/s", 0)
+	c.cpuChart, cpuCard, c.cpuValue = c.newMetricChart(tr("ui.chart.cpu", nil), " %", 100)
+	c.loadChart, loadCard, c.loadValue = c.newMetricChart(tr("ui.chart.load", nil), "", 0)
+	c.netChart, netCard, c.netValue = c.newMetricChart(tr("ui.chart.net", nil), " MB/s", 0)
+	summary := c.surface(container.NewVBox(
+		container.NewBorder(nil, nil, nil, c.nasUpdatedLabel, c.nasLabel),
+		c.healthValue,
+		c.activityValue,
+	), "")
 	monitorPane := container.NewVBox(
-		c.sectionTitle(tr("metrics.nasbox_title", nil), tr("settings.metrics_refresh_note", nil)),
-		c.surface(container.NewVBox(c.nasLabel, c.nasUpdatedLabel, c.healthValue, c.activityValue), ""),
+		summary,
 		container.NewGridWithColumns(3, cpuCard, loadCard, netCard),
-		metrics,
+		diskCard,
+		tileRows(3, memoryTile, swapTile, uptimeTile, ioTile, lockTile, queueTile, stagingTile, metadataTile),
 		c.surface(container.NewVBox(
 			widget.NewLabelWithStyle(tr("status.nas_overview_title", nil), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 			c.monitorDevicesLabel,
 		), ""),
-		newHintButton(tr("ui.action.server_check", nil), theme.ViewRefreshIcon(),
-			tr("ui.action.server_check_hint", nil), widget.MediumImportance, c.onServerCheck, c.setHint),
+		container.NewHBox(newHintButton(tr("ui.action.server_check", nil), theme.ViewRefreshIcon(),
+			tr("ui.action.server_check_hint", nil), widget.MediumImportance, c.onServerCheck, c.setHint)),
 	)
 	c.deviceList = newRowList(
 		func() int { return len(c.deviceEntries) }, 220, 320,
@@ -709,15 +725,17 @@ func (c *clientApp) nasView() fyne.CanvasObject {
 			c.updateDevicesLabel()
 		}
 	}
+	c.assignDeviceBtn = plainButton(tr("ui.action.assign_device", nil), theme.DocumentCreateIcon(),
+		tr("ui.action.assign_device_hint", nil), widget.MediumImportance, c.onAssignDevice, c.setHint)
+	c.assignDeviceBtn.Disable()
 	c.selectedDeviceLabel = widget.NewLabel(tr("ui.device.none_selected", nil))
 	c.selectedDeviceLabel.Wrapping = fyne.TextWrapWord
 	devicesPane := container.NewBorder(
 		container.NewVBox(
-			c.sectionTitle(tr("devices.title", nil), tr("ui.device.assign_note", nil)),
+			c.sectionTitle("", tr("ui.device.assign_note", nil)),
 			c.selectedDeviceLabel,
 			container.NewHBox(
-				newHintButton(tr("ui.action.assign_device", nil), theme.DocumentCreateIcon(),
-					tr("ui.action.assign_device_hint", nil), widget.MediumImportance, c.onAssignDevice, c.setHint),
+				c.assignDeviceBtn,
 				newHintButton(tr("devices.refresh_btn", nil), theme.ViewRefreshIcon(),
 					tr("ui.device.refresh_hint", nil), widget.LowImportance, func() {
 						c.appendAction(tr("devices.refresh_btn", nil))
@@ -728,7 +746,7 @@ func (c *clientApp) nasView() fyne.CanvasObject {
 		nil, nil, nil, c.deviceList,
 	)
 	c.nasTabs = container.NewAppTabs(
-		container.NewTabItem(tr("main_window.tab_metrics", nil), monitorPane),
+		container.NewTabItem(tr("main_window.tab_metrics", nil), container.NewVScroll(inset(monitorPane))),
 		container.NewTabItem(tr("devices.title", nil), devicesPane),
 		container.NewTabItem(tr("storage.title", nil), c.buildStoragePane()),
 	)
@@ -736,6 +754,13 @@ func (c *clientApp) nasView() fyne.CanvasObject {
 }
 
 func (c *clientApp) updateDevicesLabel() {
+	if c.assignDeviceBtn != nil {
+		if c.selectedDevice == "" {
+			c.assignDeviceBtn.Disable()
+		} else {
+			c.assignDeviceBtn.Enable()
+		}
+	}
 	if c.selectedDeviceLabel == nil {
 		return
 	}
@@ -832,12 +857,12 @@ func (c *clientApp) settingsView() fyne.CanvasObject {
 			tr("status.confirm_deletes_tooltip", nil), widget.DangerImportance, c.onConfirmDelete, c.setHint),
 	)
 	c.settingsTabs = container.NewAppTabs(
-		container.NewTabItem(tr("ui.group.general", nil), container.NewVScroll(general)),
-		container.NewTabItem(tr("ui.settings.safety_tab", nil), container.NewVScroll(c.settingsSafety())),
-		container.NewTabItem(tr("ui.settings.integrity_tab", nil), container.NewVScroll(c.settingsIntegrity())),
-		container.NewTabItem(tr("ui.group.folders", nil), container.NewVScroll(folders)),
-		container.NewTabItem(tr("ui.settings.advanced_tab", nil), container.NewVScroll(c.settingsAdvanced())),
-		container.NewTabItem(tr("ui.group.about", nil), container.NewVScroll(container.NewVBox(c.buildHealthPane(), about))),
+		container.NewTabItem(tr("ui.group.general", nil), container.NewVScroll(inset(general))),
+		container.NewTabItem(tr("ui.settings.safety_tab", nil), container.NewVScroll(inset(c.settingsSafety()))),
+		container.NewTabItem(tr("ui.settings.integrity_tab", nil), container.NewVScroll(inset(c.settingsIntegrity()))),
+		container.NewTabItem(tr("ui.group.folders", nil), container.NewVScroll(inset(folders))),
+		container.NewTabItem(tr("ui.settings.advanced_tab", nil), container.NewVScroll(inset(c.settingsAdvanced()))),
+		container.NewTabItem(tr("ui.group.about", nil), container.NewVScroll(inset(container.NewVBox(c.buildHealthPane(), about)))),
 	)
 	if index, err := strconv.Atoi(os.Getenv("NASBOX_SETTINGS_TAB")); err == nil &&
 		index >= 0 && index < len(c.settingsTabs.Items) {
@@ -1172,18 +1197,18 @@ func (c *clientApp) refreshStats() {
 	audit := tr("audit.never", nil)
 	if reports := integrity.Load(); len(reports) > 0 {
 		last := reports[len(reports)-1]
-		audit = fmt.Sprintf("%d", len(last.Differences))
+		audit = formatCount(len(last.Differences))
 	}
 	conflictCount := len(c.confGroups)
 	fyne.Do(func() {
 		if c.statTracked != nil {
-			c.statTracked.SetText(fmt.Sprint(tracked))
+			c.statTracked.SetText(formatCount(tracked))
 		}
 		if c.statConflicts != nil {
-			c.statConflicts.SetText(fmt.Sprint(conflictCount))
+			c.statConflicts.SetText(formatCount(conflictCount))
 		}
 		if c.statUndo != nil {
-			c.statUndo.SetText(fmt.Sprint(undo))
+			c.statUndo.SetText(formatCount(undo))
 		}
 		if c.statAudit != nil {
 			c.statAudit.SetText(audit)
@@ -2024,6 +2049,9 @@ func (c *clientApp) updateTrashUsage(values map[string]string) {
 	text := tr("ui.home.trash", map[string]any{"size": humanBytes(used)})
 	if limit, err := strconv.ParseInt(values["TRASH_MAX_MB"], 10, 64); err == nil && limit > 0 {
 		text = tr("ui.home.trash_quota", map[string]any{"size": humanBytes(used), "limit": humanBytes(limit * 1048576)})
+		if used >= limit*1048576*95/100 {
+			text += " — " + tr("ui.home.trash_full", nil)
+		}
 	}
 	c.homeTrashLabel.SetText(text)
 	c.homeTrashLabel.Show()

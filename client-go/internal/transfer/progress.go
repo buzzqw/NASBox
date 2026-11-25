@@ -21,12 +21,16 @@ import (
 type Progress struct {
 	Upload  bool
 	File    string // file rsync is transferring now (relative path)
-	Percent int    // overall percent of the batch, 0..100
+	Percent int    // overall percent of the batch, 0..100 (never goes backwards)
 	Bytes   int64  // bytes transferred so far in this batch
 	Rate    string // e.g. "12.34MB/s"
 	ETA     string // e.g. "1:05" (empty when unknown)
 	Done    int    // files completed in this batch
 	Total   int    // files in this batch
+	// TotalBytes is the planned size of the batch (0 when the caller gave no
+	// size hints). With it the percentage and the ETA are computed from the
+	// same quantity, so they can never contradict each other.
+	TotalBytes int64
 	// Finished marks the final callback of a batch (success or failure).
 	Finished bool
 	Err      error
@@ -112,35 +116,142 @@ func scanLines(reader io.Reader, onLine func(string)) {
 	_, _ = io.Copy(io.Discard, reader)
 }
 
+// progressLine matches rsync's progress2 line, e.g.
+//
+//	14,481,160  4%  62.8MB/s  0:00:00 (xfr#19, to-chk=22/42)
+//
+// The optional tail carries xfr#N: the number of files rsync has actually
+// completed, which is the only reliable file counter (to-chk includes
+// directories and, with an incremental file list, grows while it runs).
 var progressLine = regexp.MustCompile(
-	`^\s*([\d,.]+)B?\s+(\d{1,3})%\s+(\S+/s)\s+(\d+:\d{2}:\d{2})`)
+	`^\s*([\d,.]+)B?\s+(\d{1,3})%\s+(\S+/s)\s+(\d+:\d{2}:\d{2})(?:\s+\(xfr#(\d+),)?`)
 
 // progressParser turns rsync lines into Progress/FileEvent callbacks.
 type progressParser struct {
 	mu       sync.Mutex
 	state    Progress
 	seen     int
+	haveXfr  bool
 	onUpdate ProgressHandler
 	onFile   FileHandler
+
+	now        func() time.Time
+	rateAt     time.Time
+	rateBytes  int64
+	rateSmooth float64 // bytes per second, exponentially smoothed
 }
 
-func newProgressParser(upload bool, total int, onUpdate ProgressHandler, onFile FileHandler) *progressParser {
+func newProgressParser(
+	upload bool, total int, totalBytes int64, onUpdate ProgressHandler, onFile FileHandler,
+) *progressParser {
 	return &progressParser{
-		state:    Progress{Upload: upload, Total: total},
+		state:    Progress{Upload: upload, Total: total, TotalBytes: totalBytes},
 		onUpdate: onUpdate,
 		onFile:   onFile,
+		now:      time.Now,
 	}
+}
+
+// observeRate smooths the byte rate over windows of at least one second, so a
+// burst of tiny files or a stalled one does not make the ETA jump around.
+func (p *progressParser) observeRate() {
+	now := p.now()
+	if p.rateAt.IsZero() {
+		p.rateAt, p.rateBytes = now, p.state.Bytes
+		return
+	}
+	elapsed := now.Sub(p.rateAt).Seconds()
+	if elapsed < 1 {
+		return
+	}
+	instant := float64(p.state.Bytes-p.rateBytes) / elapsed
+	if instant < 0 {
+		instant = 0
+	}
+	if p.rateSmooth == 0 {
+		p.rateSmooth = instant
+	} else {
+		p.rateSmooth = 0.7*p.rateSmooth + 0.3*instant
+	}
+	p.rateAt, p.rateBytes = now, p.state.Bytes
+}
+
+// applyBytes derives percent, rate and ETA. With a planned size they all come
+// from the same byte counters; without one rsync's own figures are kept.
+func (p *progressParser) applyBytes(rsyncPercent int, rsyncRate, rsyncETA string) {
+	p.observeRate()
+	if p.state.TotalBytes <= 0 {
+		p.state.Percent = maxIntValue(p.state.Percent, rsyncPercent)
+		p.state.Rate, p.state.ETA = rsyncRate, rsyncETA
+		return
+	}
+	percent := int(p.state.Bytes * 100 / p.state.TotalBytes)
+	if percent > 99 {
+		percent = 99 // 100 is reserved for the end of the batch
+	}
+	p.state.Percent = maxIntValue(p.state.Percent, percent)
+	if p.rateSmooth > 0 {
+		p.state.Rate = FormatRate(p.rateSmooth)
+		remaining := p.state.TotalBytes - p.state.Bytes
+		if remaining > 0 {
+			p.state.ETA = FormatDuration(time.Duration(float64(remaining) / p.rateSmooth * float64(time.Second)))
+		} else {
+			p.state.ETA = ""
+		}
+	}
+}
+
+func maxIntValue(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+// FormatRate renders bytes per second as "16.5 MB/s".
+func FormatRate(bytesPerSecond float64) string {
+	units := []string{"B/s", "KB/s", "MB/s", "GB/s"}
+	value := bytesPerSecond
+	unit := 0
+	for value >= 1000 && unit < len(units)-1 {
+		value /= 1024
+		unit++
+	}
+	if unit == 0 {
+		return fmt.Sprintf("%.0f %s", value, units[unit])
+	}
+	return fmt.Sprintf("%.1f %s", value, units[unit])
+}
+
+// FormatDuration renders a remaining time as "M:SS" or "H:MM:SS".
+func FormatDuration(d time.Duration) string {
+	seconds := int(d.Round(time.Second).Seconds())
+	if seconds < 0 {
+		seconds = 0
+	}
+	if seconds >= 3600 {
+		return fmt.Sprintf("%d:%02d:%02d", seconds/3600, seconds%3600/60, seconds%60)
+	}
+	return fmt.Sprintf("%d:%02d", seconds/60, seconds%60)
 }
 
 func (p *progressParser) line(raw string) {
 	p.mu.Lock()
 	if match := progressLine.FindStringSubmatch(raw); match != nil {
 		p.state.Bytes, _ = strconv.ParseInt(strings.NewReplacer(",", "", ".", "").Replace(match[1]), 10, 64)
-		p.state.Percent, _ = strconv.Atoi(match[2])
-		p.state.Rate = match[3]
-		p.state.ETA = compactETA(match[4])
-		// rsync's to-chk counter includes directories, so the file count is
-		// derived from the names it prints instead.
+		rsyncPercent, _ := strconv.Atoi(match[2])
+		// xfr#N is the count of files rsync has finished. It replaces the
+		// count derived from the printed names, which runs one file ahead.
+		if match[5] != "" {
+			if done, err := strconv.Atoi(match[5]); err == nil {
+				p.haveXfr = true
+				p.state.Done = maxIntValue(p.state.Done, done)
+				if p.state.Done > p.state.Total {
+					p.state.Total = p.state.Done
+				}
+			}
+		}
+		p.applyBytes(rsyncPercent, match[3], compactETA(match[4]))
 		snapshot := p.state
 		p.mu.Unlock()
 		if p.onUpdate != nil {
@@ -155,7 +266,9 @@ func (p *progressParser) line(raw string) {
 	}
 	p.state.File = name
 	p.seen++
-	p.state.Done = p.seen - 1 // the previous file is complete
+	if !p.haveXfr {
+		p.state.Done = p.seen - 1 // the previous file is complete
+	}
 	if p.seen > p.state.Total {
 		p.state.Total = p.seen
 	}
@@ -225,7 +338,7 @@ func (t *Transfer) runObserved(ctx context.Context, payload []byte, upload bool,
 	if (onProgress == nil && onFile == nil) || !localRsyncSupportsProgress() {
 		return runRsync(ctx, payload, args...)
 	}
-	parser := newProgressParser(upload, total, onProgress, onFile)
+	parser := newProgressParser(upload, total, t.takeSizeHint(payload), onProgress, onFile)
 	if onProgress != nil {
 		onProgress(parser.state)
 	}
@@ -281,4 +394,39 @@ func localRsyncSupportsProgress() bool {
 		progressSupported = major > 3 || (major == 3 && minor >= 1)
 	})
 	return progressSupported
+}
+
+// HintSizes tells the next transfers how big each planned file is, so the
+// progress bar and the ETA are computed from planned bytes instead of
+// rsync's estimate (which is only reliable once the whole file list is
+// known). The hint is optional and is dropped by the next batch that uses it.
+func (t *Transfer) HintSizes(sizes map[string]int64) {
+	t.hintMu.Lock()
+	defer t.hintMu.Unlock()
+	t.sizeHints = sizes
+}
+
+// takeSizeHint sums the hinted sizes of the files in a --files-from payload
+// (NUL separated) and clears the hint. It returns 0 when any file is unknown:
+// a partial sum would make the percentage lie.
+func (t *Transfer) takeSizeHint(payload []byte) int64 {
+	t.hintMu.Lock()
+	hints := t.sizeHints
+	t.sizeHints = nil
+	t.hintMu.Unlock()
+	if len(hints) == 0 || len(payload) == 0 {
+		return 0
+	}
+	var total int64
+	for _, name := range bytes.Split(payload, []byte{0}) {
+		if len(name) == 0 {
+			continue
+		}
+		size, ok := hints[string(name)]
+		if !ok {
+			return 0
+		}
+		total += size
+	}
+	return total
 }

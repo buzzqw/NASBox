@@ -2228,8 +2228,8 @@
     "it": "CPU"
   },
   "metrics.cpu_value": {
-    "en": "{usage}% / {iowait}%",
-    "it": "{usage}% / {iowait}%"
+    "en": "I/O wait {iowait}%",
+    "it": "attesa I/O {iowait}%"
   },
   "metrics.disk_label": {
     "en": "Free / total",
@@ -2728,8 +2728,8 @@
     "it": "{count} operazioni in coda"
   },
   "overview.stat_audit": {
-    "en": "Last audit",
-    "it": "Ultimo audit"
+    "en": "Last audit differences",
+    "it": "Differenze audit"
   },
   "overview.stat_conflicts": {
     "en": "Conflicts",
@@ -3196,8 +3196,8 @@
     "it": "Aggiorna monitor NAS ogni:"
   },
   "settings.metrics_refresh_note": {
-    "en": "Read-only dashboard interval. It does not scan files.",
-    "it": "Intervallo della dashboard read-only. Non esegue scansioni dei file."
+    "en": "Read-only dashboard: it does not scan files.",
+    "it": "Dashboard in sola lettura: non scansiona i file."
   },
   "settings.multiple_instances_body": {
     "en": "Found multiple sync-daemon-server.sh instances running on the NAS:\n\n{list}\n\nUsing the first one ({first}) -- if that's not the right one, set it by hand in the 'Server script on the NAS' field.",
@@ -4436,8 +4436,8 @@
     "it": "{count} versioni, {size} occupati · {expired} scadute ({expired_size} recuperabili) · retention {days}g"
   },
   "storage.trash_title": {
-    "en": "Recoverable history (.sync-trash)",
-    "it": "Storico recuperabile (.sync-trash)"
+    "en": "Local trash (versions replaced on this PC)",
+    "it": "Cestino locale (versioni sostituite su questo PC)"
   },
   "transfers.active_file": {
     "en": "{direction} in progress: {path} ({seconds}s elapsed)",
@@ -4948,8 +4948,8 @@
     "it": "Audit"
   },
   "ui.action.cancel": {
-    "en": "Cancel transfer",
-    "it": "Annulla trasferimento"
+    "en": "Stop transfer",
+    "it": "Ferma trasferimento"
   },
   "ui.action.check_update": {
     "en": "Check for updates",
@@ -5027,8 +5027,8 @@
   "ui.action.download_path": {"it": "Scarica percorso", "en": "Download path"},
   "ui.action.download_path_short": {"it": "Scarica", "en": "Download"},
   "ui.action.undo_short": {
-    "en": "Undo",
-    "it": "Annulla"
+    "en": "Restore deleted",
+    "it": "Ripristina eliminati"
   },
   "ui.action.update_install": {
     "en": "Install Go update",
@@ -5407,16 +5407,16 @@
     "it": "Automatico (Wayland se disponibile, altrimenti X11)"
   },
   "ui.settings.bandwidth_download": {
-    "en": "Download limit (kbps)",
-    "it": "Limite download (kbps)"
+    "en": "Download limit (KB/s, 0 = unlimited)",
+    "it": "Limite download (KB/s, 0 = illimitato)"
   },
   "ui.settings.bandwidth_total": {
-    "en": "Total limit (kbps, 0 = unlimited)",
-    "it": "Limite totale (kbps, 0 = illimitato)"
+    "en": "Total limit (KB/s, 0 = unlimited)",
+    "it": "Limite totale (KB/s, 0 = illimitato)"
   },
   "ui.settings.bandwidth_upload": {
-    "en": "Upload limit (kbps)",
-    "it": "Limite upload (kbps)"
+    "en": "Upload limit (KB/s, 0 = unlimited)",
+    "it": "Limite upload (KB/s, 0 = illimitato)"
   },
   "ui.settings.change_feed_wait": {
     "en": "Change feed wait (s)",
@@ -5479,8 +5479,8 @@
     "it": "Minimo file per anomalia"
   },
   "ui.settings.delete_guard_ratio": {
-    "en": "Folder anomaly threshold",
-    "it": "Soglia anomalia cartella"
+    "en": "Folder anomaly threshold (0–1)",
+    "it": "Soglia anomalia cartella (0–1)"
   },
   "ui.settings.delete_sentinels": {
     "en": "Required sentinels (comma-separated)",
@@ -5979,8 +5979,8 @@
     "it": "Scaricamento"
   },
   "ui.transfer.title": {
-    "en": "{direction} · file {current} of {total}",
-    "it": "{direction} · file {current} di {total}"
+    "en": "{direction} · {current} of {total} files",
+    "it": "{direction} · {current} di {total} file"
   },
   "ui.transfer.eta": {
     "en": "{eta} left",
@@ -6433,5 +6433,49 @@
   "ui.health.trash_hint": {
     "en": "Set TRASH_MAX_MB in server.conf (e.g. 51200 = 50 GB) so the history cannot fill the NAS.",
     "it": "Imposta TRASH_MAX_MB in server.conf (es. 51200 = 50 GB) per evitare che lo storico riempia il NAS."
+  },
+  "ui.transfer.bytes_of": {
+    "en": "{done} of {total}",
+    "it": "{done} di {total}"
+  },
+  "ui.transfer.bytes_done": {
+    "en": "{done} transferred",
+    "it": "{done} trasferiti"
+  },
+  "ui.recent.group_up": {
+    "en": "{count} files uploaded",
+    "it": "{count} file caricati"
+  },
+  "ui.recent.group_down": {
+    "en": "{count} files downloaded",
+    "it": "{count} file scaricati"
+  },
+  "ui.recent.group_del": {
+    "en": "{count} files deleted",
+    "it": "{count} file eliminati"
+  },
+  "ui.recent.group_conflict": {
+    "en": "{count} conflicts",
+    "it": "{count} conflitti"
+  },
+  "ui.home.device_one": {
+    "en": "1 device connected to the NAS",
+    "it": "1 dispositivo collegato al NAS"
+  },
+  "storage.not_analyzed": {
+    "en": "Not analysed yet: press “Analyse now”.",
+    "it": "Non ancora analizzato: premi «Analizza ora»."
+  },
+  "metrics.load_5_15": {
+    "en": "5 min {m5} · 15 min {m15}",
+    "it": "5 min {m5} · 15 min {m15}"
+  },
+  "ui.device.default_this": {
+    "en": "This PC",
+    "it": "Questo PC"
+  },
+  "ui.home.trash_full": {
+    "en": "quota full: the oldest versions are deleted first",
+    "it": "quota piena: le versioni più vecchie vengono eliminate"
   }
 }

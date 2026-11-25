@@ -74,6 +74,10 @@ var settingHelp = map[string]helpText{
 	"client_update_remote_path_go":          {"Cartella del canale di aggiornamento Go.", "Go update channel folder."},
 }
 
+// settingRow is "label + help on the left, control on the right". The control
+// keeps its natural height and sits at the top of the row: a Border would
+// stretch it to the height of the (often multi-line) help text, which turned
+// every one-line field into a large empty box.
 func (c *clientApp) settingRow(label string, object fyne.CanvasObject, helpKey string) fyne.CanvasObject {
 	name := widget.NewLabelWithStyle(label, fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
 	name.Wrapping = fyne.TextWrapWord
@@ -83,19 +87,33 @@ func (c *clientApp) settingRow(label string, object fyne.CanvasObject, helpKey s
 		if strings.EqualFold(i18n.Language, "en") {
 			text = info.en
 		}
-		help := c.note(text)
+		help := widget.NewLabel(text)
+		help.Wrapping = fyne.TextWrapWord
+		help.Importance = widget.LowImportance
+		help.SizeName = theme.SizeNameCaptionText
 		leftObjects = append(leftObjects, help)
 	}
-	// Auto-height left column: help sits directly under its label. The old
-	// fixed 320x84 cell made every setting look like a large empty box.
-	left := minWidth(container.NewVBox(leftObjects...), 260)
-	return container.NewBorder(nil, nil, left, nil, object)
+	left := minWidth(container.NewVBox(leftObjects...), 300)
+	return container.NewBorder(nil, nil, left, nil, container.NewVBox(object))
+}
+
+// compactField keeps a short control (number, choice) at a sensible width
+// instead of stretching it across the whole window.
+func compactField(object fyne.CanvasObject, width float32) fyne.CanvasObject {
+	return container.NewHBox(minWidth(object, width))
 }
 
 func (c *clientApp) settingsGroup(title, subtitle string, rows ...fyne.CanvasObject) fyne.CanvasObject {
+	items := make([]fyne.CanvasObject, 0, len(rows)*2)
+	for index, row := range rows {
+		if index > 0 {
+			items = append(items, widget.NewSeparator())
+		}
+		items = append(items, row)
+	}
 	return container.NewVBox(
 		c.sectionTitle(title, subtitle),
-		c.surface(container.NewVBox(rows...), ""),
+		c.surface(container.NewVBox(items...), ""),
 	)
 }
 
@@ -141,7 +159,7 @@ func (c *clientApp) intSetting(label, key string) fyne.CanvasObject {
 			c.settingSaved(label, parsed)
 		}
 	}
-	return c.settingRow(label, entry, key)
+	return c.settingRow(label, compactField(entry, 160), key)
 }
 
 func (c *clientApp) floatSetting(label, key string, fallback float64) fyne.CanvasObject {
@@ -166,7 +184,7 @@ func (c *clientApp) floatSetting(label, key string, fallback float64) fyne.Canva
 			c.settingSaved(label, parsed)
 		}
 	}
-	return c.settingRow(label, entry, key)
+	return c.settingRow(label, compactField(entry, 160), key)
 }
 
 type settingOption struct {
@@ -209,7 +227,7 @@ func (c *clientApp) choiceSettingLabels(label, key string, options []settingOpti
 			}
 		}
 	}
-	return c.settingRow(label, selectWidget, key)
+	return c.settingRow(label, compactField(selectWidget, 280), key)
 }
 
 func (c *clientApp) boolSetting(label, key string) fyne.CanvasObject {
@@ -250,8 +268,12 @@ func scheduleTimes(current string) []string {
 // settings tab and the client.json array.
 func (c *clientApp) excludePatternsSetting() fyne.CanvasObject {
 	entry := widget.NewMultiLineEntry()
-	entry.SetMinRowsVisible(6)
+	entry.SetMinRowsVisible(10)
 	entry.SetText(strings.Join(stringList(c.cfg.Get("exclude_patterns")), "\n"))
+	// SetText leaves the caret at the end, which scrolled the box to the
+	// bottom of a long list: start from the first pattern instead.
+	entry.CursorRow, entry.CursorColumn = 0, 0
+	entry.Refresh()
 	entry.SetPlaceHolder(tr("ui.settings.exclude_placeholder", nil))
 	save := newHintButton(tr("ui.settings.exclude_save", nil), theme.ConfirmIcon(),
 		tr("ui.settings.exclude_save_hint", nil), widget.HighImportance, func() {
@@ -270,7 +292,7 @@ func (c *clientApp) excludePatternsSetting() fyne.CanvasObject {
 		widget.NewLabelWithStyle(tr("ui.settings.exclude_title", nil), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 		c.note(tr("ui.settings.exclude_note", nil)),
 		entry,
-		save,
+		container.NewHBox(save),
 	)
 }
 
@@ -310,7 +332,7 @@ func (c *clientApp) languageSetting() fyne.CanvasObject {
 		}
 		c.setLanguage(language)
 	}
-	return c.settingRow(tr("settings.language_title", nil), selectWidget, "language")
+	return c.settingRow(tr("settings.language_title", nil), compactField(selectWidget, 280), "language")
 }
 
 func (c *clientApp) themeSetting() fyne.CanvasObject {
@@ -328,17 +350,17 @@ func (c *clientApp) themeSetting() fyne.CanvasObject {
 			c.setTheme("light")
 		}
 	}
-	return c.settingRow(tr("settings.theme_title", nil), selectWidget, "go_theme")
+	return c.settingRow(tr("settings.theme_title", nil), compactField(selectWidget, 280), "go_theme")
 }
 
 func (c *clientApp) settingsAppearance() fyne.CanvasObject {
-	return c.settingsGroup(tr("ui.group.general", nil), tr("ui.settings.appearance_note", nil),
+	return c.settingsGroup("", tr("ui.settings.appearance_note", nil),
 		c.languageSetting(),
 		c.themeSetting(),
 		c.settingRow(tr("ui.settings.display_backend", nil),
 			widget.NewLabel(displayBackend(c.cfg)), "go_display_backend"),
 		c.settingRow(tr("ui.settings.shortcuts", nil),
-			widget.NewLabel(tr("ui.settings.shortcuts_value", nil)), "shortcuts"),
+			c.note(tr("ui.settings.shortcuts_value", nil)), "shortcuts"),
 	)
 }
 
@@ -391,7 +413,7 @@ func (c *clientApp) settingsSync() fyne.CanvasObject {
 }
 
 func (c *clientApp) settingsSafety() fyne.CanvasObject {
-	return c.settingsGroup(tr("ui.settings.safety_title", nil), tr("ui.settings.safety_note", nil),
+	return c.settingsGroup("", tr("ui.settings.safety_note", nil),
 		c.boolSetting(tr("ui.settings.delete_enabled", nil), "delete_enabled"),
 		c.intSetting(tr("ui.settings.max_delete_batch", nil), "max_delete_files"),
 		c.intSetting(tr("ui.settings.max_delete_window", nil), "max_delete_files_per_window"),
@@ -405,7 +427,7 @@ func (c *clientApp) settingsSafety() fyne.CanvasObject {
 }
 
 func (c *clientApp) settingsIntegrity() fyne.CanvasObject {
-	return c.settingsGroup(tr("ui.settings.integrity_title", nil), tr("ui.settings.integrity_note", nil),
+	return c.settingsGroup("", tr("ui.settings.integrity_note", nil),
 		c.boolSetting(tr("ui.settings.integrity_enabled", nil), "integrity_audit_enabled"),
 		c.intSetting(tr("ui.settings.integrity_interval", nil), "integrity_check_interval_seconds"),
 		c.intSetting(tr("ui.settings.integrity_startup_delay", nil), "integrity_startup_delay_seconds"),
@@ -417,7 +439,7 @@ func (c *clientApp) settingsIntegrity() fyne.CanvasObject {
 }
 
 func (c *clientApp) settingsAdvanced() fyne.CanvasObject {
-	return c.settingsGroup(tr("ui.settings.advanced_title", nil), tr("ui.settings.advanced_note", nil),
+	return c.settingsGroup("", tr("ui.settings.advanced_note", nil),
 		c.intSetting(tr("ui.settings.retention_local", nil), "retention_days_local"),
 		c.intSetting(tr("ui.settings.retention_remote", nil), "retention_days_remote"),
 		c.intSetting(tr("ui.settings.bandwidth_total", nil), "bandwidth_kbps"),

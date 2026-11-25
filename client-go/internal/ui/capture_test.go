@@ -117,7 +117,7 @@ func TestCaptureSoftware(t *testing.T) {
 	c.updateMetricsUI(map[string]string{
 		"VERSION": "3.23.0", "DISK_USAGE_PERCENT": "63", "DISK_AVAILABLE_BYTES": "214748364800",
 		"LOAD_1": "0.24", "LOAD_5": "0.31", "LOAD_15": "0.28", "MEM_AVAILABLE_BYTES": "3221225472",
-		"NASBOX_LOCK_HELD": "0", "NASBOX_LOCK_PHASE": "idle", "NASBOX_QUEUE_COUNT": "0",
+		"NASBOX_LOCK_HELD": "false", "NASBOX_LOCK_PHASE": "idle", "NASBOX_QUEUE_COUNT": "0",
 	})
 
 	var walk func(o fyne.CanvasObject, depth int, trail string)
@@ -169,10 +169,17 @@ func TestCaptureSoftware(t *testing.T) {
 	c.lastSyncAt = now.Add(-2 * time.Minute)
 	c.updateLastSync()
 	c.updateMetricsUI(map[string]string{
-		"VERSION": "3.26.0", "DISK_USAGE_PERCENT": "63", "DISK_AVAILABLE_BYTES": "1460288880640",
-		"DISK_TOTAL_BYTES": "3940649673949", "LOAD_1": "0.24", "LOAD_5": "0.31", "LOAD_15": "0.28",
-		"MEM_AVAILABLE_BYTES": "3221225472", "NASBOX_LOCK_HELD": "0", "NASBOX_LOCK_PHASE": "idle",
-		"NASBOX_QUEUE_COUNT": "0",
+		"VERSION": "3.27.1", "COLLECTED_AT_EPOCH": "1792910400", "UPTIME_SECONDS": "354300",
+		"CPU_TOTAL_TICKS": "1000000", "CPU_IDLE_TICKS": "850000", "CPU_IOWAIT_TICKS": "20000",
+		"MEM_TOTAL_BYTES": "1035993088", "MEM_AVAILABLE_BYTES": "330000000",
+		"SWAP_TOTAL_BYTES": "2147483648", "SWAP_FREE_BYTES": "1700000000",
+		"DISK_USED_BYTES": "12788000000000", "DISK_TOTAL_BYTES": "17430000000000",
+		"DISK_AVAILABLE_BYTES": "4020000000000", "DISK_USAGE_PERCENT": "77",
+		"DISK_READ_BYTES": "5000000000", "DISK_WRITE_BYTES": "900000000",
+		"NET_RX_BYTES": "90000000000", "NET_TX_BYTES": "70000000000",
+		"NET_RX_PACKETS": "5000000", "NET_TX_PACKETS": "4000000", "NET_INTERFACE_COUNT": "2",
+		"LOAD_1": "0.52", "LOAD_5": "0.50", "LOAD_15": "0.47",
+		"NASBOX_LOCK_HELD": "false", "NASBOX_LOCK_PHASE": "idle", "NASBOX_QUEUE_COUNT": "0",
 	})
 	c.updateDevicesUI([]string{"pc-122|1792910400|42|ACTIVE", "pc-134|1792906800|17|"})
 	save("01-status")
@@ -180,6 +187,21 @@ func TestCaptureSoftware(t *testing.T) {
 	c.renderProgress(transfer.Progress{Upload: true, File: "Foto/2026/mare/VID_2044.mp4",
 		Percent: 47, Bytes: 734003200, Rate: "21.8MB/s", ETA: "0:42", Done: 2, Total: 12})
 	save("01b-status-transfer")
+	// Bulk download: thousands of files in one folder fold into one row and
+	// the progress block shows files done / bytes with one consistent source.
+	bulk := make([]recentItem, 0, 1400)
+	for index := 0; index < 1240; index++ {
+		bulk = append(bulk, recentItem{Path: fmt.Sprintf("SADE/SADE/images/img%04d.png", 1240-index), Kind: "down", At: now})
+	}
+	c.recent = append(bulk, c.recent...)
+	c.renderRecent()
+	c.refreshTransfersPane()
+	c.renderProgress(transfer.Progress{File: "SADE/SADE/images/eltab.png", Percent: 53, Bytes: 38000000000,
+		TotalBytes: 71000000000, Rate: "16.5 MB/s", ETA: "16:14", Done: 10301, Total: 19445})
+	save("01c-status-bulk")
+	c.navigate(sectionActivity, 1)
+	save("02c-transfers-live")
+	c.navigate(sectionStatus, 0)
 	c.applyStatusUI(statusOK, "Tutto sincronizzato. Nessuna modifica in sospeso.")
 	c.progress = transfer.Progress{Finished: true}
 	c.setTransferCardVisible(false)
@@ -190,7 +212,8 @@ func TestCaptureSoftware(t *testing.T) {
 	}{
 		{"02-activity", sectionActivity, 0}, {"02b-transfers", sectionActivity, 1}, {"03-files", sectionFiles, 0},
 		{"04-conflicts", sectionFiles, 1}, {"05-history", sectionFiles, 2},
-		{"06-nas", sectionNAS, 0}, {"07-devices", sectionNAS, 1},
+		{"06-nas", sectionNAS, 0}, {"07-devices", sectionNAS, 1}, {"07b-storage", sectionNAS, 2},
+		{"08c-security", sectionSettings, 1}, {"08d-integrity", sectionSettings, 2},
 		{"08-settings", sectionSettings, 0}, {"08b-folders", sectionSettings, 3}, {"09-advanced", sectionSettings, 4},
 	}
 	for _, shot := range shots {

@@ -49,7 +49,11 @@ func (c *clientApp) deviceDetails(entry deviceEntry) deviceEntry {
 		}
 	}
 	if entry.Name == "" {
-		entry.Name = fmt.Sprintf("%s %s", tr("ui.device.default_name", nil), entry.ID)
+		if c.isThisDevice(entry.ID) {
+			entry.Name = tr("ui.device.default_this", nil)
+		} else {
+			entry.Name = fmt.Sprintf("%s %s", tr("ui.device.default_name", nil), entry.ID)
+		}
 	}
 	return entry
 }
@@ -63,8 +67,6 @@ func (c *clientApp) deviceSubtitle(entry deviceEntry) string {
 	parts := []string{}
 	if entry.IP != "" {
 		parts = append(parts, entry.IP)
-	} else {
-		parts = append(parts, "IP —")
 	}
 	if !entry.LastSeen.IsZero() {
 		parts = append(parts, entry.LastSeen.Format("02/01 15:04"))
@@ -113,9 +115,11 @@ func (c *clientApp) updateMetricsUI(values map[string]string) {
 		}
 		c.netChart.add((*sample.NetRxRate + tx) / (1 << 20))
 	}
+	if version := strings.TrimSpace(values["VERSION"]); version != "" {
+		c.serverVersion = version
+	}
 	if c.nasLabel != nil {
-		c.nasLabel.SetText(fmt.Sprintf(tr("ui.nas.config_short", nil), valueOrDash(c.cfg.String("nas_lan")),
-			tr("settings.info_version_label", nil), metricText(values["VERSION"])))
+		c.nasLabel.SetText(c.nasSummaryText())
 	}
 	diskText := tr("metrics.disk_value", map[string]any{
 		"available": humanBytes(sample.DiskAvailableBytes),
@@ -131,11 +135,12 @@ func (c *clientApp) updateMetricsUI(values map[string]string) {
 	if c.homeDiskBar != nil {
 		c.homeDiskBar.SetValue(sample.DiskUsagePercent / 100)
 		c.homeDiskLabel.SetText(diskText)
-		c.homeNASLabel.SetText(fmt.Sprintf("%s · %s %s", valueOrDash(c.cfg.String("nas_lan")),
-			tr("ui.home.server", nil), metricText(values["VERSION"])))
+		c.homeNASLabel.SetText(c.homeNASText())
 	}
 	if c.loadValue != nil {
-		c.loadValue.SetText(fmt.Sprintf("%.2f / %.2f / %.2f", sample.Load1, sample.Load5, sample.Load15))
+		c.loadValue.SetText(tr("metrics.load_5_15", map[string]any{
+			"m5": fmt.Sprintf("%.2f", sample.Load5), "m15": fmt.Sprintf("%.2f", sample.Load15),
+		}))
 	}
 	if c.cpuValue != nil {
 		if sample.CPUUsagePercent == nil {
@@ -258,7 +263,11 @@ func (c *clientApp) updateDevicesUI(raw []string) {
 		c.deviceList.Refresh()
 	}
 	if c.homeDevicesLabel != nil {
-		c.homeDevicesLabel.SetText(tr("ui.home.devices", map[string]any{"count": len(c.deviceEntries)}))
+		key := "ui.home.devices"
+		if len(c.deviceEntries) == 1 {
+			key = "ui.home.device_one"
+		}
+		c.homeDevicesLabel.SetText(tr(key, map[string]any{"count": len(c.deviceEntries)}))
 	}
 	if c.selectedDevice != "" {
 		found := false
@@ -272,6 +281,7 @@ func (c *clientApp) updateDevicesUI(raw []string) {
 			c.selectedDevice = ""
 		}
 	}
+	c.updateDevicesLabel()
 	if c.selectedDeviceLabel != nil {
 		if c.selectedDevice == "" {
 			c.selectedDeviceLabel.SetText(tr("ui.device.none_selected", nil))
@@ -290,4 +300,47 @@ func (c *clientApp) updateDevicesUI(raw []string) {
 		}
 		c.monitorDevicesLabel.SetText(strings.Join(lines, "\n"))
 	}
+}
+
+// setServerVersion remembers the NAS script version (from print-config) and
+// refreshes the places that show it. Metrics samples do not always carry it,
+// which used to leave "server —" on screen even though the version was known.
+func (c *clientApp) setServerVersion(version string) {
+	version = strings.TrimSpace(version)
+	if version == "" {
+		return
+	}
+	c.serverVersion = version
+	if c.homeNASLabel != nil {
+		c.homeNASLabel.SetText(c.homeNASText())
+	}
+	if c.nasLabel != nil {
+		c.nasLabel.SetText(c.nasSummaryText())
+	}
+}
+
+// homeNASText is "192.168.1.119 · server 3.27.1" (the version only if known).
+func (c *clientApp) homeNASText() string {
+	host := valueOrDash(c.cfg.String("nas_lan"))
+	if c.serverVersion == "" {
+		return host
+	}
+	return fmt.Sprintf("%s · %s %s", host, tr("ui.home.server", nil), c.serverVersion)
+}
+
+func (c *clientApp) nasSummaryText() string {
+	host := valueOrDash(c.cfg.String("nas_lan"))
+	if c.serverVersion == "" {
+		return "NAS " + host
+	}
+	return fmt.Sprintf("NAS %s — %s %s", host, tr("ui.home.server", nil), c.serverVersion)
+}
+
+// isThisDevice tells whether a device id listed by the NAS (possibly the
+// shortened form) is this client.
+func (c *clientApp) isThisDevice(id string) bool {
+	if c.store == nil || len(id) < 8 {
+		return false
+	}
+	return strings.HasPrefix(c.store.DeviceID(), id)
 }

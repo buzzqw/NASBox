@@ -21,22 +21,24 @@ func (c *clientApp) buildStoragePane() fyne.CanvasObject {
 	c.storageStatus.Wrapping = fyne.TextWrapWord
 	c.storageLast = widget.NewLabel(tr("storage.never_updated", nil))
 	c.storageLast.Wrapping = fyne.TextWrapWord
-	c.storageFolders = widget.NewLabel(tr("storage.empty_folders", nil))
+	c.storageFolders = widget.NewLabel(tr("storage.not_analyzed", nil))
 	c.storageFolders.Wrapping = fyne.TextWrapWord
-	c.storageDuplicates = widget.NewLabel(tr("storage.empty_duplicates", nil))
+	c.storageDuplicates = widget.NewLabel(tr("storage.not_analyzed", nil))
 	c.storageDuplicates.Wrapping = fyne.TextWrapWord
-	c.storageTrash = widget.NewLabel(tr("storage.empty_trash", nil))
+	c.storageTrash = widget.NewLabel(tr("storage.not_analyzed", nil))
 	c.storageTrash.Wrapping = fyne.TextWrapWord
 	c.storageProgress = widget.NewProgressBar()
 	c.storageProgress.SetValue(0)
+	c.storageProgress.TextFormatter = func() string { return "" }
+	c.storageProgress.Hide() // only meaningful while an analysis runs
 	c.storageAnalyzeBtn = plainButton(tr("storage.analyze_btn", nil), theme.ViewRefreshIcon(),
 		tr("storage.title", nil), widget.HighImportance, c.onAnalyzeStorage, c.setHint)
 	c.storageCleanupBtn = plainButton(tr("storage.cleanup_btn", nil), theme.DeleteIcon(),
 		tr("storage.cleanup_tooltip", nil), widget.MediumImportance, c.onCleanupDuplicates, c.setHint)
 	c.storageCleanupBtn.Disable()
 
-	return container.NewVScroll(container.NewVBox(
-		c.sectionTitle(tr("storage.title", nil), tr("storage.details_title", nil)),
+	c.storageBox = container.NewVBox(
+		c.sectionTitle("", tr("storage.details_title", nil)),
 		c.surface(container.NewVBox(
 			c.storageStatus,
 			c.storageLast,
@@ -55,7 +57,8 @@ func (c *clientApp) buildStoragePane() fyne.CanvasObject {
 			widget.NewLabelWithStyle(tr("storage.trash_title", nil), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 			c.storageTrash,
 		), ""),
-	))
+	)
+	return container.NewVScroll(inset(c.storageBox))
 }
 
 func (c *clientApp) onAnalyzeStorage() {
@@ -80,6 +83,8 @@ func (c *clientApp) onAnalyzeStorage() {
 	}
 	if c.storageProgress != nil {
 		c.storageProgress.SetValue(0)
+		c.storageProgress.Show()
+		c.storageBox.Refresh()
 	}
 	root := c.cfg.LocalRoot()
 	retention := 0.0
@@ -106,6 +111,8 @@ func (c *clientApp) applyStorageInsights(insights storage.Insights) {
 	}
 	if c.storageProgress != nil {
 		c.storageProgress.SetValue(1)
+		c.storageProgress.Hide()
+		c.storageBox.Refresh()
 	}
 	if c.storageStatus != nil {
 		c.storageStatus.SetText(tr("storage.status_done", map[string]any{"files": insights.ScannedFiles}))
