@@ -191,3 +191,35 @@ class NestedInternalFolderTests(unittest.TestCase):
             manifest = sandbox.run("--manifest-export").stdout.decode()
             self.assertIn("progetto/ok.txt", manifest)
             self.assertNotIn(".sync-trash", manifest)
+
+    def test_phantoms_are_rows_without_a_file_and_can_be_forgotten(self) -> None:
+        """The mirror image of an orphan: a live row whose file is gone. Nothing
+        removes those either, so the manifest keeps advertising a file that does
+        not exist."""
+        with ServerSandbox() as sandbox:
+            sandbox.init_repository()
+            self.assertEqual(sandbox.run("--manifest-export").returncode, 0)
+            _put(sandbox, "progetto/sparito.txt", b"c'era")
+            _put(sandbox, "progetto/resta.txt", "c'è".encode())
+            self.assertEqual(_values(sandbox.run("--audit-adopt").stdout.decode())["ADOPTED"], "2")
+            (sandbox.share / "progetto" / "sparito.txt").unlink()
+
+            listed = sandbox.run("--audit-phantoms")
+            self.assertEqual(listed.returncode, 0, listed.stderr.decode())
+            self.assertEqual(_values(listed.stdout.decode())["PHANTOMS"], "1")
+            self.assertIn("progetto/sparito.txt", listed.stdout.decode())
+
+            done = sandbox.run("--audit-phantoms", "--forget")
+            self.assertEqual(done.returncode, 0, done.stderr.decode())
+            self.assertEqual(_values(done.stdout.decode())["PHANTOMS"], "1")
+
+            manifest = sandbox.run("--manifest-export").stdout.decode()
+            rows = [l for l in manifest.splitlines() if l.startswith("progetto/sparito.txt\t")]
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0].split("\t")[1], "")  # tombstone, non più vivo
+            self.assertTrue((sandbox.share / "progetto" / "resta.txt").exists())
+            self.assertIn("progetto/resta.txt", manifest)
+            # Nothing left to report, and the surviving file is untouched.
+            self.assertEqual(
+                _values(sandbox.run("--audit-phantoms").stdout.decode())["PHANTOMS"], "0"
+            )

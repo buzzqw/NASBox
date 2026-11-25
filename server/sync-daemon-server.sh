@@ -33,7 +33,7 @@
 #
 set -uo pipefail
 
-VERSION="3.32.3"
+VERSION="3.32.4"
 SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -1936,6 +1936,67 @@ cmd_audit_orphans() {
             printf '\0'
         done < "$orphans"
         printf '\0'
+    fi
+    rm -rf "$tmpdir"
+    return 0
+}
+
+# The mirror image of --audit-orphans: a live manifest row whose file is no
+# longer on disk. Nothing removes those rows either, so the manifest keeps
+# advertising files that do not exist (a client holding a local copy would be
+# told to delete it, one without would fail to download it).
+#   --audit-phantoms           lists them, read-only
+#   --audit-phantoms --forget  marks them deleted in the journal (no disk change)
+cmd_audit_phantoms() {
+    local forget="${1:-}" tmpdir encoded_live records count=0 encoded raw run_ts txid
+    tmpdir=$(mktemp -d "${STATE_DIR}/.audit-phantoms.XXXXXX") || return 1
+    encoded_live="$tmpdir/live"
+    records="$tmpdir/records"
+    if command -v flock >/dev/null 2>&1; then
+        exec 9>>"$JOURNAL_LOCK_FILE"
+        flock -s 9 2>/dev/null || true
+    fi
+    render_manifest_unlocked 2>/dev/null \
+        | awk -F '\t' 'NR > 1 && length($2) == 64 && $1 !~ /(^|\/)(\.sync-trash|\.sync-partial|\.nasbox-staging|\.nasbox-root|@eaDir)(\/|$)/ { print $1 }' \
+        > "$encoded_live" || { rm -rf "$tmpdir"; return 1; }
+    if command -v flock >/dev/null 2>&1; then
+        flock -u 9 2>/dev/null || true
+        exec 9>&-
+    fi
+    : > "$records" || { rm -rf "$tmpdir"; return 1; }
+    while IFS= read -r encoded; do
+        [[ -n "$encoded" ]] || continue
+        raw=$(decode_journal_field "$encoded")
+        if [[ -f "$SHARE_ROOT/$raw" ]]; then
+            continue
+        fi
+        # A path that exists as a directory or a link is a shape the sync never
+        # wrote: leave it to a human, do not tombstone it.
+        [[ -e "$SHARE_ROOT/$raw" || -L "$SHARE_ROOT/$raw" ]] && continue
+        printf '%s\0' "$raw" >> "$records" || { rm -rf "$tmpdir"; return 1; }
+        (( count++ ))
+    done < "$encoded_live"
+    if [[ "$forget" == "--forget" && "$count" -gt 0 ]]; then
+        if [[ "$DRY_RUN" == "true" ]]; then
+            rm -rf "$tmpdir"
+            printf 'PHANTOMS=%s\nWOULD_FORGET=%s\n' "${count//[[:space:]]/}" "${count//[[:space:]]/}"
+            return 0
+        fi
+        run_ts=$(date -u '+%Y-%m-%d--%H-%M-%S-000000Z')
+        txid="audit-phantoms-${run_ts}-$$"
+        exec 9>>"$JOURNAL_LOCK_FILE"
+        flock -x 9 || { exec 9>&-; rm -rf "$tmpdir"; return 1; }
+        ensure_journal_files
+        if ! append_delete_journal_batch_unlocked "$records" "audit" "$txid"; then
+            flock -u 9; exec 9>&-; rm -rf "$tmpdir"
+            printf 'PHANTOMS=%s\nERROR=journal non aggiornato\n' "${count//[[:space:]]/}"
+            return 1
+        fi
+        flock -u 9; exec 9>&-
+    fi
+    printf 'PHANTOMS=%s\n' "${count//[[:space:]]/}"
+    if [[ "$forget" != "--forget" ]]; then
+        tr '\0' '\n' < "$records" | head -20
     fi
     rm -rf "$tmpdir"
     return 0
@@ -3949,6 +4010,7 @@ Uso:
   $(basename "$0") --audit-orphans [--list]    File sul disco senza riga nel manifest
   $(basename "$0") --audit-adopt [--dry-run]   Registra nel journal quei file (digest reali)
   $(basename "$0") --journal-forget            Mette a tombstone percorsi (input NUL, disco intatto)
+  $(basename "$0") --audit-phantoms [--forget] Righe vive nel manifest senza file sul disco
   $(basename "$0") --init-repository           Crea il marker persistente del repository
   $(basename "$0") --journal-append             Registra una transazione (input NUL)
   $(basename "$0") --journal-compact            Compatta il journal nel manifest
@@ -4010,6 +4072,8 @@ while [[ $# -gt 0 ]]; do
         --audit-orphans) ACTION="audit_orphans" ;;
         --audit-adopt) ACTION="audit_adopt" ;;
         --journal-forget) ACTION="journal_forget" ;;
+        --audit-phantoms) ACTION="audit_phantoms" ;;
+        --forget) AUDIT_FORGET="--forget" ;;
         --list) AUDIT_LIST="--list" ;;
         --transfer-wait) ACTION="transfer_wait" ;;
         -c|--config) shift; CONFIG_FILE="${1:?}" ;;
@@ -4075,5 +4139,6 @@ case "$ACTION" in
     audit_orphans) cmd_audit_orphans "${AUDIT_LIST:-}"; exit $? ;;
     audit_adopt) cmd_audit_adopt; exit $? ;;
     journal_forget) cmd_journal_forget; exit $? ;;
+    audit_phantoms) cmd_audit_phantoms "${AUDIT_FORGET:-}"; exit $? ;;
     transfer_wait) cmd_transfer_wait; exit $? ;;
 esac

@@ -4,6 +4,18 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 3.32.4 - 2026-11-25
+
+Server:
+
+- **`--audit-phantoms [--forget]`**: il controllo simmetrico di
+  `--audit-orphans`. Una riga viva nel manifest il cui file non è più sul disco
+  resta lì per sempre: il manifest continua a dichiarare file che non esistono
+  (un client con la copia locale verrebbe invitato a cancellarla, uno senza non
+  riuscirebbe a scaricarla). `--forget` le mette a tombstone nel journal senza
+  toccare il disco; i percorsi che esistono come cartella o link sono lasciati a
+  un intervento umano.
+
 ## 3.32.3 - 2026-11-25
 
 Server:
