@@ -166,9 +166,28 @@ class NestedInternalFolderTests(unittest.TestCase):
             )
             self.assertEqual(done.returncode, 0, done.stderr.decode())
             self.assertEqual(_values(done.stdout.decode())["FORGOTTEN"], "1")
-            rows = [
-                line for line in sandbox.run("--manifest-export").stdout.decode().splitlines()
-                if line.startswith("RPG/.sync-trash/mappe/vecchia.jpg-2026-08-06\t")
-            ]
-            self.assertEqual(len(rows), 1)
-            self.assertEqual(rows[0].split("\t")[1], "")
+            # The render never exports an internal path, not even as tombstone.
+            self.assertNotIn(
+                "RPG/.sync-trash/mappe/vecchia.jpg-2026-08-06",
+                sandbox.run("--manifest-export").stdout.decode(),
+            )
+            self.assertTrue(
+                (sandbox.share / "RPG" / ".sync-trash" / "mappe" / "vecchia.jpg-2026-08-06").exists()
+            )
+
+    def test_the_export_never_contains_an_internal_path(self) -> None:
+        """One such row makes every client reject the whole manifest, so the
+        render drops it even when the journal mentions it."""
+        with ServerSandbox() as sandbox:
+            sandbox.init_repository()
+            journal = sandbox.state / "transfer-journal.tsv"
+            with journal.open("a", encoding="utf-8") as handle:
+                handle.write("BEGIN\tmanuale\t1700000000\tdevice-a\n")
+                for path in ("RPG/.sync-trash/mappe/vecchia.jpg", "progetto/ok.txt"):
+                    handle.write(
+                        f"PUT\t{path}\t{'a' * 64}\t10\t1700000000000000000\tdevice-a\t1700000000\n"
+                    )
+                handle.write("COMMIT\tmanuale\n")
+            manifest = sandbox.run("--manifest-export").stdout.decode()
+            self.assertIn("progetto/ok.txt", manifest)
+            self.assertNotIn(".sync-trash", manifest)

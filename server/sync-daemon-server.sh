@@ -33,7 +33,7 @@
 #
 set -uo pipefail
 
-VERSION="3.32.2"
+VERSION="3.32.3"
 SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -691,6 +691,10 @@ render_manifest_unlocked() {
         END {
             print "NASBOX_MANIFEST_V1"
             for (path in state) {
+                # Never export a path a client refuses: one row with an internal
+                # component (.sync-trash at any depth, @eaDir, staging) makes
+                # every client reject the whole manifest.
+                if (path ~ /(^|\/)(\.sync-trash|\.sync-partial|\.nasbox-staging|\.nasbox-root|@eaDir)(\/|$)/) continue
                 if (cutoff == 0) { print state[path]; continue }
                 split(state[path], f, FS)
                 if (f[2] == "" && f[3] == "0") {

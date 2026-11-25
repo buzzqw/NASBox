@@ -4,6 +4,15 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 3.32.3 - 2026-11-25
+
+Server:
+
+- **Il manifest non esporta mai un percorso interno**, nemmeno come tombstone:
+  una sola riga con `.sync-trash` (anche annidata), `.sync-staging`, `@eaDir`…
+  faceva rifiutare il manifest intero a ogni client. Il filtro è nel render,
+  quindi vale per export completo, delta e compattazione.
+
 ## 3.32.2 - 2026-11-25
 
 Server:
