@@ -50,3 +50,10 @@ EVENTS_MAX_BYTES=5242880    # rotate events.jsonl past this size (bytes)
 JOURNAL_MAX_BYTES=10485760  # compact the transfer journal past this size (bytes)
 JOURNAL_MAX_LINES=50000     # ...or past this many lines
 STATE_TEMP_MAX_AGE_HOURS=24 # remove stale temporary files after N hours (0 = keep)
+
+# --- Capabilities ---
+# How many files --file-states reads and hashes at once. Empty (recommended)
+# means one per CPU core, at most 8: a 4-core NAS uses 4, a 2-core NAS uses 2
+# instead of the fixed 8 that used to thrash a small CPU and a single disk.
+# Set it only to force a value (1..64).
+# FILE_STATES_PARALLELISM=

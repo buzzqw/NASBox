@@ -4,6 +4,36 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 3.30.0 - 2026-11-25
+
+Server:
+
+- **Il NAS dichiara le proprie capacità** con `--capabilities` (e le include in
+  `--print-config`): change feed, protocolli di rinomina, core, memoria, tipo di
+  dischi, versione di rsync, filesystem, parallelismo dell'hashing. I client se
+  ne servono e ogni chiave ha un ripiego, quindi un client vecchio continua a
+  funzionare identico.
+- **Parallelismo dell'hashing derivato dal NAS**: `--file-states` lanciava
+  sempre 8 job in parallelo, troppi per 2 core e pochi per 16. Ora è un job per
+  core (massimo 8) e si può forzare con `FILE_STATES_PARALLELISM` in
+  `server.conf` (1-64, valore non valido rifiutato all'avvio).
+
+## 1.10.0 - 2026-11-25
+
+Client Go:
+
+- **Il sync in tempo reale segue le capacità del NAS**: il change feed
+  (long-poll su `manifest.revision`, 4-6 s misurati su dati veri) resta attivo
+  quando il NAS lo dichiara; se non lo dichiara si usa il timer normale. Nuova
+  impostazione `realtime` con tre valori: automatico (default), sempre (se il
+  NAS non sa avvisare controlla ogni minuto) e disattivato.
+- **Risparmio energetico solo dove serve**: con `power_saving: auto` il client
+  smette di rallentare il change feed quando il NAS dichiara dischi a stato
+  solido; con dischi rotanti o tipo sconosciuto resta il comportamento di prima.
+- **`doctor` mostra lo stato vero**: una riga `tempo reale:` (attivo con change
+  feed / senza change feed / disattivato) e una `capacità NAS:` con core,
+  memoria, dischi, rsync e filesystem letti dal NAS.
+
 ## 3.29.0 - 2026-11-25
 
 Server:

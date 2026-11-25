@@ -57,6 +57,7 @@ var settingHelp = map[string]helpText{
 	"remote_server_script":                  {"Percorso dello script server sul NAS.", "Path of the server script on the NAS."},
 	"ssh_known_hosts":                       {"File known hosts usato per verificare il NAS.", "Known hosts file used to verify the NAS."},
 	"poll_interval":                         {"Secondi tra i controlli periodici.", "Seconds between periodic checks."},
+	"realtime":                              {"Sincronizzazione in tempo reale. Automatico: usa il change feed del NAS se lo supporta (oggi sì), altrimenti il timer normale. Sempre: se il NAS non sa avvisare, controlla ogni minuto. Disattivato: solo il timer. Le modifiche fatte su questo PC partono comunque subito.", "Real-time sync. Automatic: use the NAS change feed when it supports it (it does today), otherwise the normal timer. Always: if the NAS cannot notify, check every minute. Off: timer only. Local changes are pushed immediately either way."},
 	"power_saving":                          {"Con dischi meccanici: dopo 15 minuti senza attività NASBox smette di interrogare il NAS di continuo, così i dischi possono andare in standby. Una modifica locale riattiva subito la sync.", "With spinning disks: after 15 idle minutes NASBox stops polling the NAS continuously so the disks can spin down. A local change resumes sync immediately."},
 	"power_saving_poll_minutes":             {"Ogni quanti minuti, in risparmio, controllare se altri PC hanno cambiato qualcosa.", "How often, while saving power, to check whether other PCs changed something."},
 	"change_feed_wait_seconds":              {"Attesa massima del change feed NAS.", "Maximum wait for the NAS change feed."},
@@ -505,6 +506,11 @@ func (c *clientApp) settingsSync() fyne.CanvasObject {
 			{value: "off", label: tr("ui.settings.off", nil)},
 		}),
 		c.intSetting(tr("ui.settings.full_pull", nil), "full_pull_interval_seconds"),
+		c.choiceSettingLabels(tr("ui.settings.realtime", nil), "realtime", []settingOption{
+			{value: "auto", label: tr("ui.settings.realtime_auto", nil)},
+			{value: "on", label: tr("ui.settings.realtime_on", nil)},
+			{value: "off", label: tr("ui.settings.realtime_off", nil)},
+		}),
 		c.choiceSettingLabels(tr("ui.settings.power_saving", nil), "power_saving", []settingOption{
 			{value: "off", label: tr("ui.settings.power_saving_off", nil)},
 			{value: "auto", label: tr("ui.settings.power_saving_auto", nil)},

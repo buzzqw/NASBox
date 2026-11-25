@@ -5634,6 +5634,22 @@
     "en": "Polling interval (s)",
     "it": "Intervallo polling (s)"
   },
+  "ui.settings.realtime": {
+    "en": "Real-time sync",
+    "it": "Sync in tempo reale"
+  },
+  "ui.settings.realtime_auto": {
+    "en": "Automatic: use the NAS change feed when available (recommended)",
+    "it": "Automatico: usa il change feed del NAS se disponibile (consigliato)"
+  },
+  "ui.settings.realtime_off": {
+    "en": "Off: only the normal timer",
+    "it": "Disattivato: solo il timer normale"
+  },
+  "ui.settings.realtime_on": {
+    "en": "Always: if the NAS cannot notify, check every minute",
+    "it": "Sempre: se il NAS non può avvisare, controlla ogni minuto"
+  },
   "ui.settings.remote_prefix": {
     "en": "Remote NASBox folder",
     "it": "Cartella NASBox remota"

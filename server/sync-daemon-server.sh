@@ -33,7 +33,7 @@
 #
 set -uo pipefail
 
-VERSION="3.29.0"
+VERSION="3.30.0"
 SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -63,11 +63,93 @@ STAGING_DIRNAME=".nasbox-staging"
 CHANGE_WAIT_MAX_TIMEOUT_SECONDS=3600
 
 # How many sha256sum/stat lookups cmd_file_states runs concurrently -- see
-# that function for why. 8 is a conservative default: enough to stop a single
-# subprocess-per-file from being the bottleneck on a large batch, low enough
-# to not thrash a weak NAS CPU or a spinning disk's seek time with too much
-# concurrent I/O.
-FILE_STATES_PARALLELISM=8
+# that function for why. Left empty on purpose: detect_capabilities() derives it
+# from the CPU count of this NAS (one job per core, at most 8), and server.conf
+# can override it. A fixed 8 was either too little for a 16-core NAS or too much
+# for a 2-core one with a single disk.
+FILE_STATES_PARALLELISM=""
+
+# --- capabilities ---
+# What this machine can do, detected once and published to the clients. The
+# clients adapt instead of assuming: a NAS without the change feed polls, a
+# single-core NAS hashes one file at a time, a NAS with solid-state disks is not
+# asked to rest them. Every value has a safe fallback, so an old client that
+# ignores this block keeps working exactly as before.
+NAS_CPU_COUNT=""
+NAS_MEM_TOTAL_MB=""
+NAS_DISK_ROTATIONAL=""
+NAS_RSYNC_VERSION=""
+NAS_FS_TYPE=""
+CAPABILITIES_LIST="change_feed,causal_versions,v3_rename,batch_delete,quiet_lock,empty_dir_prune,capabilities_v1"
+
+# 1 = rotating, 0 = solid state, empty = unknown. Derived from the device that
+# holds the share; when the volume is a mapper/LVM device (Synology) the first
+# physical disk is used, which is what a one-disk NAS has anyway.
+disk_rotational_for() {
+    local path="$1" device base parent block
+    device=$(df -P "$path" 2>/dev/null | awk 'NR == 2 {print $1}')
+    if [[ -n "$device" ]]; then
+        base=$(basename "$(readlink -f "$device" 2>/dev/null || printf '%s' "$device")")
+        if [[ -r "/sys/block/$base/queue/rotational" ]]; then
+            cat "/sys/block/$base/queue/rotational"
+            return 0
+        fi
+        for parent in /sys/block/*/"$base"; do
+            [[ -e "$parent" ]] || continue
+            block=$(basename "$(dirname "$parent")")
+            if [[ -r "/sys/block/$block/queue/rotational" ]]; then
+                cat "/sys/block/$block/queue/rotational"
+                return 0
+            fi
+        done
+    fi
+    for parent in /sys/block/sd*/queue/rotational; do
+        [[ -r "$parent" ]] && { cat "$parent"; return 0; }
+    done
+    return 0
+}
+
+detect_capabilities() {
+    NAS_CPU_COUNT=$(nproc 2>/dev/null || echo 1)
+    [[ "$NAS_CPU_COUNT" =~ ^[1-9][0-9]*$ ]] || NAS_CPU_COUNT=1
+    local mem_kb=""
+    mem_kb=$(awk '/^MemTotal:/ {print $2; exit}' /proc/meminfo 2>/dev/null || true)
+    if [[ "$mem_kb" =~ ^[0-9]+$ ]]; then
+        NAS_MEM_TOTAL_MB=$((mem_kb / 1024))
+    else
+        NAS_MEM_TOTAL_MB=0
+    fi
+    NAS_DISK_ROTATIONAL=$(disk_rotational_for "$SHARE_ROOT" || true)
+    NAS_RSYNC_VERSION=$(rsync --version 2>/dev/null | head -1 | awk '{print $3}')
+    NAS_FS_TYPE=$(awk -v root="$SHARE_ROOT" '$2 == root {print $3; exit}' /proc/mounts 2>/dev/null || true)
+    if [[ -z "${FILE_STATES_PARALLELISM:-}" ]]; then
+        FILE_STATES_PARALLELISM="$NAS_CPU_COUNT"
+        ((FILE_STATES_PARALLELISM > 8)) && FILE_STATES_PARALLELISM=8
+        ((FILE_STATES_PARALLELISM < 1)) && FILE_STATES_PARALLELISM=1
+    fi
+    return 0
+}
+
+# KEY=VALUE only (no header): --print-config embeds these lines, and a dedicated
+# --capabilities query prints them with a CAPABILITIES_V1 header in front.
+print_capability_values() {
+    echo "CAPABILITIES=$CAPABILITIES_LIST"
+    echo "CHANGE_FEED_AVAILABLE=true"
+    echo "CAUSAL_VERSIONS_AVAILABLE=true"
+    echo "BROWSE_RENAME_PROTOCOLS=BROWSE_RENAME_V1,BROWSE_RENAME_V2,BROWSE_RENAME_V3"
+    echo "CPU_COUNT=$NAS_CPU_COUNT"
+    echo "MEM_TOTAL_MB=$NAS_MEM_TOTAL_MB"
+    echo "DISK_ROTATIONAL=$NAS_DISK_ROTATIONAL"
+    echo "RSYNC_VERSION=$NAS_RSYNC_VERSION"
+    echo "FS_TYPE=$NAS_FS_TYPE"
+    echo "FILE_STATES_PARALLELISM=$FILE_STATES_PARALLELISM"
+}
+
+cmd_capabilities() {
+    echo "CAPABILITIES_V1"
+    echo "SERVER_VERSION=$VERSION"
+    print_capability_values
+}
 
 TRASH_DIRNAME=".sync-trash"
 REPOSITORY_MARKER_NAME=".nasbox-root"
@@ -189,6 +271,8 @@ load_config() {
     LOG_RETENTION_DAYS=30
     EVENTS_MAX_BYTES=5242880
     STATE_TEMP_MAX_AGE_HOURS=24
+    # Empty = derive from the CPU count in detect_capabilities().
+    FILE_STATES_PARALLELISM=""
     local key value
     while IFS='=' read -r key value || [[ -n "$key" ]]; do
         case "$key" in
@@ -230,6 +314,10 @@ load_config() {
                 STATE_TEMP_MAX_AGE_HOURS="${value%%#*}"
                 STATE_TEMP_MAX_AGE_HOURS="${STATE_TEMP_MAX_AGE_HOURS//[[:space:]]/}"
                 ;;
+            FILE_STATES_PARALLELISM)
+                FILE_STATES_PARALLELISM="${value%%#*}"
+                FILE_STATES_PARALLELISM="${FILE_STATES_PARALLELISM//[[:space:]]/}"
+                ;;
             *) log ERROR "Chiave non supportata in $CONFIG_FILE: $key"; exit 1 ;;
         esac
     done < "$CONFIG_FILE"
@@ -250,6 +338,10 @@ load_config() {
     [[ "$LOG_RETENTION_DAYS" =~ ^[0-9]+$ ]] || { log ERROR "LOG_RETENTION_DAYS deve essere un intero >= 0"; exit 1; }
     [[ "$EVENTS_MAX_BYTES" =~ ^[1-9][0-9]*$ ]] || { log ERROR "EVENTS_MAX_BYTES deve essere un intero >= 1"; exit 1; }
     [[ "$STATE_TEMP_MAX_AGE_HOURS" =~ ^[0-9]+$ ]] || { log ERROR "STATE_TEMP_MAX_AGE_HOURS deve essere un intero >= 0"; exit 1; }
+    if [[ -n "$FILE_STATES_PARALLELISM" ]]; then
+        [[ "$FILE_STATES_PARALLELISM" =~ ^[1-9][0-9]*$ && "$FILE_STATES_PARALLELISM" -le 64 ]] \
+            || { log ERROR "FILE_STATES_PARALLELISM deve essere un intero tra 1 e 64"; exit 1; }
+    fi
 
     if [[ ! -d "$SHARE_ROOT" ]]; then
         log ERROR "SHARE_ROOT non esiste: $SHARE_ROOT"
@@ -3309,8 +3401,7 @@ cmd_print_config() {
     echo "LOG_RETENTION_DAYS=$LOG_RETENTION_DAYS"
     echo "EVENTS_MAX_BYTES=$EVENTS_MAX_BYTES"
     echo "STATE_TEMP_MAX_AGE_HOURS=$STATE_TEMP_MAX_AGE_HOURS"
-    echo "CHANGE_FEED_AVAILABLE=true"
-    echo "CAUSAL_VERSIONS_AVAILABLE=true"
+    print_capability_values
     if [[ -f "$JOURNAL_FILE" ]]; then echo "JOURNAL_READY=true"; else echo "JOURNAL_READY=false"; fi
     # Own runtime state dir (PID file, lock, log) -- self-reported so clients whose
     # synced tree happens to contain this install can exclude it from sync instead
@@ -3558,6 +3649,7 @@ Uso:
   $(basename "$0") --wait-for-revision REVISION TIMEOUT
                                                    Attende solo manifest.revision
   $(basename "$0") --print-config              Dump KEY=VALUE (per l'auto-configurazione dei client)
+  $(basename "$0") --capabilities              Cosa sa fare questo NAS (KEY=VALUE)
   $(basename "$0") --init-repository           Crea il marker persistente del repository
   $(basename "$0") --journal-append             Registra una transazione (input NUL)
   $(basename "$0") --journal-compact            Compatta il journal nel manifest
@@ -3615,6 +3707,7 @@ while [[ $# -gt 0 ]]; do
         --journal-status) ACTION="journal_status" ;;
         --history-list) ACTION="history_list" ;;
         --diagnostics) ACTION="diagnostics" ;;
+        --capabilities) ACTION="capabilities" ;;
         --transfer-wait) ACTION="transfer_wait" ;;
         -c|--config) shift; CONFIG_FILE="${1:?}" ;;
         --help|-h) cmd_help; exit 0 ;;
@@ -3645,6 +3738,7 @@ fi
 
 mkdir -p "$STATE_DIR"
 load_config
+detect_capabilities
 ensure_journal_files
 
 case "$ACTION" in
@@ -3674,5 +3768,6 @@ case "$ACTION" in
     journal_status) cmd_journal_status; exit $? ;;
     history_list) cmd_history_list; exit $? ;;
     diagnostics) cmd_diagnostics; exit $? ;;
+    capabilities) cmd_capabilities; exit $? ;;
     transfer_wait) cmd_transfer_wait; exit $? ;;
 esac

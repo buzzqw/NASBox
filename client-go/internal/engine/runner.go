@@ -299,10 +299,9 @@ func (r *Runner) Run(ctx context.Context) error {
 	if debounce <= 0 {
 		debounce = 2 * time.Second
 	}
-	interval := time.Duration(r.cfg.Int("poll_interval")) * time.Second
-	if interval <= 0 {
-		interval = 300 * time.Second
-	}
+	// Real-time needs the NAS change feed; without it the timer is the only
+	// source of remote changes, and "realtime": "on" makes it short.
+	interval := effectivePollInterval(r.cfg)
 	fullPullInterval := time.Duration(r.cfg.Int("full_pull_interval_seconds")) * time.Second
 	if fullPullInterval <= 0 {
 		fullPullInterval = 2 * time.Hour
@@ -320,7 +319,9 @@ func (r *Runner) Run(ctx context.Context) error {
 	r.mu.Lock()
 	r.watchReliable = watcher.Reliable
 	r.mu.Unlock()
-	go r.watchRemoteChanges(watchCtx)
+	if changeFeedEnabled(r.cfg) {
+		go r.watchRemoteChanges(watchCtx)
+	}
 
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -578,7 +579,7 @@ func (r *Runner) maybeAudit() {
 // waiting for the next poll tick. The call is read-only and never holds the
 // transfer lock.
 func (r *Runner) watchRemoteChanges(ctx context.Context) {
-	if !r.cfg.Bool("remote_change_feed_available") {
+	if !changeFeedEnabled(r.cfg) {
 		return
 	}
 	waitSeconds := r.cfg.Int("change_feed_wait_seconds")

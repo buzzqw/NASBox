@@ -169,6 +169,9 @@ type doctorReport struct {
 	Lock             doctorLockReport    `json:"lock"`
 	RsyncLocal       string              `json:"rsync_local,omitempty"`
 	RsyncNAS         string              `json:"rsync_nas,omitempty"`
+	Realtime         string              `json:"realtime,omitempty"`
+	NasCapabilities  string              `json:"nas_capabilities,omitempty"`
+	NasHardware      string              `json:"nas_hardware,omitempty"`
 	Error            string              `json:"error,omitempty"`
 	DiagnosticsError string              `json:"diagnostics_error,omitempty"`
 }
@@ -284,6 +287,9 @@ func doctor(args []string) int {
 	report.Lock.Remote = probe.RemoteLock
 	report.RsyncNAS = probe.RsyncNAS
 	report.RsyncLocal = transfer.LocalRsyncVersion()
+	report.Realtime = engine.RealtimeSummary(cfg)
+	report.NasCapabilities = cfg.String("nas_capabilities")
+	report.NasHardware = engine.CapabilitiesSummary(cfg)
 	if !probe.Reachable && probe.Error != "" {
 		report.Lock.Remote.Error = probe.Error
 	}
@@ -459,6 +465,8 @@ func writeDoctorReport(report doctorReport, asJSON bool) error {
 	fmt.Println()
 	fmt.Printf("lock NAS:    %s\n", formatRemoteLock(report.Lock.Remote))
 	fmt.Printf("rsync:       locale %s · NAS %s\n", valueOr(report.RsyncLocal, "?"), valueOr(report.RsyncNAS, "?"))
+	fmt.Printf("tempo reale: %s\n", valueOr(report.Realtime, "?"))
+	fmt.Printf("capacità NAS: %s\n", valueOr(report.NasHardware, "?"))
 	if report.Error != "" {
 		fmt.Println("errore:", report.Error)
 	}

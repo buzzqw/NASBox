@@ -237,8 +237,16 @@ func controlPersist(cfg *config.Config) int {
 
 // PowerSaving reports whether NAS power-saving mode is enabled
 // ("power_saving": "auto"; default "off").
+//
+// With "auto" the decision also depends on what the NAS reported about itself:
+// there is nothing to save on a solid-state volume, so real-time stays on there.
+// An unknown disk type keeps the old behaviour (rest the disks), because that is
+// the conservative choice for the spinning disks this mode was written for.
 func PowerSaving(cfg *config.Config) bool {
-	return strings.EqualFold(strings.TrimSpace(cfg.String("power_saving")), "auto")
+	if !strings.EqualFold(strings.TrimSpace(cfg.String("power_saving")), "auto") {
+		return false
+	}
+	return !strings.EqualFold(strings.TrimSpace(cfg.String("nas_disk_rotational")), "0")
 }
 
 // Args returns the complete ssh argv, including the binary name.
@@ -397,7 +405,25 @@ func (c *Client) Bootstrap() error {
 		strings.ToLower(values["CAUSAL_VERSIONS_AVAILABLE"]) == "true", true)
 	c.cfg.Set("remote_change_feed_available",
 		strings.ToLower(values["CHANGE_FEED_AVAILABLE"]) == "true", true)
+	c.cfg.Set("server_version", strings.TrimSpace(values["VERSION"]), true)
+	c.cfg.Set("nas_capabilities", values["CAPABILITIES"], true)
+	c.cfg.Set("nas_cpu_count", atoiOr(values["CPU_COUNT"], 0), true)
+	c.cfg.Set("nas_mem_total_mb", atoiOr(values["MEM_TOTAL_MB"], 0), true)
+	c.cfg.Set("nas_disk_rotational", strings.TrimSpace(values["DISK_ROTATIONAL"]), true)
+	c.cfg.Set("nas_rsync_version", strings.TrimSpace(values["RSYNC_VERSION"]), true)
+	c.cfg.Set("nas_fs_type", strings.TrimSpace(values["FS_TYPE"]), true)
+	c.cfg.Set("nas_file_states_parallelism", atoiOr(values["FILE_STATES_PARALLELISM"], 0), true)
 	return nil
+}
+
+// atoiOr parses a capability value, falling back when the server did not send
+// it (an older server simply omits the key).
+func atoiOr(value string, fallback int) int {
+	parsed, err := strconv.Atoi(strings.TrimSpace(value))
+	if err != nil || parsed < 0 {
+		return fallback
+	}
+	return parsed
 }
 
 // RunLocked runs a mutating command while holding the global NAS lease and
