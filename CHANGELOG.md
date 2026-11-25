@@ -4,6 +4,20 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 1.1.1 - 2026-11-25
+
+Client Go:
+
+- **I link simbolici e i file speciali non fermano più la sincronizzazione.**
+  La scansione locale li tratta come fa il client Python (ignorati, mai
+  caricati, mai interpretati come cancellazioni) e li riporta una volta nel log
+  come `UNSUPPORTED`. Prima il primo link simbolico nell'albero bloccava
+  l'intera passata (`percorso locale non regolare, sync interrotto`), cosa che
+  accadeva per esempio sui backup della configurazione di sistema.
+- `nasbox-go sync` indica quanti percorsi non regolari ha ignorato.
+- Resta fail-closed sui file regolari illeggibili o che cambiano durante la
+  lettura.
+
 ## 3.27.1 - 2026-11-25
 
 - Server: con `--dry-run` il riepilogo della quota dello storico dice

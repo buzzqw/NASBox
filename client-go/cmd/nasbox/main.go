@@ -866,6 +866,9 @@ func syncOnce(args []string) {
 	}
 	fmt.Printf("caricati %d, scaricati %d, cancellati sul NAS %d, cancellati in locale %d, spostamenti rilevati %d, conflitti %d, saltati %d\n",
 		result.Uploaded, result.Downloads, result.Deleted, result.LocalDeleted, result.Renames, result.Conflicts, result.Stale)
+	if result.Local != nil && len(result.Local.Skipped) > 0 {
+		fmt.Printf("%d link simbolici o file speciali ignorati\n", len(result.Local.Skipped))
+	}
 }
 
 func undoDeletions(args []string) {

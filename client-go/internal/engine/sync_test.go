@@ -212,22 +212,73 @@ func TestScanLocalFailsClosedOnUnreadableFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer os.Chmod(path, 0o600)
-	if _, err := scanLocal(cfg, map[string]state.Identity{}); err == nil {
+	if _, err := scanLocal(cfg, map[string]state.Identity{}, nil); err == nil {
 		t.Fatal("unreadable file must stop the scan")
 	}
 }
 
-func TestScanLocalFailsClosedOnSymlink(t *testing.T) {
+func TestScanLocalSkipsSymlinkInsteadOfAborting(t *testing.T) {
 	cfg, _, root := setupTest(t)
-	target := filepath.Join(root, "target.txt")
-	if err := os.WriteFile(target, []byte("x"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "target.txt"), []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(target, filepath.Join(root, "link.txt")); err != nil {
+	if err := os.Symlink(filepath.Join(root, "target.txt"), filepath.Join(root, "link.txt")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := scanLocal(cfg, map[string]state.Identity{}); err == nil {
-		t.Fatal("symlink must stop the scan")
+	skipped := make([]string, 0)
+	files, err := scanLocal(cfg, map[string]state.Identity{}, &skipped)
+	if err != nil {
+		t.Fatalf("a symlink must not stop the scan: %v", err)
+	}
+	if _, ok := files["link.txt"]; ok {
+		t.Fatal("the symlink must not be uploaded")
+	}
+	if _, ok := files["target.txt"]; !ok {
+		t.Fatal("the regular file next to the symlink must still be scanned")
+	}
+	if len(skipped) != 1 || skipped[0] != "link.txt" {
+		t.Fatalf("the ignored symlink must be reported, got %v", skipped)
+	}
+}
+
+func TestLocalScanKeepsSkippedSymlinksAcrossIncrementalPasses(t *testing.T) {
+	cfg, _, root := setupTest(t)
+	writeLocal(t, root, "a.txt", "a")
+	link := filepath.Join(root, "link.txt")
+	if err := os.Symlink(filepath.Join(root, "a.txt"), link); err != nil {
+		t.Fatal(err)
+	}
+	_, snapshot, _, err := localScan(cfg, map[string]state.Identity{}, nil, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snapshot.Skipped) != 1 || snapshot.Skipped[0] != "link.txt" {
+		t.Fatalf("full scan must report the symlink, got %v", snapshot.Skipped)
+	}
+	// A pass that does not touch the link must still report it.
+	writeLocal(t, root, "b.txt", "b")
+	_, incremental, mode, err := localScan(cfg, map[string]state.Identity{},
+		&ScanScope{Previous: snapshot, Dirty: []string{"b.txt"}}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mode == "completa" {
+		t.Fatal("expected an incremental scan")
+	}
+	if len(incremental.Skipped) != 1 || incremental.Skipped[0] != "link.txt" {
+		t.Fatalf("incremental scan must keep the ignored symlink, got %v", incremental.Skipped)
+	}
+	// Removing it must drop the entry instead of keeping a stale path.
+	if err := os.Remove(link); err != nil {
+		t.Fatal(err)
+	}
+	_, after, _, err := localScan(cfg, map[string]state.Identity{},
+		&ScanScope{Previous: incremental, Dirty: []string{"link.txt"}}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(after.Skipped) != 0 {
+		t.Fatalf("a removed symlink must not stay in the snapshot, got %v", after.Skipped)
 	}
 }
 

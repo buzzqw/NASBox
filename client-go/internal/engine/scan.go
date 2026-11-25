@@ -20,6 +20,11 @@ type LocalSnapshot struct {
 	files    map[string]localFile
 	FullAt   time.Time // last complete walk
 	Complete bool
+	// Skipped lists the non-regular local entries (symlinks, fifos, sockets)
+	// the scan ignored. Like the Python client they are never uploaded and
+	// never reported as deletions; the Runner logs them once so a missing
+	// file cannot disappear silently.
+	Skipped []string
 }
 
 // ScanScope tells a pass how to obtain the local state.
@@ -42,6 +47,7 @@ func (s *LocalSnapshot) clone() map[string]localFile {
 // folders are rescanned as subtrees, files are fingerprinted again.
 func scanIncremental(
 	cfg *config.Config, identities map[string]state.Identity, previous *LocalSnapshot, dirty []string,
+	skipped *[]string,
 ) (map[string]localFile, error) {
 	root := cfg.LocalRoot()
 	files := previous.clone()
@@ -62,13 +68,17 @@ func scanIncremental(
 			return nil, fmt.Errorf("stat locale non riuscito per %s: %w", rel, err)
 		}
 		if info.IsDir() {
-			if err := scanTree(cfg, identities, rel, files); err != nil {
+			if err := scanTree(cfg, identities, rel, files, skipped); err != nil {
 				return nil, err
 			}
 			continue
 		}
 		if !info.Mode().IsRegular() {
-			return nil, fmt.Errorf("percorso locale non regolare, sync interrotto: %s", rel)
+			// Symlinks and special files are ignored, never fatal.
+			if skipped != nil {
+				*skipped = append(*skipped, rel)
+			}
+			continue
 		}
 		file, err := scanFile(filepath.Join(root, filepath.FromSlash(rel)), rel, info, identities)
 		if err != nil {
@@ -77,6 +87,29 @@ func scanIncremental(
 		files[rel] = file
 	}
 	return files, nil
+}
+
+// carrySkipped keeps the previous pass's ignored entries that are not under a
+// rescanned path, so an incremental pass reports the same set as a full walk.
+func carrySkipped(previous *LocalSnapshot, dirty []string) []string {
+	if previous == nil || len(previous.Skipped) == 0 {
+		return nil
+	}
+	kept := make([]string, 0, len(previous.Skipped))
+	for _, rel := range previous.Skipped {
+		dropped := false
+		for _, raw := range dirty {
+			parent := strings.Trim(path.Clean("/"+filepath.ToSlash(raw)), "/")
+			if parent == "" || rel == parent || strings.HasPrefix(rel, parent+"/") {
+				dropped = true
+				break
+			}
+		}
+		if !dropped {
+			kept = append(kept, rel)
+		}
+	}
+	return kept
 }
 
 func removeTree(files map[string]localFile, rel string) {
@@ -124,15 +157,21 @@ func localScan(
 	entries map[string]state.EntryState, manifest map[string]classify.RemoteState,
 ) (map[string]localFile, *LocalSnapshot, string, error) {
 	if scope != nil && !scope.Full && scope.Previous != nil && scope.Previous.Complete {
-		files, err := scanIncremental(cfg, identities, scope.Previous, scope.Dirty)
+		skipped := carrySkipped(scope.Previous, scope.Dirty)
+		files, err := scanIncremental(cfg, identities, scope.Previous, scope.Dirty, &skipped)
 		if err == nil && incrementalConsistent(cfg, files, entries, manifest) {
-			return files, &LocalSnapshot{files: files, FullAt: scope.Previous.FullAt, Complete: true},
+			return files, &LocalSnapshot{
+					files: files, FullAt: scope.Previous.FullAt, Complete: true, Skipped: skipped,
+				},
 				fmt.Sprintf("incrementale(%d)", len(scope.Dirty)), nil
 		}
 	}
-	files, err := scanLocal(cfg, identities)
+	skipped := make([]string, 0)
+	files, err := scanLocal(cfg, identities, &skipped)
 	if err != nil {
 		return nil, nil, "completa", err
 	}
-	return files, &LocalSnapshot{files: files, FullAt: time.Now(), Complete: true}, "completa", nil
+	return files, &LocalSnapshot{
+		files: files, FullAt: time.Now(), Complete: true, Skipped: skipped,
+	}, "completa", nil
 }

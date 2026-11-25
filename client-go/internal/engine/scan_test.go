@@ -51,7 +51,7 @@ func TestIncrementalScanEqualsFullScan(t *testing.T) {
 	if mode == "completa" {
 		t.Fatal("expected an incremental scan")
 	}
-	full, err := scanLocal(cfg, identities)
+	full, err := scanLocal(cfg, identities, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

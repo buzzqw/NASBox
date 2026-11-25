@@ -63,6 +63,7 @@ type Runner struct {
 	manifestRevision int
 	storm            *conflicts.StormTracker
 	logger           *diagnostics.Logger
+	skippedReported  map[string]bool
 }
 
 func NewRunner(
@@ -76,6 +77,7 @@ func NewRunner(
 		activity: make(chan struct{}, 1), lastActivity: time.Now(),
 		transferCtx: ctx, cancelTransfer: cancel,
 		manifestRevision: -1,
+		skippedReported:  map[string]bool{},
 		storm: conflicts.NewStormTracker(conflicts.StormConfig{
 			ConflictStormLimit:         cfg.Int("conflict_storm_limit"),
 			ConflictStormWindowSeconds: cfg.Int("conflict_storm_window_seconds"),
@@ -226,6 +228,38 @@ func (r *Runner) excluded(relative string) bool {
 	return excluded(r.cfg, relative)
 }
 
+// reportSkipped logs each non-regular local entry (symlink, fifo, socket) that
+// the scan ignored, once per path. The Python client logged them as
+// UNSUPPORTED: skipping is correct, but a file that silently never syncs must
+// at least leave a trace. Repeats are suppressed because the pass runs often.
+func (r *Runner) reportSkipped(snapshot *LocalSnapshot) {
+	if r.logger == nil || snapshot == nil || len(snapshot.Skipped) == 0 {
+		return
+	}
+	const limit = 50
+	fresh := make([]string, 0, len(snapshot.Skipped))
+	r.mu.Lock()
+	if r.skippedReported == nil {
+		r.skippedReported = map[string]bool{}
+	}
+	for _, rel := range snapshot.Skipped {
+		if r.skippedReported[rel] {
+			continue
+		}
+		r.skippedReported[rel] = true
+		fresh = append(fresh, rel)
+	}
+	r.mu.Unlock()
+	for index, rel := range fresh {
+		if index == limit {
+			_ = r.logger.Log("UNSUPPORTED", "-",
+				fmt.Sprintf("%d percorsi non regolari ignorati", len(fresh)-limit))
+			break
+		}
+		_ = r.logger.Log("UNSUPPORTED", rel, "link simbolico o file speciale ignorato")
+	}
+}
+
 // Run blocks until ctx is cancelled. Filesystem events and the periodic timer
 // wake the same singleflight-ish loop; only one sync runs at a time.
 func (r *Runner) Run(ctx context.Context) error {
@@ -348,6 +382,7 @@ func (r *Runner) Run(ctx context.Context) error {
 			r.handleFailure(err)
 			continue
 		}
+		r.reportSkipped(result.Local)
 		if r.logger != nil && len(result.Timings) > 0 {
 			_ = r.logger.Event("PERF", "-", "sync: "+strings.Join(result.Timings, ", "))
 		}

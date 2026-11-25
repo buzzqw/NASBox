@@ -628,14 +628,17 @@ func guardMessage(cfg *config.Config, report classify.Report) string {
 	return ""
 }
 
-func scanLocal(cfg *config.Config, identities map[string]state.Identity) (map[string]localFile, error) {
+func scanLocal(cfg *config.Config, identities map[string]state.Identity, skipped *[]string) (map[string]localFile, error) {
 	result := make(map[string]localFile)
-	return result, scanTree(cfg, identities, "", result)
+	return result, scanTree(cfg, identities, "", result, skipped)
 }
 
 // scanTree walks the subtree at rel ("" = whole repository) into result,
-// with the same fail-closed rules as a full scan.
-func scanTree(cfg *config.Config, identities map[string]state.Identity, start string, result map[string]localFile) error {
+// with the same fail-closed rules as a full scan for regular files.
+func scanTree(
+	cfg *config.Config, identities map[string]state.Identity, start string,
+	result map[string]localFile, skipped *[]string,
+) error {
 	root := cfg.LocalRoot()
 	base := root
 	if start != "" {
@@ -663,7 +666,13 @@ func scanTree(cfg *config.Config, identities map[string]state.Identity, start st
 			return nil
 		}
 		if !entry.Type().IsRegular() {
-			return fmt.Errorf("percorso locale non regolare, sync interrotto: %s", rel)
+			// Symlinks, fifos and sockets are ignored like the Python client
+			// does: they are never uploaded (WalkDir does not follow links,
+			// so the tree stays safe) and skipping them is not an error.
+			if skipped != nil {
+				*skipped = append(*skipped, rel)
+			}
+			return nil
 		}
 		info, err := entry.Info()
 		if err != nil {
