@@ -77,6 +77,12 @@ type nasStateReader interface {
 	FileStatesCurrent(paths []string) (map[string]remote.FileState, error)
 }
 
+// nasNameChecker answers "which of these names already exist on the NAS?"
+// without hashing anything (see remote.Client.ExistingPaths).
+type nasNameChecker interface {
+	ExistingPaths(paths []string) (map[string]bool, error)
+}
+
 // deleteChunk is how many files one CheckedDelete request carries and
 // deletionBudget how long a pass keeps deleting before it yields.
 const (
@@ -536,9 +542,25 @@ func syncPass(
 			// the whole pass every time: identical files are adopted into the
 			// journal without a transfer, different ones are replaced under
 			// the NAS lease with the current NAS version as precondition.
-			states, err := reader.FileStatesCurrent(created)
-			if err != nil {
-				return result, err
+			candidates := created
+			if checker, ok := client.(nasNameChecker); ok {
+				taken, err := checker.ExistingPaths(created)
+				if err != nil {
+					return result, err
+				}
+				candidates = candidates[:0:0]
+				for _, path := range created {
+					if taken[path] {
+						candidates = append(candidates, path)
+					}
+				}
+			}
+			states := map[string]remote.FileState{}
+			if len(candidates) > 0 {
+				var err error
+				if states, err = reader.FileStatesCurrent(candidates); err != nil {
+					return result, err
+				}
 			}
 			keptCreated := created[:0:0]
 			keptFiles := files[:0:0]
@@ -1009,21 +1031,36 @@ func applyRemoteDeletions(
 // a move ("esiste gia un percorso") and the refusal used to abort every pass.
 // The vanished source then goes through the normal deletion safeguards.
 func dropRenamesOntoExistingFiles(client ConfigSource, report classify.Report) classify.Report {
-	reader, ok := client.(nasStateReader)
-	if !ok || len(report.Renames) == 0 {
+	if len(report.Renames) == 0 {
 		return report
 	}
 	targets := make([]string, 0, len(report.Renames))
 	for _, rename := range report.Renames {
 		targets = append(targets, rename.Local)
 	}
-	states, err := reader.FileStatesCurrent(targets)
-	if err != nil {
-		return report // keep the plan; a real NAS problem surfaces on the rename itself
+	taken := map[string]bool{}
+	if checker, ok := client.(nasNameChecker); ok {
+		found, err := checker.ExistingPaths(targets)
+		if err != nil {
+			return report // keep the plan; a real NAS problem surfaces on the rename itself
+		}
+		taken = found
+	} else if reader, ok := client.(nasStateReader); ok {
+		states, err := reader.FileStatesCurrent(targets)
+		if err != nil {
+			return report
+		}
+		for path, state := range states {
+			if state.Kind == "FILE" {
+				taken[path] = true
+			}
+		}
+	} else {
+		return report
 	}
 	kept := report.Renames[:0:0]
 	for _, rename := range report.Renames {
-		if state, exists := states[rename.Local]; exists && state.Kind == "FILE" {
+		if taken[rename.Local] {
 			report.Unexplained = append(report.Unexplained, rename.Missing)
 			continue
 		}

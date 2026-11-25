@@ -360,3 +360,46 @@ func TestReportAdvancedRows(t *testing.T) {
 		}
 	}
 }
+
+// TestRealStateMinSize measures the window minimum with the real event
+// history of this machine (set NASBOX_REAL_STATE=<dir with events.jsonl>).
+func TestRealStateMinSize(t *testing.T) {
+	dir := os.Getenv("NASBOX_REAL_STATE")
+	if dir == "" {
+		t.Skip()
+	}
+	i18n.Language = "it"
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	logger, err := diagnostics.OpenDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.New("")
+	cfg.Set("local_root", t.TempDir(), false)
+	store, _ := state.Open(cfg)
+	t.Cleanup(func() { _ = store.Close() })
+	client := remote.New(cfg)
+	a := test.NewTempApp(t)
+	window := test.NewWindow(nil)
+	window.Resize(fyne.NewSize(1180, 800))
+	c := &clientApp{
+		cfg: cfg, store: store, client: client, transfers: transfer.New(cfg, client), logger: logger,
+		runner:  engine.NewRunner(cfg, store, client, transfer.New(cfg, client)),
+		fyneApp: a, window: window, uiTheme: newNAStheme(theme.VariantLight), level: statusOK,
+	}
+	c.setHint = c.setHintText
+	a.Settings().SetTheme(c.uiTheme)
+	c.bannerGo = func() {}
+	window.SetContent(c.buildRoot())
+	c.seedRecent()
+	c.reloadLog()
+	c.applyStatusUI(statusAttention, "ssh: exit status 1: il NAS ha rifiutato lo spostamento SADE/SADE/images/spidvodo.png → LoreKeep/lorekeep/ui/monster/spidvodo.png: esiste gia un percorso con questo nome")
+	for name, view := range map[string]sectionID{"status": sectionStatus, "activity": sectionActivity} {
+		t.Logf("%-9s min: %v", name, c.views[view].MinSize())
+	}
+	for _, item := range c.activityTabs.Items {
+		t.Logf("  activity tab %s min: %v", item.Text, item.Content.MinSize())
+	}
+	t.Logf("recent=%d logRows=%d", len(c.recent), len(c.logRows))
+}

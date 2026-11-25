@@ -155,6 +155,9 @@ func (c *clientApp) setTransferCardVisible(visible bool) {
 func (c *clientApp) kpiTile(icon fyne.Resource, caption, tip string, onTap func()) (*widget.Label, fyne.CanvasObject) {
 	number := widget.NewLabelWithStyle("—", fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
 	number.SizeName = theme.SizeNameSubHeadingText
+	// A long value ("Nessun audit eseguito") must not widen the tile: four
+	// tiles share one row and the page minimum is four times the widest.
+	number.Truncation = fyne.TextTruncateEllipsis
 	label := widget.NewLabel(caption)
 	label.Importance = widget.LowImportance
 	label.Truncation = fyne.TextTruncateEllipsis

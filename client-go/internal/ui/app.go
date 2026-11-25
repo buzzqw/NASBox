@@ -366,6 +366,7 @@ func startClient(
 	go c.refreshMonitor()
 	c.appendLog(tr("main_window.brand_tagline", nil) + " — " + version.AppVersion)
 	go c.seedRecent()
+	c.debugMinSize()
 	go c.tickRelativeTimes(ctx)
 	go c.autoUpdateLoop(ctx)
 	stopIPC := c.startDesktopIntegration()
@@ -1226,7 +1227,7 @@ func (c *clientApp) consumeEvents() {
 func (c *clientApp) refreshStats() {
 	tracked := c.store.EntryCount(c.cfg.LocalRepositoryID())
 	undo := c.store.UndoCount(c.cfg.LocalRepositoryID(), 24)
-	audit := tr("audit.never", nil)
+	audit := lt("Mai eseguito", "Never run")
 	if reports := integrity.Load(); len(reports) > 0 {
 		last := reports[len(reports)-1]
 		audit = formatCount(len(last.Differences))

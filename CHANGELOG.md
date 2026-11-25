@@ -4,6 +4,23 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 1.4.1 - 2026-11-25
+
+Client Go:
+
+- **Controllo dei nomi già presenti sul NAS senza calcolare hash.** Per capire
+  se un rename ha come destinazione un file esistente il client faceva
+  calcolare lo SHA-256 di migliaia di file al NAS (minuti, con il lock
+  tenuto). Ora basta un controllo di esistenza (secondi); l'hash serve solo
+  per i file effettivamente già presenti.
+- **Finestra davvero meno larga.** Sul PC reale la pagina Stato imponeva circa
+  1300 px di larghezza minima (il testo "Audit completo: mai eseguito" nella
+  tessera dell'audit, ripetuto su quattro tessere uguali): la finestra si
+  allargava a 1634 px. Ora il valore è breve e troncato, e la larghezza minima
+  della Stato è circa 570 px. Strumento di diagnostica: build con
+  `-tags debugsize` e `NASBOX_UI_DEBUG_MINSIZE=1` stampa la catena di widget
+  che impone la larghezza minima.
+
 ## 1.4.0 - 2026-11-25
 
 Client Go, "come Dropbox": un file non ferma più gli altri.

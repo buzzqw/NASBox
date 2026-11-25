@@ -177,3 +177,35 @@ func parseDirSizes(output string) map[string]int64 {
 	}
 	return sizes
 }
+
+// ExistingPaths reports which of paths exist on the NAS (file, folder or
+// anything else) without hashing them. It is the cheap question "is this name
+// already taken?": FileStatesCurrent reads every file to digest it, which on a
+// small NAS turns a check of a few thousand names into minutes under the lease.
+// Paths containing a newline cannot be reported reliably and are left out.
+func (c *Client) ExistingPaths(paths []string) (map[string]bool, error) {
+	existing := make(map[string]bool, len(paths))
+	if len(paths) == 0 {
+		return existing, nil
+	}
+	var payload []byte
+	for _, path := range paths {
+		if strings.ContainsAny(path, "\n\x00") {
+			continue
+		}
+		payload = append(payload, path...)
+		payload = append(payload, 0)
+	}
+	prefix := strings.TrimSuffix(c.cfg.RemotePrefix(), "/")
+	output, err := c.Run([]string{"sh", "-c", `cd "$1" && xargs -0 -r stat -c %n -- 2>/dev/null; true`, "sh", prefix},
+		payload, 5*time.Minute)
+	if err != nil {
+		return nil, err
+	}
+	for _, line := range strings.Split(string(output), "\n") {
+		if line != "" {
+			existing[line] = true
+		}
+	}
+	return existing, nil
+}
