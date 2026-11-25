@@ -33,7 +33,7 @@
 #
 set -uo pipefail
 
-VERSION="3.32.0"
+VERSION="3.32.1"
 SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -1794,15 +1794,20 @@ prune_empty_dirs_unlocked() {
 # Adoption moves no bytes: it only writes the transaction that should have
 # happened when the file arrived.
 audit_path_ignored() {
-    local rel="$1" base
-    case "$rel" in
-        "$TRASH_DIRNAME"/*|"$STAGING_DIRNAME"/*|.nasbox-client-update/*|.nasbox-client-update-go/*)
-            return 0 ;;
-        "@eaDir"/*|*/@eaDir/*|.sync-partial/*|*/.sync-partial/*)
-            return 0 ;;
-        "$REPOSITORY_MARKER_NAME")
-            return 0 ;;
-    esac
+    local rel="$1" base part
+    local IFS=/
+    # Any component, at any depth: a nested ".sync-trash" (a history folder that
+    # was itself synced once) is exactly as internal as one at the root, and the
+    # clients refuse such paths -- journaling them breaks every client's export,
+    # not just this file.
+    for part in $rel; do
+        case "$part" in
+            "$TRASH_DIRNAME"|"$STAGING_DIRNAME"|.sync-partial|.nasbox-client-update| \
+            .nasbox-client-update-go|@eaDir|"$REPOSITORY_MARKER_NAME")
+                return 0 ;;
+        esac
+    done
+    unset IFS
     # rsync stages new content in ".<name>.<6 random chars>" next to the target;
     # adopting one of those would journal bytes that are about to vanish.
     base="${rel##*/}"
@@ -1840,6 +1845,40 @@ audit_orphan_encoded_list() {
     # equals FNR on the first line of the second file and that line was lost.
     awk 'FILENAME == ARGV[1] { live[$0] = 1; next } !($0 in live) { print }' \
         "$encoded_live" "$encoded_disk" > "$orphans"
+    return 0
+}
+
+# Tombstone rows the manifest should never have held (a path a client refuses,
+# a folder that is history and not repository content). Only the journal is
+# written: nothing on disk moves, so a version in .sync-trash is untouched.
+cmd_journal_forget() {
+    local tmpdir records count=0 path run_ts txid
+    tmpdir=$(mktemp -d "${STATE_DIR}/.journal-forget.XXXXXX") || return 1
+    records="$tmpdir/paths"
+    : > "$records" || { rm -rf "$tmpdir"; return 1; }
+    while IFS= read -r -d '' path; do
+        valid_sync_relative_path "$path" || continue
+        printf '%s\0' "$path" >> "$records" || { rm -rf "$tmpdir"; return 1; }
+        (( count++ ))
+    done
+    if (( count == 0 )); then
+        rm -rf "$tmpdir"
+        printf 'FORGOTTEN=0\n'
+        return 0
+    fi
+    run_ts=$(date -u '+%Y-%m-%d--%H-%M-%S-000000Z')
+    txid="journal-forget-${run_ts}-$$"
+    exec 9>>"$JOURNAL_LOCK_FILE"
+    flock -x 9 || { exec 9>&-; rm -rf "$tmpdir"; return 1; }
+    ensure_journal_files
+    if ! append_delete_journal_batch_unlocked "$records" "maintenance" "$txid"; then
+        flock -u 9; exec 9>&-; rm -rf "$tmpdir"
+        printf 'FORGOTTEN=0\nERROR=journal non aggiornato\n'
+        return 1
+    fi
+    flock -u 9; exec 9>&-
+    rm -rf "$tmpdir"
+    printf 'FORGOTTEN=%s\n' "$count"
     return 0
 }
 
@@ -3887,6 +3926,7 @@ Uso:
   $(basename "$0") --capabilities              Cosa sa fare questo NAS (KEY=VALUE)
   $(basename "$0") --audit-orphans [--list]    File sul disco senza riga nel manifest
   $(basename "$0") --audit-adopt [--dry-run]   Registra nel journal quei file (digest reali)
+  $(basename "$0") --journal-forget            Mette a tombstone percorsi (input NUL, disco intatto)
   $(basename "$0") --init-repository           Crea il marker persistente del repository
   $(basename "$0") --journal-append             Registra una transazione (input NUL)
   $(basename "$0") --journal-compact            Compatta il journal nel manifest
@@ -3947,6 +3987,7 @@ while [[ $# -gt 0 ]]; do
         --capabilities) ACTION="capabilities" ;;
         --audit-orphans) ACTION="audit_orphans" ;;
         --audit-adopt) ACTION="audit_adopt" ;;
+        --journal-forget) ACTION="journal_forget" ;;
         --list) AUDIT_LIST="--list" ;;
         --transfer-wait) ACTION="transfer_wait" ;;
         -c|--config) shift; CONFIG_FILE="${1:?}" ;;
@@ -4011,5 +4052,6 @@ case "$ACTION" in
     capabilities) cmd_capabilities; exit $? ;;
     audit_orphans) cmd_audit_orphans "${AUDIT_LIST:-}"; exit $? ;;
     audit_adopt) cmd_audit_adopt; exit $? ;;
+    journal_forget) cmd_journal_forget; exit $? ;;
     transfer_wait) cmd_transfer_wait; exit $? ;;
 esac

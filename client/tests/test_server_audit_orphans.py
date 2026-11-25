@@ -103,3 +103,50 @@ class AuditOrphansTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class NestedInternalFolderTests(unittest.TestCase):
+    """A history folder that was itself synced once (nested .sync-trash) is as
+    internal as one at the root. Adopting those paths breaks every client's
+    manifest export, so the audit must skip them at any depth -- and the journal
+    must be able to forget a row it should never have held."""
+
+    def test_nested_trash_and_staging_are_never_adopted(self) -> None:
+        with ServerSandbox() as sandbox:
+            sandbox.init_repository()
+            self.assertEqual(sandbox.run("--manifest-export").returncode, 0)
+            _put(sandbox, "RPG/.sync-trash/mappe/vecchia.jpg-2026-08-06", b"storico annidato")
+            _put(sandbox, "progetto/.nasbox-staging/x/y.bin", b"staging annidato")
+            _put(sandbox, "progetto/.sync-partial/temp.part", b"parziale")
+            _put(sandbox, "progetto/vero.txt", b"contenuto")
+
+            listed = sandbox.run("--audit-orphans", "--list")
+            parts = listed.stdout.split(b"\0")
+            self.assertEqual(_values(parts[0].decode())["COUNT"], "1")
+            self.assertEqual([p.decode() for p in parts[1:] if p], ["progetto/vero.txt"])
+
+    def test_journal_forget_tombstones_without_touching_the_disk(self) -> None:
+        with ServerSandbox() as sandbox:
+            sandbox.init_repository()
+            self.assertEqual(sandbox.run("--manifest-export").returncode, 0)
+            _put(sandbox, "progetto/da-dimenticare.txt", b"contenuto")
+            self.assertEqual(
+                _values(sandbox.run("--audit-adopt").stdout.decode())["ADOPTED"], "1"
+            )
+            self.assertIn("progetto/da-dimenticare.txt", sandbox.run("--manifest-export").stdout.decode())
+
+            done = sandbox.run("--journal-forget", input=b"progetto/da-dimenticare.txt\0")
+            self.assertEqual(done.returncode, 0, done.stderr.decode())
+            self.assertEqual(_values(done.stdout.decode())["FORGOTTEN"], "1")
+
+            manifest = sandbox.run("--manifest-export").stdout.decode()
+            rows = [
+                line for line in manifest.splitlines()
+                if line.startswith("progetto/da-dimenticare.txt\t")
+            ]
+            self.assertEqual(len(rows), 1)
+            # Still listed, but as a tombstone (empty digest): no client will
+            # treat the path as a live file any more.
+            self.assertEqual(rows[0].split("\t")[1], "")
+            # The bytes are still there: forgetting a row is not a deletion.
+            self.assertTrue((sandbox.share / "progetto" / "da-dimenticare.txt").exists())

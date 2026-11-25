@@ -4,6 +4,20 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 3.32.1 - 2026-11-25
+
+Server:
+
+- **Le cartelle interne vengono riconosciute a qualsiasi profondità.** Il primo
+  giro di `--audit-adopt` ha registrato 3 file dentro `RPG/.sync-trash/…` (una
+  cartella di storico che era stata sincronizzata a suo tempo): quei percorsi
+  sono interni per i client, che rifiutano il manifest per intero. Ora
+  `.sync-trash`, `.nasbox-staging`, `.sync-partial`, `@eaDir` e i canali di
+  update sono esclusi come *componente* del percorso, non solo alla radice.
+- Nuovo `--journal-forget` (input NUL): mette a tombstone percorsi che il
+  manifest non dovrebbe contenere, senza toccare il disco. Usato per riparare i
+  3 percorsi adottati per errore.
+
 ## 3.32.0 - 2026-11-25
 
 Server:
