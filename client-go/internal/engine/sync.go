@@ -117,6 +117,9 @@ type SyncResult struct {
 	// LocalDeleted counts files removed locally because another PC deleted
 	// them (moved to the local trash, always recoverable).
 	LocalDeleted int
+	// LocalRenamed counts files another PC renamed on the NAS that were moved
+	// locally instead of downloaded again.
+	LocalRenamed int
 	// Local is the local snapshot of this pass (for the next incremental
 	// scan); nil when the scan failed.
 	Local *LocalSnapshot
@@ -712,6 +715,29 @@ func syncPass(
 			if err != nil {
 				return result, unwrapFatal(err)
 			}
+		}
+	}
+	if len(downloads) > 0 && len(localDeletes) > 0 {
+		// A rename made on another PC arrives as DELETE old + PUT new. When the
+		// bytes are already here under the old name, move the file instead of
+		// transferring a second identical copy: a folder of 2.000 files renamed
+		// on one PC is 2.000 local renames here, not a full download.
+		moves, keptDownloads, keptDeletes := planPullRenames(downloads, localDeletes, local, manifest)
+		if len(moves) > 0 {
+			applied, failed, err := applyPullRenames(cfg, store, local, manifest, moves)
+			if err != nil {
+				return result, err
+			}
+			result.LocalRenamed = applied
+			downloads = keptDownloads
+			localDeletes = keptDeletes
+			// A move that did not happen after all still needs the transfer, and
+			// its old name still has to go: put both back as they were.
+			for _, move := range failed {
+				downloads = append(downloads, move.Dst)
+				localDeletes = append(localDeletes, move.Src)
+			}
+			sort.Strings(downloads)
 		}
 	}
 	if len(downloads) > 0 {

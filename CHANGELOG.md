@@ -4,6 +4,35 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 3.29.0 - 2026-11-25
+
+Server:
+
+- **Le cartelle rimaste vuote non restano più sul NAS.** Cancellare una
+  cartella da un PC svuotava i file ma lasciava le cartelle nella share (i
+  client non creano mai directory sul NAS: esistono solo come genitori di un
+  file). Ora dopo una cancellazione riuscita, e dopo una cancellazione dal
+  browser (`--browse-delete`), i genitori rimasti vuoti vengono rimossi
+  risalendo la gerarchia: `rmdir` non tocca una cartella che contiene ancora
+  qualcosa, quindi un trasferimento in corso o un file di un altro PC restano
+  al loro posto, e cestino e staging sono esclusi.
+
+## 1.9.0 - 2026-11-25
+
+Client Go, logica di sincronizzazione:
+
+- **Una rinomina fatta su un altro PC non si riscarica più.** Il journal arriva
+  come `DELETE vecchio` + `PUT nuovo`; quando digest e dimensione coincidono con
+  un file presente in locale sotto il vecchio nome, il pull lo sposta con un
+  rename locale invece di scaricare di nuovo gli stessi byte. Vale per cartelle
+  intere (una cartella da 2.000 file rinominata altrove = 2.000 rename locali,
+  zero trasferimenti) e per i file singoli. Se qualcosa non torna — byte
+  diversi, file modificato dopo la scansione, destinazione già occupata — resta
+  il percorso normale di download e cancellazione, quindi non si perde nulla.
+- La cartella vecchia non resta più come guscio vuoto nemmeno sul PC che segue
+  una rinomina, e il riepilogo del comando `sync` riporta gli spostamenti
+  applicati in locale (`rinominati in locale N`).
+
 ## 3.28.0 - 2026-11-25
 
 Server:

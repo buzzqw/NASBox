@@ -607,6 +607,9 @@ func TestE2EFolderRenameIsOneRequestAndKeepsBytes(t *testing.T) {
 	if got := readOrEmpty(filepath.Join(b.local, "Progetto 2026", "sub", "f3.txt")); got != "contenuto 3" {
 		t.Fatalf("B non ha seguito la rinomina: %q\n%s", got, out)
 	}
+	if strings.Contains(out, "↓ Progetto 2026") {
+		t.Fatalf("B ha riscaricato la cartella rinominata invece di spostarla in locale:\n%s", out)
+	}
 	if _, err := os.Stat(filepath.Join(b.local, "Progetto")); !os.IsNotExist(err) {
 		t.Fatalf("su B la vecchia cartella è rimasta\n%s", out)
 	}

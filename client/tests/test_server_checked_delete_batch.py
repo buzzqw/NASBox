@@ -115,5 +115,67 @@ class CheckedDeleteBatchTests(unittest.TestCase):
                 self.assertEqual(text.count(f"DELETE\tcrash{i}.txt\t"), 1)
 
 
+class EmptyDirectoryCleanupTests(unittest.TestCase):
+    """A folder removed on a PC used to leave its empty shell on the NAS. Clients
+    never create directories there: a directory only exists as the parent of a
+    file, so once its last file is gone the folder is an artifact of the deletion.
+    """
+
+    def test_deleting_every_file_removes_the_empty_folders(self) -> None:
+        with ServerSandbox() as sandbox:
+            sandbox.init_repository()
+            self.assertEqual(sandbox.run("--manifest-export").returncode, 0)
+            items = [
+                _make(sandbox, "docs/2026/a.txt", b"a"),
+                _make(sandbox, "docs/2026/sub/b.txt", b"b"),
+            ]
+            _make(sandbox, "keep/altro.txt", b"keep")
+
+            done = sandbox.run_with_lease("--checked-delete", input=_payload(items))
+            self.assertEqual(done.returncode, 0, done.stderr.decode())
+            self.assertEqual(set(_statuses(done.stdout).values()), {"DELETED"})
+            self.assertFalse((sandbox.share / "docs").exists())
+            # What belongs to someone else is untouched, and the versions stay.
+            self.assertTrue((sandbox.share / "keep" / "altro.txt").exists())
+            self.assertTrue((sandbox.share / ".sync-trash" / "docs" / "2026" / f"a.txt-{RUN_TS}").exists())
+            self.assertTrue((sandbox.share / ".sync-trash" / "docs" / "2026" / "sub" / f"b.txt-{RUN_TS}").exists())
+
+    def test_a_folder_with_remaining_files_stays(self) -> None:
+        with ServerSandbox() as sandbox:
+            sandbox.init_repository()
+            self.assertEqual(sandbox.run("--manifest-export").returncode, 0)
+            gone = _make(sandbox, "misto/uno.txt", b"uno")
+            _make(sandbox, "misto/due.txt", b"due")
+
+            done = sandbox.run_with_lease("--checked-delete", input=_payload([gone]))
+            self.assertEqual(done.returncode, 0, done.stderr.decode())
+            self.assertTrue((sandbox.share / "misto" / "due.txt").exists())
+            self.assertFalse((sandbox.share / "misto" / "uno.txt").exists())
+
+    def test_a_file_at_the_share_root_does_not_touch_it(self) -> None:
+        with ServerSandbox() as sandbox:
+            sandbox.init_repository()
+            self.assertEqual(sandbox.run("--manifest-export").returncode, 0)
+            item = _make(sandbox, "radice.txt", b"radice")
+
+            done = sandbox.run_with_lease("--checked-delete", input=_payload([item]))
+            self.assertEqual(done.returncode, 0, done.stderr.decode())
+            self.assertEqual(_statuses(done.stdout)["radice.txt"], "DELETED")
+            self.assertTrue(sandbox.share.is_dir())
+            self.assertTrue((sandbox.share / ".sync-trash").is_dir())
+
+    def test_an_already_absent_file_also_clears_its_empty_folder(self) -> None:
+        with ServerSandbox() as sandbox:
+            sandbox.init_repository()
+            self.assertEqual(sandbox.run("--manifest-export").returncode, 0)
+            item = _make(sandbox, "resti/interno/a.txt", b"a")
+            (sandbox.share / "resti" / "interno" / "a.txt").unlink()
+
+            done = sandbox.run_with_lease("--checked-delete", input=_payload([item]))
+            self.assertEqual(done.returncode, 0, done.stderr.decode())
+            self.assertEqual(_statuses(done.stdout)["resti/interno/a.txt"], "ABSENT")
+            self.assertFalse((sandbox.share / "resti").exists())
+
+
 if __name__ == "__main__":
     unittest.main()

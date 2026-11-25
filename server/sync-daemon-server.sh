@@ -33,7 +33,7 @@
 #
 set -uo pipefail
 
-VERSION="3.28.0"
+VERSION="3.29.0"
 SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -1597,6 +1597,30 @@ cmd_staging_publish() {
     exec 9>&-
 }
 
+# Folders left empty by a mutation go too. Clients never create directories on
+# the NAS: a directory only exists there as the parent of a file, so an empty one
+# is what a deletion left behind (a folder removed on a PC used to leave its
+# shell in the share). rmdir refuses a folder that still holds anything -- also
+# one another PC just filled -- and every caller already holds the NAS lease, so
+# this cannot race a transfer. Ascending stops at the first folder that is not
+# empty, and never enters the trash or the staging tree.
+prune_empty_dirs_unlocked() {
+    local path dir
+    for path in "$@"; do
+        [[ "$path" == */* ]] || continue
+        dir="${path%/*}"
+        while [[ -n "$dir" ]]; do
+            case "$dir" in
+                .|"$TRASH_DIRNAME"|"$TRASH_DIRNAME"/*|"$STAGING_DIRNAME"|"$STAGING_DIRNAME"/*) break ;;
+            esac
+            rmdir "$SHARE_ROOT/$dir" 2>/dev/null || break
+            [[ "$dir" == */* ]] || break
+            dir="${dir%/*}"
+        done
+    done
+    return 0
+}
+
 cmd_checked_delete() {
     command -v sha256sum >/dev/null 2>&1 || {
         echo "checked-delete: sha256sum non disponibile" >&2
@@ -1639,6 +1663,7 @@ cmd_checked_delete() {
     # transaction record, and a crash before the journal commit is recovered per
     # file by recover_pending_transactions_unlocked, exactly as before.
     local -a status_of=() backup_of=() txfile_of=()
+    local -a emptied=()
     local batch_paths batch_txid last_backup_dir=""
     batch_paths="$TRANSACTION_DIR/checked-delete-batch-${run_ts}-$$-${RANDOM}.paths"
     mkdir -p "$TRANSACTION_DIR" || { flock -u 9; exec 9>&-; return 1; }
@@ -1695,8 +1720,12 @@ cmd_checked_delete() {
             test_failpoint "checked_delete_after_journal"
             for ((index = 0; index < count; index++)); do
                 case "${status_of[index]:-}" in
-                    DELETED_PENDING) rm -f "${txfile_of[index]}"; status_of[index]=DELETED ;;
-                    ABSENT_PENDING) status_of[index]=ABSENT ;;
+                    DELETED_PENDING)
+                        rm -f "${txfile_of[index]}"; status_of[index]=DELETED
+                        emptied+=("${paths[index]}") ;;
+                    ABSENT_PENDING)
+                        status_of[index]=ABSENT
+                        emptied+=("${paths[index]}") ;;
                 esac
             done
         else
@@ -1714,6 +1743,9 @@ cmd_checked_delete() {
         fi
     fi
     rm -f "$batch_paths"
+    if [[ "${#emptied[@]}" -gt 0 ]]; then
+        prune_empty_dirs_unlocked "${emptied[@]}"
+    fi
     printf 'CHECKED_DELETE_V1\0%s\0' "$count"
     for ((index = 0; index < count; index++)); do
         printf '%s\0%s\0' "${paths[index]}" "${status_of[index]:-ERROR}"
@@ -2050,6 +2082,7 @@ cmd_browse_delete() {
     if append_delete_journal_batch_unlocked "$paths_file" "$device" "$txid"; then
         test_failpoint "browse_delete_after_journal"
         rm -f "$txfile" "$paths_file"
+        prune_empty_dirs_unlocked "$relative"
         flock -u 9; exec 9>&-
         printf 'BROWSE_DELETE_V1\0OK\0'
     else
