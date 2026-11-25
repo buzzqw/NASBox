@@ -998,6 +998,20 @@ func (c *clientApp) applyStatusUI(level statusLevel, reason string) {
 	if c.detailsBtn != nil {
 		c.detailsBtn.SetText(action)
 		c.detailsBtn.hint = fmt.Sprintf("%s — %s", action, next)
+		// The header already has Sync and Pause/Resume: repeating them in the
+		// banner showed the same buttons twice. The banner button only appears
+		// when it leads somewhere else (Transfers, Log, Settings).
+		if level == statusOK || level == statusPaused || level == statusStarting {
+			c.detailsBtn.Hide()
+		} else {
+			c.detailsBtn.Show()
+		}
+	}
+	if c.pauseBtnStatus != nil {
+		c.pauseBtnStatus.Hide()
+	}
+	if c.homeBox != nil {
+		c.homeBox.Refresh()
 	}
 }
 

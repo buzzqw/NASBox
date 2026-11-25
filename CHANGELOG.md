@@ -4,6 +4,14 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 1.4.4 - 2026-11-25
+
+Client Go:
+
+- **Stato: «Sincronizza» e «Pausa» non compaiono più due volte.** Erano
+  nell'intestazione e di nuovo nel banner. Il pulsante del banner resta solo
+  quando porta altrove (Trasferimenti, Log, Impostazioni).
+
 ## 1.4.3 - 2026-11-25
 
 Client Go:
