@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strings"
@@ -285,4 +286,44 @@ func (c *clientApp) markWaitingFiles(issues []engine.Issue) {
 			}
 		}
 	}()
+}
+
+// watchScanProgress shows what the first (or a full) scan is doing in the
+// status banner, once a second while it runs and takes longer than a moment.
+func (c *clientApp) watchScanProgress(ctx context.Context) {
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	shown := false
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			snap := engine.Scan.Snapshot()
+			if !snap.Active || snap.Visited < 2000 {
+				if shown {
+					shown = false
+					fyne.Do(func() {
+						if c.level == statusProgress && c.bannerReason != nil {
+							c.bannerReason.SetText(tr("status.sync_state_active", map[string]any{"direction": tr("ui.direction.sync", nil)}))
+						}
+					})
+				}
+				continue
+			}
+			shown = true
+			text := lt(
+				fmt.Sprintf("Analizzo i file di questo PC: %s controllati", formatCount(int(snap.Visited))),
+				fmt.Sprintf("Scanning this PC's files: %s checked", formatCount(int(snap.Visited))))
+			if snap.Hashed > 0 {
+				text += lt(fmt.Sprintf(" · %s letti (%s)", formatCount(int(snap.Hashed)), humanBytes(snap.Bytes)),
+					fmt.Sprintf(" · %s read (%s)", formatCount(int(snap.Hashed)), humanBytes(snap.Bytes)))
+			}
+			fyne.Do(func() {
+				if c.level == statusProgress && c.bannerReason != nil {
+					c.bannerReason.SetText(text)
+				}
+			})
+		}
+	}
 }

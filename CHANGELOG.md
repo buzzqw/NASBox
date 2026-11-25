@@ -4,6 +4,30 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 1.7.0 - 2026-11-25
+
+Client Go, installazione e avvio più semplici:
+
+- **Il NAS si trova da solo.** Nel primo avvio il client cerca in rete (mDNS,
+  come fanno Synology e QNAP, più una ricerca di host con SSH nella sottorete)
+  e mostra i NAS trovati: un tocco e l'indirizzo è compilato. Se un solo NAS
+  si annuncia da solo, viene proposto già scritto. Da terminale:
+  `nasbox-go find-nas` (5 secondi, esclude il PC stesso).
+- **Chiave SSH automatica.** Se il NAS risponde ma non conosce questo PC, il
+  primo avvio chiede la password del NAS *una volta*, crea la chiave
+  (ed25519) se manca, la installa in `authorized_keys` correggendo i permessi
+  della cartella home (causa tipica del rifiuto su Synology), verifica che il
+  login con chiave funzioni e dimentica la password: non viene salvata né
+  passata in argomenti.
+- **Prima sincronizzazione grande con avanzamento vero**: durante l'analisi
+  iniziale il banner dice "Analizzo i file di questo PC: 23.400 controllati ·
+  1.200 letti (3,4 GB)" invece di un generico "in corso".
+- **Client Python ritirato.** `tools/publish_client.py` rifiuta di pubblicare
+  senza `--i-know-it-is-retired`; tolta dalle Impostazioni la voce del canale
+  Python. La cartella del canale sul NAS è stata archiviata fuori dalla share.
+- **Diagnostica passate**: ogni passata registra quali percorsi locali l'hanno
+  avviata, per individuare cosa le fa partire a raffica.
+
 ## 1.6.1 - 2026-11-25
 
 Client Go:

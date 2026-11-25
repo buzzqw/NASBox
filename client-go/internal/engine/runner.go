@@ -359,6 +359,10 @@ func (r *Runner) Run(ctx context.Context) error {
 			continue
 		}
 		paths, remoteOnly := r.takeDirty()
+		if r.logger != nil && len(paths) > 0 && len(paths) <= 5 {
+			// Which local paths woke this pass: the clue when passes come in bursts.
+			_ = r.logger.Event("PERF", "-", "motivo passata: "+strings.Join(paths, ", "))
+		}
 		fullPass := false
 		for _, path := range paths {
 			if path == "" {

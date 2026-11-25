@@ -561,7 +561,6 @@ func (c *clientApp) settingsAdvanced() fyne.CanvasObject {
 		}),
 		c.boolSetting(tr("ui.settings.pause_enabled", nil), "pause_schedule_enabled"),
 		c.wideSetting(c.scheduleSetting()),
-		c.stringSetting(tr("ui.settings.update_python", nil), "client_update_remote_path"),
 		c.stringSetting(tr("ui.settings.update_go", nil), "client_update_remote_path_go"),
 		c.stringSetting(tr("ui.settings.min_server", nil), "min_server_version"),
 		c.deviceLabelsSetting(),

@@ -381,6 +381,7 @@ func startClient(
 	go c.refreshMonitor()
 	c.appendLog(tr("main_window.brand_tagline", nil) + " — " + version.AppVersion)
 	go c.seedRecent()
+	go c.watchScanProgress(ctx)
 	c.debugMinSize()
 	go c.tickRelativeTimes(ctx)
 	go c.autoUpdateLoop(ctx)

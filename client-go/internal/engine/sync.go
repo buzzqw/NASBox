@@ -867,6 +867,8 @@ func guardMessage(cfg *config.Config, report classify.Report) string {
 
 func scanLocal(cfg *config.Config, identities map[string]state.Identity, skipped *[]string) (map[string]localFile, error) {
 	result := make(map[string]localFile)
+	Scan.begin()
+	defer Scan.end()
 	return result, scanTree(cfg, identities, "", result, skipped)
 }
 
@@ -926,6 +928,7 @@ func scanTree(
 			Issues.Report(rel, PhaseRead, err.Error())
 			return nil
 		}
+		Scan.visited.Add(1)
 		file, err := scanFile(path, rel, info, identities)
 		if err != nil {
 			Issues.Report(rel, PhaseRead, err.Error())
@@ -959,6 +962,8 @@ func scanFile(path, rel string, info os.FileInfo, identities map[string]state.Id
 	if err != nil {
 		return localFile{}, fmt.Errorf("lettura locale non riuscita per %s: %w", rel, err)
 	}
+	Scan.hashed.Add(1)
+	Scan.bytes.Add(before.size)
 	afterInfo, err := os.Lstat(path)
 	if err != nil {
 		return localFile{}, fmt.Errorf("file cambiato durante la lettura: %s: %w", rel, err)

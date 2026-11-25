@@ -4,6 +4,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -20,6 +21,7 @@ import (
 	"nasbox-go/internal/config"
 	"nasbox-go/internal/deletesafety"
 	"nasbox-go/internal/diagnostics"
+	"nasbox-go/internal/discover"
 	"nasbox-go/internal/engine"
 	"nasbox-go/internal/history"
 	"nasbox-go/internal/instance"
@@ -67,6 +69,8 @@ func main() {
 		pruneTrash(args)
 	case "audit":
 		runAudit(args)
+	case "find-nas":
+		findNAS()
 	case "server-check":
 		serverCheck(args)
 	case "bootstrap-check":
@@ -720,6 +724,22 @@ func bootstrapCheck(args []string) {
 		os.Exit(1)
 	}
 	fmt.Println("bootstrap NAS ok")
+}
+
+// findNAS lists the machines on the local network that look like a NAS.
+func findNAS() {
+	candidates := discover.Find(context.Background(), 5*time.Second)
+	if len(candidates) == 0 {
+		fmt.Println("nessun NAS trovato in rete")
+		return
+	}
+	for _, candidate := range candidates {
+		banner := candidate.Banner
+		if banner == "" {
+			banner = "-"
+		}
+		fmt.Printf("%-18s %-24s mdns=%-5v ssh=%s\n", candidate.IP, candidate.Name, candidate.MDNS, banner)
+	}
 }
 
 func serverCheck(args []string) {

@@ -23,6 +23,12 @@ Examples:
 """
 from __future__ import annotations
 
+# RETIRED 2026-11-25: the Python client is no longer distributed. Every PC runs
+# the Go client (client-go), which has its own channel and publisher
+# (tools/publish_go_client.py). This script only builds a bundle for archival
+# or emergency use and refuses to publish without --i-know-it-is-retired.
+import sys as _sys
+
 import argparse
 import gzip
 import hashlib
@@ -183,7 +189,19 @@ def _upload(directory: Path, cfg) -> None:
         raise SystemExit(f"upload fallito: {result.stderr.strip() or result.returncode}")
 
 
+def _refuse_when_retired() -> None:
+    if "--i-know-it-is-retired" in _sys.argv:
+        _sys.argv.remove("--i-know-it-is-retired")
+        return
+    if "--dest-dir" in _sys.argv or "--upload" in _sys.argv:
+        _sys.exit(
+            "Il client Python e' ritirato (2026-11-25): usa tools/publish_go_client.py. "
+            "Per pubblicare comunque aggiungi --i-know-it-is-retired."
+        )
+
+
 def main() -> int:
+    _refuse_when_retired()
     parser = argparse.ArgumentParser(description="Pubblica un client NASBox per l'auto-aggiornamento.")
     parser.add_argument("--out", default=str(REPO_ROOT / "dist-client-update"), help="cartella di output")
     parser.add_argument("--channel", default="stable", help="canale pubblicato nel manifest")

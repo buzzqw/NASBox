@@ -1,11 +1,14 @@
 package ui
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
@@ -14,6 +17,7 @@ import (
 	"fyne.io/fyne/v2/widget"
 
 	"nasbox-go/internal/config"
+	"nasbox-go/internal/discover"
 	"nasbox-go/internal/remote"
 )
 
@@ -108,6 +112,103 @@ func showSetupWizard(fyneApp fyne.App, window fyne.Window, cfg *config.Config, o
 		stepBox.Refresh()
 	}
 
+	// Machines found on the network (mDNS + SSH scan), offered as one-click
+	// choices so nobody has to know the NAS address.
+	foundBox := container.NewVBox()
+	foundLabel := widget.NewLabel("")
+	foundLabel.Importance = widget.LowImportance
+	foundLabel.Wrapping = fyne.TextWrapWord
+	searching := false
+	search := func() {
+		if searching {
+			return
+		}
+		searching = true
+		foundLabel.SetText(lt("Cerco il NAS in rete…", "Looking for the NAS on the network…"))
+		go func() {
+			defer func() { _ = recover() }() // the window may be gone (tests, shutdown)
+			candidates := discover.Find(context.Background(), 5*time.Second)
+			fyne.Do(func() {
+				searching = false
+				foundBox.Objects = nil
+				if len(candidates) == 0 {
+					foundLabel.SetText(lt("Non ho trovato nessun NAS in rete: scrivi l'indirizzo qui sotto.", "I found no NAS on the network: type the address below."))
+					foundBox.Refresh()
+					return
+				}
+				foundLabel.SetText(lt("Trovati in rete — tocca il tuo NAS:", "Found on the network — tap your NAS:"))
+				limit := len(candidates)
+				if limit > 5 {
+					limit = 5
+				}
+				for _, candidate := range candidates[:limit] {
+					candidate := candidate
+					foundBox.Add(plainButton(candidate.Label(), theme.ComputerIcon(),
+						lt("Usa questo indirizzo", "Use this address"), widget.MediumImportance, func() {
+							hostEntry.SetText(candidate.Host())
+						}, func(string) {}))
+				}
+				// A single machine that advertised itself and nothing typed yet:
+				// fill it in, the person only has to confirm.
+				if strings.TrimSpace(hostEntry.Text) == "" && candidates[0].MDNS {
+					hostEntry.SetText(candidates[0].Host())
+				}
+				foundBox.Refresh()
+			})
+		}()
+	}
+
+	// Key setup panel: shown only when the NAS answers but does not know this
+	// PC's SSH key. The password is used once to install the key; it is not
+	// saved anywhere.
+	passwordEntry := widget.NewPasswordEntry()
+	keyStatus := widget.NewLabel("")
+	keyStatus.Wrapping = fyne.TextWrapWord
+	keyPanel := container.NewVBox()
+	var connectNow func()
+	authorize := plainButton(lt("Autorizza questo PC", "Authorise this PC"), theme.ConfirmIcon(),
+		lt("Copia la chiave di questo PC sul NAS usando la password, una volta sola", "Copy this PC's key to the NAS using the password, just once"),
+		widget.HighImportance, nil, func(string) {})
+	authorize.OnTapped = func() {
+		if passwordEntry.Text == "" {
+			keyStatus.SetText(lt("Scrivi la password del NAS.", "Type the NAS password."))
+			return
+		}
+		authorize.Disable()
+		keyStatus.SetText(lt("Autorizzo questo PC sul NAS…", "Authorising this PC on the NAS…"))
+		host, user, password := strings.TrimSpace(hostEntry.Text), strings.TrimSpace(userEntry.Text), passwordEntry.Text
+		port, _ := strconv.Atoi(strings.TrimSpace(portEntry.Text))
+		if port <= 0 {
+			port = 22
+		}
+		go func() {
+			var err error
+			keyPath, _, keyErr := remote.LocalPublicKey()
+			if keyErr != nil {
+				err = keyErr
+			} else if data, readErr := os.ReadFile(keyPath); readErr != nil {
+				err = readErr
+			} else {
+				err = remote.InstallKey(context.Background(), host, port, user, password, string(data))
+			}
+			fyne.Do(func() {
+				authorize.Enable()
+				if err != nil {
+					if errors.Is(err, remote.ErrWrongPassword) {
+						keyStatus.SetText(lt("Password non corretta: riprova.", "Wrong password: try again."))
+					} else {
+						keyStatus.SetText(humanSetupError(err.Error()))
+					}
+					return
+				}
+				passwordEntry.SetText("")
+				keyPanel.Objects = nil
+				keyPanel.Refresh()
+				connectNow()
+			})
+		}()
+	}
+
 	advanced := widget.NewAccordion(widget.NewAccordionItem(lt("Impostazioni avanzate (di solito non servono)", "Advanced settings (usually not needed)"),
 		container.NewVBox(
 			field(lt("Porta SSH", "SSH port"), portEntry),
@@ -143,6 +244,16 @@ func showSetupWizard(fyneApp fyne.App, window fyne.Window, cfg *config.Config, o
 			fyne.Do(func() {
 				connect.Enable()
 				if err != nil {
+					if remote.NeedsKeySetup(err.Error()) {
+						status.SetText("")
+						keyStatus.SetText(lt("Il NAS risponde, ma non conosce ancora questo PC. Scrivi la password del NAS una volta sola: NASBox la usa per autorizzare questo PC e poi la dimentica.",
+							"The NAS answers but does not know this PC yet. Type the NAS password once: NASBox uses it to authorise this PC and then forgets it."))
+						keyPanel.Objects = []fyne.CanvasObject{
+							keyStatus, field(lt("Password del NAS", "NAS password"), passwordEntry), container.NewHBox(authorize),
+						}
+						keyPanel.Refresh()
+						return
+					}
 					status.SetText(lt("Non riesco a collegarmi. ", "I cannot connect. ") + humanSetupError(err.Error()))
 					advanced.Open(0)
 					return
@@ -152,6 +263,8 @@ func showSetupWizard(fyneApp fyne.App, window fyne.Window, cfg *config.Config, o
 			})
 		}()
 	}
+
+	connectNow = connect.OnTapped
 
 	start := plainButton(lt("Inizia a sincronizzare", "Start syncing"), theme.ConfirmIcon(),
 		lt("Salva le impostazioni e avvia la sincronizzazione", "Save the settings and start syncing"),
@@ -206,15 +319,20 @@ func showSetupWizard(fyneApp fyne.App, window fyne.Window, cfg *config.Config, o
 			setStep(2, lt("Collegati al tuo NAS", "Connect to your NAS"),
 				cnote(lt("Indirizzo e utente del NAS, gli stessi che usi per entrarci via SSH. Il resto lo trovo da solo.",
 					"Address and user of the NAS, the same you use to log in over SSH. I find the rest by myself.")),
+				foundLabel, foundBox,
 				field(lt("Indirizzo del NAS (nome o IP)", "NAS address (name or IP)"), hostEntry),
 				field(lt("Utente", "User"), userEntry),
+				keyPanel,
 				advanced,
 				container.NewHBox(
 					plainButton(lt("Indietro", "Back"), theme.NavigateBackIcon(), lt("Torna alla scelta della cartella", "Back to the folder choice"),
 						widget.LowImportance, func() { status.SetText(""); showStep(1) }, func(string) {}),
 					connect,
+					plainButton(lt("Cerca di nuovo", "Search again"), theme.SearchIcon(), lt("Cerca di nuovo il NAS in rete", "Look for the NAS on the network again"),
+						widget.LowImportance, search, func(string) {}),
 				),
 			)
+			search()
 		default:
 			setStep(3, lt("Tutto pronto", "All set"),
 				cnote(lt(fmt.Sprintf("Collegato a %s. I file di %s verranno sincronizzati con il NAS: i nuovi si caricano, quelli degli altri PC si scaricano.",
