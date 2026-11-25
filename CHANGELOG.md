@@ -4,6 +4,22 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 1.12.0 - 2026-11-25
+
+Client Go:
+
+- **Le stesse esclusioni su tutti i PC.** Le regole che ignorano file generati
+  (build, dist, target, cache di IDE, classi, oggetti, log, LaTeX, venv,
+  node_modules...) vivono ora nel codice e non nella configurazione del singolo
+  client: due macchine non possono più divergere perché una delle due le ha
+  diverse. Resta possibile aggiungere esclusioni locali (es. `sync-daemon/`),
+  ma solo in aggiunta.
+- **Le voci di stato dei percorsi esclusi vengono potate** (una volta per ogni
+  insieme di regole): erano righe che nessuna passata avrebbe più guardato e
+  facevano sembrare diversi due stati identici — è così che un buco reale nel
+  set tracciato era rimasto nascosto dai numeri. Il riepilogo di `sync` dice
+  quante voci sono state rimosse.
+
 ## 1.11.1 - 2026-11-25
 
 Client Go:

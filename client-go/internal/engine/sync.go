@@ -120,6 +120,9 @@ type SyncResult struct {
 	// LocalRenamed counts files another PC renamed on the NAS that were moved
 	// locally instead of downloaded again.
 	LocalRenamed int
+	// PrunedExcluded counts stored rows dropped because the current exclusion
+	// rules now ignore those paths (see pruneExcludedOnce).
+	PrunedExcluded int
 	// Local is the local snapshot of this pass (for the next incremental
 	// scan); nil when the scan failed.
 	Local *LocalSnapshot
@@ -240,6 +243,11 @@ func syncPass(
 		return result, fmt.Errorf("journal NAS: %s", detail)
 	}
 	timer.mark("journal")
+	pruned, err := pruneExcludedOnce(cfg, store)
+	if err != nil {
+		return result, err
+	}
+	result.PrunedExcluded = pruned
 	identities, err := store.IdentitySnapshot(cfg.LocalRepositoryID())
 	if err != nil {
 		return result, err

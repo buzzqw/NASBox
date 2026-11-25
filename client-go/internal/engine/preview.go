@@ -74,6 +74,13 @@ var systemExcludes = []string{
 	"*.aux", "*.fls", "*.fdb_latexmk", "*.synctex.gz", "*.toc", "*.lof",
 	"*.lot", "*.bbl", "*.blg", "*.idx", "*.ind", "*.ilg", "*.xdv", "*.nav",
 	"*.snm", "*.vrb", "*.bcf", "*.run.xml",
+	// Build and tool output, kept here instead of in each client's config: the
+	// two PCs used to carry their own lists and drifted (one synced build/dist,
+	// the other did not), which made the same repository look different on each
+	// machine. A per-PC config can still ADD exclusions, but these can no longer
+	// be dropped by one side only.
+	"build", "dist", "target", ".gradle", ".idea", ".vscode", ".next", ".cache",
+	"*.class", "*.o", "*.obj", "*.log", "*.out",
 }
 
 func excluded(cfg *config.Config, path string) bool {

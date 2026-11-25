@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -591,4 +592,72 @@ func statInfo(info os.FileInfo) fileStat {
 		size:    info.Size(),
 		mtimeNS: info.ModTime().UnixNano(),
 	}
+}
+
+// SetString stores a small value in meta (used for "already done once" marks).
+func (s *Store) SetString(key, value string) error {
+	_, err := s.db.Exec(
+		`INSERT INTO meta(key, value) VALUES(?, ?)
+		 ON CONFLICT(key) DO UPDATE SET value = excluded.value`, key, value)
+	return err
+}
+
+// PruneExcluded drops every record for paths the current exclusion rules
+// ignore. Such rows can never be evaluated again -- the local scan and the
+// planner both skip them -- and leaving them behind makes two machines with
+// identical rules still report different counts, which is exactly how a real
+// gap in the tracked set stayed hidden.
+func (s *Store) PruneExcluded(repository string, excluded func(string) bool) (int, error) {
+	rows, err := s.db.Query(`SELECT path FROM entry WHERE repository = ?`, repository)
+	if err != nil {
+		return 0, err
+	}
+	victims := make([]string, 0)
+	for rows.Next() {
+		var path string
+		if scanErr := rows.Scan(&path); scanErr != nil {
+			rows.Close()
+			return 0, scanErr
+		}
+		if excluded(path) {
+			victims = append(victims, path)
+		}
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+	if len(victims) == 0 {
+		return 0, nil
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	const batch = 400
+	for start := 0; start < len(victims); start += batch {
+		end := start + batch
+		if end > len(victims) {
+			end = len(victims)
+		}
+		chunk := victims[start:end]
+		placeholders := strings.TrimSuffix(strings.Repeat("?,", len(chunk)), ",")
+		args := make([]any, 0, len(chunk)+1)
+		args = append(args, repository)
+		for _, path := range chunk {
+			args = append(args, path)
+		}
+		for _, table := range []string{"entry", "local_observation", "file_identity", "pending"} {
+			if _, execErr := tx.Exec(
+				`DELETE FROM `+table+` WHERE repository = ? AND path IN (`+placeholders+`)`, args...,
+			); execErr != nil {
+				return 0, execErr
+			}
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return len(victims), nil
 }

@@ -909,6 +909,9 @@ func syncOnce(args []string) {
 	fmt.Printf("caricati %d, scaricati %d, cancellati sul NAS %d, cancellati in locale %d, spostamenti rilevati %d, rinominati in locale %d, conflitti %d, saltati %d\n",
 		result.Uploaded, result.Downloads, result.Deleted, result.LocalDeleted, result.Renames,
 		result.LocalRenamed, result.Conflicts, result.Stale)
+	if result.PrunedExcluded > 0 {
+		fmt.Printf("%d voci di stato eliminate perché ora escluse dalle regole\n", result.PrunedExcluded)
+	}
 	if result.Local != nil && len(result.Local.Skipped) > 0 {
 		fmt.Printf("%d link simbolici o file speciali ignorati\n", len(result.Local.Skipped))
 	}

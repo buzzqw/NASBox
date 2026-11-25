@@ -169,3 +169,59 @@ func TestSyncOnceAppliesRemoteRenameWithoutDownloading(t *testing.T) {
 		t.Fatalf("il vecchio nome è ancora una baseline viva: %+v", entries["Progetto/sub/f1.txt"])
 	}
 }
+
+// Rows recorded before an exclusion rule existed are dead weight: nothing ever
+// looks at them again, and they made two machines with identical rules report
+// different counts. They are dropped once per distinct rule set.
+func TestExcludedRowsArePrunedOncePerRuleSet(t *testing.T) {
+	cfg, store, _ := setupTest(t)
+	repo := cfg.LocalRepositoryID()
+	for _, path := range []string{"progetto/build/out.bin", "progetto/nota.txt", "progetto/server.log"} {
+		if err := store.RecordEntry(repo, path, state.EntryState{Digest: digest(path), Size: 3, MTimeNS: 1}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	removed, err := pruneExcludedOnce(cfg, store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if removed != 2 {
+		t.Fatalf("attese 2 voci escluse rimosse, ottenute %d", removed)
+	}
+	entries, err := store.EntrySnapshot(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := entries["progetto/nota.txt"]; !ok {
+		t.Fatal("la voce non esclusa è stata rimossa")
+	}
+	if _, ok := entries["progetto/build/out.bin"]; ok {
+		t.Fatal("la voce esclusa è rimasta")
+	}
+
+	// Same rules again: nothing to do (the marker makes it a no-op).
+	again, err := pruneExcludedOnce(cfg, store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again != 0 {
+		t.Fatalf("la potatura è stata ripetuta: %d", again)
+	}
+
+	// A new rule set runs once more.
+	cfg.Set("exclude_patterns", []any{"progetto/nota.txt"}, false)
+	third, err := pruneExcludedOnce(cfg, store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if third != 1 {
+		t.Fatalf("con la nuova regola attesa 1 voce, ottenute %d", third)
+	}
+	entries, err = store.EntrySnapshot(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("stato non vuoto: %v", entries)
+	}
+}
