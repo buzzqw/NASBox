@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 
 	"nasbox-go/internal/deletesafety"
 	"nasbox-go/internal/engine"
+	"nasbox-go/internal/integration"
 )
 
 // This file is the "never an error, always a next step" side of the UI:
@@ -47,6 +49,9 @@ func humanIssueReason(issue engine.Issue) string {
 		return lt("Il file è cambiato sul NAS mentre lo elaboravo: ricontrollo.", "The file changed on the NAS while I was handling it: checking again.")
 	case has("no such file", "vanished", "non esiste"):
 		return lt("Il file è stato spostato o eliminato mentre lo sincronizzavo.", "The file was moved or deleted while syncing.")
+	case issue.Phase == engine.PhaseDelete:
+		return lt("Eliminato qui ma sul NAS è cambiato nel frattempo: non lo elimino senza una verifica.",
+			"Deleted here but it changed on the NAS meanwhile: I will not delete it without a check.")
 	case issue.Phase == engine.PhasePlan:
 		return lt("Due versioni diverse: serve guardare questo file.", "Two different versions: this file needs a look.")
 	}
@@ -174,6 +179,7 @@ func (c *clientApp) refreshHeld() {
 			c.homeBox.Refresh()
 		}
 	}
+	c.markWaitingFiles(issues)
 	c.waitingRows = issues
 	if c.waitingList != nil {
 		c.waitingList.Refresh()
@@ -242,4 +248,41 @@ func (c *clientApp) onRestoreHeld() {
 				fmt.Sprintf("Restoring %s files", formatCount(restored))))
 			c.refreshHeld()
 		}, c.window)
+}
+
+// markWaitingFiles puts the "problem" emblem on the files that are waiting, in
+// the file manager, and takes it off when they go through: the per-file
+// status Dropbox shows, limited to the few files that need attention (marking
+// every synced file would cost a process per file).
+func (c *clientApp) markWaitingFiles(issues []engine.Issue) {
+	if !c.emblemsEnabled() || c.cfg.LocalRoot() == "" {
+		return
+	}
+	now := map[string]bool{}
+	for _, issue := range issues {
+		if len(now) >= 100 {
+			break
+		}
+		if full, ok := c.localFilePath(issue.Path); ok {
+			if _, err := os.Stat(full); err == nil {
+				now[full] = true
+			}
+		}
+	}
+	c.emblemMu.Lock()
+	previous := c.markedFiles
+	c.markedFiles = now
+	c.emblemMu.Unlock()
+	go func() {
+		for path := range now {
+			if !previous[path] {
+				integration.SetEmblem(path, integration.EmblemProblem)
+			}
+		}
+		for path := range previous {
+			if !now[path] {
+				integration.SetEmblem(path, "")
+			}
+		}
+	}()
 }

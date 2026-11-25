@@ -28,6 +28,7 @@ const (
 	PhaseUpload   = "upload"
 	PhaseDownload = "download"
 	PhasePlan     = "plan"
+	PhaseDelete   = "delete"
 )
 
 // issueBook is the registry of waiting files of this process.

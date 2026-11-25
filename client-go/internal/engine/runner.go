@@ -446,7 +446,7 @@ func (r *Runner) Run(ctx context.Context) error {
 			summary += ", " + i18n.T("overview.reason_waiting", map[string]any{"count": result.Problems})
 		}
 		r.emit("sync", summary)
-		if result.DeletesLeft > 0 {
+		if result.DeletesLeft > 0 && result.Deleted > 0 {
 			// Large deletions run in chunks; keep going without waiting for the
 			// next scheduled pass.
 			r.SyncNow()

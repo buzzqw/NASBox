@@ -269,9 +269,10 @@ type clientApp struct {
 	notifyMu      sync.Mutex
 	lastNotify    map[string]time.Time
 
-	emblemMu   sync.Mutex
-	lastEmblem string
-	marked     map[string]bool
+	emblemMu    sync.Mutex
+	markedFiles map[string]bool
+	lastEmblem  string
+	marked      map[string]bool
 }
 
 // Run starts the native client. It blocks until the window/tray exits. When

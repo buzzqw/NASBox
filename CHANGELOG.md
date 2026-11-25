@@ -4,6 +4,19 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 1.6.1 - 2026-11-25
+
+Client Go:
+
+- **Niente più passate a raffica.** Se il NAS rifiutava la cancellazione di
+  alcuni file (cambiati nel frattempo), il client li riproponeva a ogni passata
+  e, con il proseguimento automatico delle cancellazioni, rilanciava subito
+  un'altra passata ogni secondo circa. Ora un file non cancellabile va in
+  «In attesa» con le pause crescenti (1, 2, 5, 15, 60 minuti) e il
+  proseguimento riparte solo se è stato fatto progresso.
+- **Stato per file nel gestore file**: i file in attesa mostrano l'emblema di
+  problema (Nautilus, Nemo, Caja…) e lo perdono appena passano.
+
 ## 1.6.0 - 2026-11-25
 
 Client Go:

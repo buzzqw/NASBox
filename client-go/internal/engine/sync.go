@@ -707,7 +707,7 @@ func syncPass(
 	deletions := make([]string, 0, len(report.Unexplained))
 	proposed := make([]string, 0, len(report.Unexplained))
 	for _, path := range report.Unexplained {
-		if allowDelete && deleteApproved[path] {
+		if allowDelete && deleteApproved[path] && !Issues.Waiting(path) {
 			proposed = append(proposed, path)
 			if !deletionsHeld {
 				deletions = append(deletions, path)
@@ -740,6 +740,7 @@ func syncPass(
 		device := store.DeviceID()
 		sort.Strings(deletions)
 		budget := time.Now().Add(deletionBudget)
+		attempted := 0
 		for start := 0; start < len(deletions); start += deleteChunk {
 			if start > 0 && time.Now().After(budget) {
 				break
@@ -749,6 +750,7 @@ func syncPass(
 				end = len(deletions)
 			}
 			chunk := deletions[start:end]
+			attempted = end
 			requests := make([]remote.CheckedRequest, 0, len(chunk))
 			for _, path := range chunk {
 				remoteState := manifest[path]
@@ -765,6 +767,12 @@ func syncPass(
 			for path, status := range statuses {
 				if status == "DELETED" || status == "ABSENT" {
 					done = append(done, path)
+					Issues.Clear(path)
+				} else {
+					// The NAS did not delete it ("STALE": it changed since the
+					// manifest, or an error). Leave it alone for a while
+					// instead of asking again at every pass.
+					Issues.Report(path, PhaseDelete, "NAS: "+status)
 				}
 			}
 			if err := store.RecordUndo(cfg.LocalRepositoryID(), done, runTS); err != nil {
@@ -786,10 +794,13 @@ func syncPass(
 				return result, err
 			}
 		}
-		if result.Deleted < len(deletions) {
-			// Not an error: the rest continues in the next pass.
+		if attempted < len(deletions) {
+			// The time budget ended: the rest continues in the next pass. Files
+			// the NAS answered "stale" or "error" for are NOT counted here, or
+			// a path that can never be deleted would keep the client in a loop
+			// of immediate passes.
 			PendingDeletes.Set(nil)
-			result.DeletesLeft = len(deletions) - result.Deleted
+			result.DeletesLeft = len(deletions) - attempted
 		}
 	}
 	return result, nil
