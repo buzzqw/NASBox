@@ -5,7 +5,10 @@ Se qualcosa non torna, valgono i comandi in fondo.
 
 ## Stato al 2026-11-25 (verificato su dati veri)
 
-- Client Go **1.10.0**, server **3.30.1**; 122 e 134 aggiornati, GUI riavviata.
+- Client Go **1.11.1**, server **3.31.0**; 122 e 134 aggiornati, GUI riavviata.
+- rsync privato 3.5.1 in `server/bin/` (`tools/install_server_rsync.sh`), usato
+  dai client con `--rsync-path`; il rsync di sistema resta 3.1.2. `doctor`
+  stampa `NAS 3.5.1 privato, sistema 3.1.2`.
 - Rilasci fatti: `eb8196e` (1.9.0/3.29.0), `61a5582` (1.10.0/3.30.0),
   `a0cde1c` (server 3.30.1). Canale `go-stable` con 1.10.0 e 1.9.0 (retention 2).
 - Il NAS dichiara le proprie capacità (`--capabilities`): 4 core, 987 MB,
