@@ -77,8 +77,20 @@ Implementati: `--journal-append`, `--staging-publish` (V1/V2),
   bash con `VERSION="…"`; il percorso Go è coperto dal test locale sopra).
 - Parity read-only: 11/11.
 
+## Milestone 5 — protocollo a chunk lato client (completata)
+
+Nuovi verbi server: `--chunk-put-batch`, `--chunk-get`, `--file-chunks`,
+`--file-publish`. Il client ha i metodi corrispondenti in
+`internal/remote/chunks.go`: carica solo i chunk mancanti, pubblica il file in
+una transazione journalata e può rileggere i chunk per ricostruire il file.
+
+Il protocollo è coperto da `TestE2EChunkProtocol` (~2 MB, più chunk da 1 MiB):
+upload, publish con journal, listing e download verificato. Con il demone Go:
+**9 PASS, 1 SKIP** (self-update bash). Con lo script bash il test viene saltato,
+perché i verbi a chunk non esistono nel vecchio server.
+
 ## Ultimo passo
 
-Collegare il transfer lato client allo store a chunk (sostituendo rsync),
-poi disattivare lo script bash in produzione. Lo store e i verbi di
-snapshot/restore sono già pronti dalla milestone 1.
+Sostituire `internal/transfer` con questo protocollo nei sync normali e
+disattivare rsync/script bash in produzione. Il primitivo è pronto e
+collaudato; il collegamento al motore di sync è il cambio finale.

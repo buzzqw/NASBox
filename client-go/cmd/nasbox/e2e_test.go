@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -630,6 +632,77 @@ func TestE2EFolderRenameIsOneRequestAndKeepsBytes(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(b.local, "Progetto")); !os.IsNotExist(err) {
 		t.Fatalf("su B la vecchia cartella è rimasta\n%s", out)
+	}
+	if !nas.lockFree() {
+		t.Fatal("il lock NAS deve essere libero")
+	}
+}
+
+// TestE2EChunkProtocol exercises the in-house transfer primitive end to end:
+// chunk upload, journaled file publish, chunk listing and chunk download. It
+// uses the same fake SSH as the other E2E tests, so it works with both the
+// bash script and the Go daemon.
+func TestE2EChunkProtocol(t *testing.T) {
+	if os.Getenv("NASBOX_E2E_SERVER") == "" {
+		t.Skip("protocollo a chunk richiede il demone Go (NASBOX_E2E_SERVER)")
+	}
+	nas := newE2ENAS(t)
+	stateDir := filepath.Join(filepath.Dir(nas.script), "state")
+	c := nas.client("pc-chunks", map[string]any{
+		"server_lock_file_remote":       filepath.Join(stateDir, "sync-transfer.lock"),
+		"server_lock_owner_file_remote": filepath.Join(stateDir, "sync-transfer.lock.owner"),
+	})
+	t.Setenv("PATH", nas.bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	cfg, err := config.LoadFrom(c.config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := remote.New(cfg)
+	content := []byte(strings.Repeat("NASBox chunk protocol ", 100000))
+	sum := sha256.Sum256(content)
+	digest := hex.EncodeToString(sum[:])
+	const chunkSize = 1 << 20
+	chunks := []remote.ChunkUpload{}
+	for offset := 0; offset < len(content); offset += chunkSize {
+		end := offset + chunkSize
+		if end > len(content) {
+			end = len(content)
+		}
+		block := content[offset:end]
+		blockSum := sha256.Sum256(block)
+		chunks = append(chunks, remote.ChunkUpload{
+			Digest: hex.EncodeToString(blockSum[:]), Data: block,
+		})
+	}
+	if _, err := client.ChunkPutBatch("device-chunks", chunks); err != nil {
+		t.Fatalf("chunk upload: %v", err)
+	}
+	digests := make([]string, 0, len(chunks))
+	for _, chunk := range chunks {
+		digests = append(digests, chunk.Digest)
+	}
+	stamp := time.Now().Unix() * 1_000_000_000
+	if err := client.FilePublish("cartella/file.bin", digest, int64(len(content)), stamp, "device-chunks:1",
+		digests, "device-chunks", "chunk-tx-1", remote.RunTimestamp()); err != nil {
+		t.Fatalf("file publish: %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(nas.share, "cartella", "file.bin"))
+	if err != nil || !bytes.Equal(got, content) {
+		t.Fatalf("file sul NAS diverso: len=%d err=%v", len(got), err)
+	}
+	info, err := client.FileChunks("cartella/file.bin")
+	if err != nil || !info.Found || info.Digest != digest || len(info.Chunks) != len(chunks) {
+		t.Fatalf("file-chunks: %+v err=%v", info, err)
+	}
+	for _, chunk := range info.Chunks {
+		data, err := client.ChunkGet(chunk)
+		if err != nil {
+			t.Fatalf("chunk-get %s: %v", chunk, err)
+		}
+		blockSum := sha256.Sum256(data)
+		if hex.EncodeToString(blockSum[:]) != chunk {
+			t.Fatalf("chunk %s corrotto", chunk)
+		}
 	}
 	if !nas.lockFree() {
 		t.Fatal("il lock NAS deve essere libero")

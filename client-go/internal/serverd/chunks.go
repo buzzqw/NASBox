@@ -28,6 +28,7 @@ func NewChunkStore(root string) (*ChunkStore, error) {
 	for _, dir := range []string{
 		filepath.Join(root, "objects"),
 		filepath.Join(root, "snapshots"),
+		filepath.Join(root, "files"),
 		filepath.Join(root, "tmp"),
 	} {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -282,6 +283,53 @@ func (s *ChunkStore) RestoreFile(snap *Snapshot, relative, target string) error 
 		return s.Assemble(file.Chunks, target)
 	}
 	return fmt.Errorf("percorso %q non presente nello snapshot %s", relative, snap.ID)
+}
+
+func (s *ChunkStore) fileMetaPath(digest string) string {
+	return filepath.Join(s.root, "files", digest+".json")
+}
+
+// SaveFileMeta records which chunks compose a published file, so another PC
+// can ask for exactly the chunks it is missing instead of the whole file.
+func (s *ChunkStore) SaveFileMeta(digest string, chunks []string) error {
+	dir := filepath.Join(s.root, "files")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	data, err := json.Marshal(struct {
+		Chunks []string `json:"chunks"`
+	}{Chunks: chunks})
+	if err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(dir, "meta-*")
+	if err != nil {
+		return err
+	}
+	name := tmp.Name()
+	defer os.Remove(name)
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(name, s.fileMetaPath(digest))
+}
+
+func (s *ChunkStore) LoadFileMeta(digest string) ([]string, error) {
+	data, err := os.ReadFile(s.fileMetaPath(digest))
+	if err != nil {
+		return nil, err
+	}
+	meta := struct {
+		Chunks []string `json:"chunks"`
+	}{}
+	if err := json.Unmarshal(data, &meta); err != nil {
+		return nil, err
+	}
+	return meta.Chunks, nil
 }
 
 func (s *ChunkStore) Stats() (objects int, bytes int64, err error) {

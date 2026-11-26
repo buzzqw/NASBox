@@ -245,6 +245,14 @@ func Dispatch(ctx *Context, verb string, args []string) error {
 		return cmdChunkSnapshotList(ctx)
 	case "--chunk-restore":
 		return cmdChunkRestore(ctx, args)
+	case "--chunk-put-batch":
+		return cmdChunkPutBatch(ctx)
+	case "--chunk-get":
+		return cmdChunkGet(ctx, args)
+	case "--file-chunks":
+		return cmdFileChunks(ctx, args)
+	case "--file-publish":
+		return cmdFilePublish(ctx, args)
 	case "--init-repository":
 		return cmdInitRepository(ctx)
 	case "--journal-append":
