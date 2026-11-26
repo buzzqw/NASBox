@@ -4,6 +4,20 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 1.21.3 - 2026-11-26
+
+Client 1.21.3 e server 3.36.0.
+
+- **«Scarica selezionato» non sembra più un pulsante morto**: se il file è già
+  sul PC con la stessa dimensione e data del NAS non viene riscaricato (prima
+  un PDF da 90 MB veniva ricopiato per intero e non cambiava nulla); l'esito
+  compare nell'etichetta della scheda File e in una finestra, anche in caso di
+  errore. Un file non ancora presente viene trasferito come prima, ma ora il
+  progresso si vede nella scheda Trasferimenti: il trasferimento manuale non
+  aveva osservatori, quindi restava muto fino alla fine.
+- Un solo download manuale per volta: un secondo click non lancia un rsync in
+  parallelo ma avvisa che ce n'è già uno in corso.
+
 ## 1.21.2 - 2026-11-26
 
 Client 1.21.2 e server 3.36.0.

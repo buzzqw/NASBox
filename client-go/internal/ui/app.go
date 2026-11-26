@@ -32,6 +32,7 @@ import (
 	"nasbox-go/internal/integrity"
 	"nasbox-go/internal/metrics"
 	"nasbox-go/internal/mirror"
+	"nasbox-go/internal/paths"
 	"nasbox-go/internal/remote"
 	"nasbox-go/internal/selective"
 	"nasbox-go/internal/state"
@@ -141,6 +142,10 @@ type clientApp struct {
 	browseDownloadBtn   *tipButton
 	browseVersionsBtn   *tipButton
 	browseUpBtn         *tipButton
+	downloadNotice      string
+	downloadMu          sync.Mutex
+	downloadBusy        bool
+	downloadPath        string
 	mirrorLabel         *widget.Label
 	mirrorList          *widget.List
 	mirrorEntries       []mirror.Mirror
@@ -2052,14 +2057,118 @@ func (c *clientApp) onBrowseDownload() {
 }
 
 func (c *clientApp) startDownload(relative string) {
+	if relative == "" {
+		return
+	}
+	// A file that is already here with the same size and date would be copied
+	// again for nothing: rsync's own quick check says it is up to date, and the
+	// transfer used to finish with no visible effect at all (a 90 MB file whose
+	// content was already identical looked like a dead button).
+	if c.downloadAlreadyLocal(relative) {
+		c.appendAction(tr("ui.file.download_already", map[string]any{"path": relative}))
+		c.showDownloadNotice(tr("ui.file.download_already", map[string]any{"path": relative}))
+		dialog.ShowInformation(tr("ui.file.download_already_title", nil),
+			tr("ui.file.download_already_body", map[string]any{"path": relative}), c.window)
+		return
+	}
+	c.downloadMu.Lock()
+	if c.downloadBusy {
+		busy := c.downloadPath
+		c.downloadMu.Unlock()
+		message := tr("ui.file.download_busy", map[string]any{"path": busy})
+		c.appendLog(message)
+		dialog.ShowInformation(tr("ui.action.download", nil), message, c.window)
+		return
+	}
+	c.downloadBusy, c.downloadPath = true, relative
+	c.downloadMu.Unlock()
+	if c.browseDownloadBtn != nil {
+		c.browseDownloadBtn.Disable()
+	}
 	c.appendAction(tr("ui.file.download_started", map[string]any{"path": relative}))
+	c.showDownloadNotice(tr("ui.file.download_started", map[string]any{"path": relative}))
 	go func() {
 		if err := c.transfers.DownloadPath(relative); err != nil {
 			c.appendLog(tr("browse.download_failed_title", nil) + ": " + err.Error())
+			fyne.Do(func() {
+				c.finishDownload()
+				c.showDownloadNotice(tr("browse.download_failed_title", nil) + ": " + err.Error())
+				dialog.ShowError(fmt.Errorf("%s: %s", tr("browse.download_failed_title", nil), err), c.window)
+			})
 			return
 		}
-		c.appendAction(tr("ui.file.download_done", map[string]any{"path": relative}))
+		done := tr("ui.file.download_done", map[string]any{"path": relative})
+		c.appendAction(done)
+		fyne.Do(func() {
+			c.finishDownload()
+			c.showDownloadNotice(done)
+			c.refreshBrowse()
+			c.refreshStats()
+		})
 	}()
+}
+
+// showDownloadNotice keeps the outcome of a manual download visible in the
+// File tab, where the activity list is not on screen.
+func (c *clientApp) showDownloadNotice(text string) {
+	fyne.Do(func() {
+		c.downloadNotice = text
+		c.updateBrowseSelection()
+	})
+}
+
+// finishDownload releases the "one download at a time" guard.
+func (c *clientApp) finishDownload() {
+	c.downloadMu.Lock()
+	c.downloadBusy, c.downloadPath = false, ""
+	c.downloadMu.Unlock()
+	if c.browseDownloadBtn != nil {
+		if c.selectedBrowse == "" {
+			c.browseDownloadBtn.Disable()
+		} else {
+			c.browseDownloadBtn.Enable()
+		}
+	}
+}
+
+// browseEntryFor returns the listing entry of the folder being browsed, when
+// the path belongs to it.
+func (c *clientApp) browseEntryFor(relative string) (remote.BrowseEntry, bool) {
+	dir, name := "", relative
+	if index := strings.LastIndex(relative, "/"); index >= 0 {
+		dir, name = relative[:index], relative[index+1:]
+	}
+	if dir != c.browsePath || name == "" {
+		return remote.BrowseEntry{}, false
+	}
+	for _, entry := range c.browseEntries {
+		if entry.Name == name && entry.Kind != "DIR" {
+			return entry, true
+		}
+	}
+	return remote.BrowseEntry{}, false
+}
+
+// downloadAlreadyLocal mirrors rsync's quick check (size and date): the local
+// file is the same one the NAS has, so downloading it again would only cost
+// bandwidth. A file changed locally no longer matches and is re-downloaded.
+func (c *clientApp) downloadAlreadyLocal(relative string) bool {
+	entry, ok := c.browseEntryFor(relative)
+	if !ok {
+		return false
+	}
+	local, err := paths.SafeDestination(c.cfg.LocalRoot(), relative)
+	if err != nil {
+		return false
+	}
+	stat, err := os.Stat(local)
+	if err != nil || !stat.Mode().IsRegular() {
+		return false
+	}
+	if stat.Size() != entry.Size {
+		return false
+	}
+	return entry.MTime <= 0 || stat.ModTime().Unix() == entry.MTime
 }
 
 func (c *clientApp) onKeepBoth() {

@@ -233,18 +233,25 @@ func (c *clientApp) openContainingFolder(relative string) {
 // Live progress from rsync
 // ---------------------------------------------------------------------------
 
-// installTransferObservers connects rsync progress to the UI.
+// installTransferObservers connects rsync progress to the UI. The manual
+// "download selected" transfer is a separate backend from the sync engine, so
+// it gets the same observers: without them a download of a large file showed
+// no progress anywhere and looked like nothing was happening.
 func (c *clientApp) installTransferObservers() {
 	if c.transfers == nil {
 		return
 	}
-	c.syncTransfers().SetObservers(c.onTransferProgress, func(event transfer.FileEvent) {
+	onFile := func(event transfer.FileEvent) {
 		kind := "down"
 		if event.Upload {
 			kind = "up"
 		}
 		c.addRecent(recentItem{Path: event.Path, Kind: kind, At: event.At})
-	})
+	}
+	c.transfers.SetObservers(c.onTransferProgress, onFile)
+	if backend := c.syncTransfers(); backend != nil && backend != transfer.Backend(c.transfers) {
+		backend.SetObservers(c.onTransferProgress, onFile)
+	}
 }
 
 func (c *clientApp) onTransferProgress(progress transfer.Progress) {

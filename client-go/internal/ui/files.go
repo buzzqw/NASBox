@@ -142,6 +142,7 @@ func (c *clientApp) buildBrowsePane() fyne.CanvasObject {
 			return
 		}
 		c.selectedBrowse = entry.Name
+		c.downloadNotice = ""
 		c.updateBrowseSelection()
 	}
 	c.browsePathLabel = widget.NewLabel(tr("browse.path_label", map[string]any{"path": "/"}))
@@ -353,6 +354,7 @@ func (c *clientApp) joinBrowsePath(name string) string {
 func (c *clientApp) browseTo(path string) {
 	c.browsePath = strings.Trim(strings.TrimSpace(path), "/")
 	c.selectedBrowse = ""
+	c.downloadNotice = ""
 	c.refreshBrowse()
 	c.appendAction(tr("ui.file.path_opened", map[string]any{"path": valueOrDash(c.browsePath)}))
 }
@@ -395,9 +397,14 @@ func (c *clientApp) updateBreadcrumbs() {
 
 func (c *clientApp) updateBrowseSelection() {
 	if c.browseSelectedLabel != nil {
-		if c.selectedBrowse == "" {
+		switch {
+		case c.downloadNotice != "":
+			// The outcome of a download stays here: this tab does not show the
+			// activity list, so a selection-only label hid the result.
+			c.browseSelectedLabel.SetText(c.downloadNotice)
+		case c.selectedBrowse == "":
 			c.browseSelectedLabel.SetText(tr("ui.file.none_selected", nil))
-		} else {
+		default:
 			c.browseSelectedLabel.SetText(tr("ui.file.selected", map[string]any{"name": c.selectedBrowse}))
 		}
 	}

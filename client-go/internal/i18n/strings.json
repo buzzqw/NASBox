@@ -5154,6 +5154,22 @@
     "en": "Click a folder once to open it. Select a file to download, rename or move it to the NAS trash.",
     "it": "Clicca una cartella una volta per aprirla. Seleziona un file per scaricarlo, rinominarlo o spostarlo nel cestino NAS."
   },
+  "ui.file.download_already": {
+    "en": "Already on this PC: {path}",
+    "it": "Già presente su questo PC: {path}"
+  },
+  "ui.file.download_already_body": {
+    "en": "The file is already on this PC with the same size and date as the NAS copy, so there is nothing to download.\n\n{path}",
+    "it": "Il file è già su questo PC con la stessa dimensione e data della copia sul NAS, quindi non c'è nulla da scaricare.\n\n{path}"
+  },
+  "ui.file.download_already_title": {
+    "en": "File already present",
+    "it": "File già presente"
+  },
+  "ui.file.download_busy": {
+    "en": "A download is already running: {path}",
+    "it": "Un download è già in corso: {path}"
+  },
   "ui.file.download_done": {
     "en": "Downloaded: {path}",
     "it": "Scaricato: {path}"
