@@ -49,3 +49,7 @@ dist-client-update/
 # rsync privato del demone, installato da tools/install_server_rsync.sh
 server/bin/
 .rsync-install.*
+
+# Internal notes and tools: kept private, not published
+/private/
+/tools/release_all.sh

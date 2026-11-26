@@ -1,212 +1,136 @@
 # NASBox — your cloud, on your NAS
 
-NASBox synchronizes a folder between multiple PCs through a NAS over SSH and
-rsync. Your data stays on your own storage: no account, no third-party cloud
-service.
+NASBox keeps a folder in sync across your computers through **your own NAS**.
+Your files stay on your hardware: no account, no subscription, no third-party
+cloud. Think of it as a self-hosted Dropbox.
 
-> **The official program is NASBox Go** (`client-go/`, Go + Fyne, a single binary
-> for X11 and Wayland). The old PyQt6/Python client is **legacy and retired**: it
-> receives no further updates and its update channel is no longer published.
-> It is only useful for migrating data, which stays in the same place.
+- **Sync that just works** — change a file on one PC, it shows up on the others
+  within seconds. Works over your home network or over the Internet through SSH.
+- **Nothing is lost by accident** — every replaced or deleted file is kept in a
+  history you can browse and restore, on the PC and on the NAS.
+- **Simple window, powerful when needed** — a clean *Status / Files / Settings* view
+  by default; queue, logs and NAS monitor are one click away under *Advanced tools*.
+- **Browser access** — browse, search, preview, download and upload from any
+  browser, and share a file with a link that expires.
+- **Safe by default** — guards against mass deletions, conflict handling that never
+  overwrites silently, and fail-closed behaviour when something looks wrong.
 
-The staged plan for a self-hosted, Dropbox-like NAS cloud is in
-[`ROADMAP.md`](ROADMAP.md) (storage, metadata, reliability) and
-[`roadmap-claude.md`](roadmap-claude.md) (what is missing to replace Dropbox:
-simpler GUI, web browse/upload, Windows client, on-demand files).
+> User manual: [MANUAL.md](MANUAL.md). Release notes: [CHANGELOG.md](CHANGELOG.md).
 
-| Component | Current version |
+## What you get
+
+| | |
 |---|---|
-| NASBox Go client (official) | **1.20.0** |
-| NASBox Go server (`client-go/cmd/nasbox-server`) | **3.36.0** |
+| **Desktop app** | Linux (X11 and Wayland), one binary. System tray with recent files, pause and speed limit. File-manager entry "NASBox: previous versions". Windows build: experimental. |
+| **NAS daemon** | One small binary (ARM64 and x86-64) or the shell script. Keeps history, serves the web interface, runs nightly maintenance and sends optional notifications. |
+| **Web interface** | Served by the NAS daemon: browse, search, preview, upload, download, previous versions, expiring share links. |
 
-### Official client
+## Quick start
 
-NASBox Go is the only supported client. It is a single Fyne binary
-(`nasbox-go`) for Linux/X11 and Linux/Wayland. The legacy PyQt6 client is
-retired: its update channel is no longer published and no new work targets it.
-Configuration, local state, history and trash are shared with the old client,
-so migrating does not move any data.
+### 1. On the NAS
 
-The NAS runs the NASBox Go daemon. The default datapath is the chunk protocol:
-only missing content-addressed chunks are transferred, with deduplication between
-files and versions. The daemon owns the SQLite metadata index, journal, manifest,
-remote history and global transfer lease. The shell daemon and rsync remain a
-compatibility fallback for older installations.
-
-### Features
-
-- Continuous bidirectional sync with immediate change detection (inotify) and
-  a NAS change feed; several PCs share one NASBox root and are serialized by a
-  lease on the NAS.
-- Nothing is silently lost: replaced and deleted files go to NAS history
-  (`.sync-trash`) and local trash. "File versions" lists and restores them,
-  also from the file manager context menu.
-- Conflicts: newest wins by default, or resolve them manually; the losing copy
-  stays recoverable. A Conflict Center shows metadata, a text diff and a
-  recommended version.
-- Deletion guards (mass deletion, disappearing folders, sentinels, fail-closed
-  on unreadable files) and confirmation of held deletions.
-- GUI with a **simple view by default** (Home, Files, Settings: sync state,
-  recent activity, NAS space, file browser, versions/trash). Queue, log, NAS
-  monitor, devices, storage and counters live behind "Advanced tools" in the
-  sidebar. Also live transfers (file, speed, ETA), "Check system" diagnostics,
-  timed tray pauses and selective sync of NAS folders.
-- **Web UI** (served by the NAS daemon, `WEB_LISTEN`): browse, search, preview,
-  download and upload from any browser, including versions of a file. Uploads
-  go through the same transactional publish as the PCs, so every device receives
-  them. Read-only without a password; writes need `WEB_PASSWORD`.
-- Tray menu with recent files, timed pauses and a one-click bandwidth limit
-  (also on the Home screen).
-- Server maintenance: `--chunk-gc` (garbage collection of unreferenced chunks,
-  24 h grace) and `--chunk-fsck [--repair]` (SHA-256 verification of the chunk
-  store).
-- Desktop integration: "NASBox: versioni precedenti" in Thunar, Nautilus, Nemo,
-  Dolphin and Caja, plus a status emblem on the NASBox folder.
-- Automatic client updates with verification and rollback; the server can be
-  updated from the client after confirmation.
-- `nasbox-go doctor` reports server, rsync (local and NAS), locks, capabilities
-  and the last 24 hours of errors.
-- NAS capabilities are detected at bootstrap (CPU, memory, disks, rsync,
-  filesystem, change feed) and drive realtime mode, hashing parallelism and
-  power saving. A private rsync 3.5.1 can be installed on the NAS; the system
-  rsync 3.1.2 remains the fallback.
-
-### Requirements
-
-- Linux PC (X11 or Wayland) with `ssh` and, preferably, `inotify-tools`.
-  `rsync` ≥ 3.1 is needed only for the legacy transfer backend.
-- NAS reachable over SSH with a key and the NASBox Go server binary. The shell
-  fallback additionally requires `bash`, `flock`, `sha256sum`, `rsync` (even
-  3.1.2, as on Synology DSM) and standard shell utilities.
-- Go 1.27+ and a CGO-capable toolchain are needed only to build the client.
-
-### Install and update the client
-
-Download `nasbox-go-<version>` (linux-amd64) or the `.deb` package from the
-GitHub release of the chosen version, then:
+Download `nasbox-server-linux-arm64` (most Synology/QNAP ARM boxes) or
+`nasbox-server-linux-amd64` from the [latest release](../../releases/latest), then:
 
 ```bash
-# user install: ~/.local/bin, desktop entry, autostart
+chmod +x nasbox-server-linux-*
+cp server.conf.example server.conf          # set SHARE_ROOT=/volume1/NASBox
+./nasbox-server-linux-arm64 -c server.conf --init-repository
+./nasbox-server-linux-arm64 -c server.conf --start
+```
+
+Start it at boot with your NAS's task scheduler (on Synology: *Control Panel →
+Task Scheduler → triggered task → boot-up*, running the `--start` command).
+The shell-script installer (`server/install.sh`) remains available for NAS models
+without a suitable binary.
+
+### 2. On each PC
+
+Download the `.deb` or the `nasbox-go-<version>` binary from the same release:
+
+```bash
+sudo apt install ./nasbox-go_<version>_amd64.deb      # Debian / Ubuntu
+# or, for any distribution (no root needed):
 client-go/install.sh nasbox-go
-
-# migrate from the retired Python client (same config/state, no data copy)
-client-go/install.sh --migrate nasbox-go
-
-# Debian/Ubuntu package (updates go through the package manager)
-sudo apt install ./nasbox-go_<version>_amd64.deb
 ```
 
-Both clients must never run at the same time: they share the configuration and
-the instance lock. Config: `~/.config/sync-daemon/client.json`; state, log and
-trash: `~/.local/state/sync-daemon/`.
+Start **NASBox**. The first-run wizard asks for the NAS address and user, sets up
+the SSH key for you (the password is needed only once) and chooses the local folder.
+That is all: drop files in the folder and they sync.
 
-Installed from `~/.local/bin`, the client checks the `go-stable` channel at
-startup and every 6 hours, verifies SHA-256 and size, and rolls back if the new
-binary fails to start twice. Manual check:
+### 3. From a browser (optional)
 
-```bash
-nasbox-go update-check
-nasbox-go update-install        # requires a restart of the GUI
-nasbox-go doctor
-```
+Set `WEB_LISTEN`, `WEB_USER` and `WEB_PASSWORD` in the NAS `server.conf` and open
+`http://<nas>:8080`. **Use it on your home network or behind a VPN / HTTPS reverse
+proxy**; do not expose the port to the Internet without TLS.
 
-The channel is `/volume1/NASBox/.nasbox-client-update-go/` on the NAS
-(`manifest-go.json` + `nasbox-go-<version>`); it never uses the retired Python
-manifest.
+## Requirements
 
-### Install and update the NAS server
+- PC: Linux with `ssh` (and `inotify-tools` for instant change detection).
+- NAS: reachable over SSH with a key; Linux ARM64 or x86-64.
+- Optional: `rsync` ≥ 3.1 is used only by the legacy transfer backend.
 
-The canonical checkout lives on the NAS only:
+## Everyday use
 
-```bash
-git clone https://github.com/buzzqw/NASBox.git /volume1/Varie/sync-daemon
-cd /volume1/Varie/sync-daemon
-sudo ./server/install.sh          # set SHARE_ROOT=/volume1/NASBox
-./server/sync-daemon-server.sh --restart
-./server/sync-daemon-server.sh --print-config
-```
+- **Status at a glance**: the Status screen and the tray icon tell you whether
+  everything is in sync, what changed recently and what needs your attention.
+- **Pause** from the tray for an hour or until tomorrow; **limit the speed** with
+  one click.
+- **Restore** an older version or an accidentally deleted file from *Files →
+  History*, or right-click a file in your file manager.
+- **Conflicts** are resolved automatically in favour of the newest version by
+  default; the other copy is always kept and can be restored.
 
-The server version is `VERSION` at the top of `server/sync-daemon-server.sh`.
-It can also be updated from the client (*Check for server update*) after
-confirmation. The synchronized data root is `/volume1/NASBox` and is not a
-source checkout.
+## Updates
 
-### Command line
+The desktop app checks for updates at startup and every few hours, verifies them
+and rolls back automatically if a new version fails to start. The NAS daemon can
+be updated from the app after your confirmation.
+
+## Command line
 
 ```
-nasbox-go gui                      GUI (single instance)
-nasbox-go sync                     one sync pass
-nasbox-go versions <file>          file history (used by the file manager)
-nasbox-go status | show            status / bring the window to front
-nasbox-go doctor [--json]          diagnostics
-nasbox-go integrate [--remove]     file-manager menu entries
+nasbox-go gui                      open the app (single instance)
+nasbox-go sync                     run one sync pass
+nasbox-go doctor [--json]          check the setup (server, locks, errors)
+nasbox-go versions <file>          previous versions of a file
+nasbox-go status | show            show the status / bring the window forward
 nasbox-go update-check | update-install
-nasbox-go server-update-check | server-update-install
-nasbox-go preview | audit | undo | remote-history | remote-restore | prune-trash
 ```
 
-### Releases (Go version on **every** release)
+Run `nasbox-go` without arguments for the complete list.
 
-A release has two mandatory parts: the GitHub release artifacts and the
-`go-stable` channel on the NAS. Skip neither one: clients only see the channel.
+## Security
 
-1. Bump `client-go/internal/version/version.go` and add a section at the top of
-   `CHANGELOG.md`.
-2. Commit, then tag with the Go version: `git tag vX.Y.Z && git push origin master --tags`.
-   The `package.yml` workflow checks that the tag matches `packaging/version-go.sh`,
-   builds the Go binary and the `.deb`, and attaches both to the GitHub release
-   on **every** tag. The legacy Python artifacts are no longer published.
-3. Publish the same binary to the channel from the NAS (the NAS has no Go, so
-   build/copy the binary first):
+- Traffic between the PC and the NAS goes through SSH; there is no NASBox cloud.
+- The web interface is read-only until you set a password. Writes require the
+  password, and failed logins are rate-limited. Share links are random, expire,
+  can be revoked, and always download as attachments.
+- Report vulnerabilities as described in [SECURITY.md](SECURITY.md).
 
-   ```bash
-   cd /volume1/Varie/sync-daemon
-   python3 tools/publish_go_client.py --binary ./nasbox-go-X.Y.Z \
-     --dest-dir /volume1/NASBox/.nasbox-client-update-go \
-     --notes "<summary>" --keep 2
-   ```
-
-4. Verify digest and version, then let the clients update:
-
-   ```bash
-   python3 -c "import json,hashlib;m=json.load(open('/volume1/NASBox/.nasbox-client-update-go/manifest-go.json'));p='/volume1/NASBox/.nasbox-client-update-go/'+m['artifact'];print(m['version'],m['sha256']==hashlib.sha256(open(p,'rb').read()).hexdigest())"
-   ```
-
-A server-only release bumps `VERSION` in the server script instead; clients are
-notified and install it only after confirmation.
-
-### Development and tests
+## Building from source
 
 ```bash
 cd client-go
-go vet ./... && go test ./...        # includes end-to-end tests with real ssh/rsync/server
-NASBOX_UI_CAPTURE=/tmp/shots go test ./internal/ui -run TestCaptureSoftware
-bash -n server/install.sh server/sync-daemon-server.sh server/uninstall.sh
+go vet ./... && go test ./...
+go build -trimpath -ldflags='-s -w' -o nasbox-go ./cmd/nasbox
 ```
 
-The end-to-end tests exercise a temporary NAS share with simulated PCs. See
-`client-go/README.md` for protocol constraints and
-[`tests/LOAD_TESTS.md`](tests/LOAD_TESTS.md) for the load harness.
+Go 1.27+ and a CGO toolchain are needed for the desktop app; the NAS daemon
+(`./cmd/nasbox-server`) builds with `CGO_ENABLED=0`. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
-### Security
+## Roadmap
 
-Never commit `server/server.conf`, files under `server/state/`, SSH keys, logs
-or personal client configuration (already excluded by `.gitignore`). Read
-[SECURITY.md](SECURITY.md) before reporting a vulnerability.
+Planned next: a smoother Windows client, a deduplicated history to save NAS space,
+folder management and renaming from the web interface, and a simpler conflict
+screen. Suggestions are welcome as issues.
 
-### Support the Project
+## Support the project
 
-NASBox is free and open-source software built in spare time. If it is useful to
-you, consider supporting its development with a coffee.
+NASBox is free software. If it is useful to you, you can support its development:
 
-<div align="center">
+[![Donate with PayPal](https://img.shields.io/badge/Donate-PayPal-00457C?style=for-the-badge&logo=paypal)](https://www.paypal.com/donate/?business=azanzani%40gmail.com&item_name=NASBox)
 
-[![Donate with PayPal](https://img.shields.io/badge/Donate-PayPal-00457C?style=for-the-badge&logo=paypal)](https://www.paypal.com/cgi-bin/webscr?cmd=_donations&business=azanzani@gmail.com&item_name=Support+NASBox+Project) [![Ko-fi](https://img.shields.io/badge/Ko--fi-Support%20me-FF5E5B?style=for-the-badge&logo=ko-fi&logoColor=white)](https://ko-fi.com/buzzqw)
+## License
 
-</div>
-
-### License
-
-NASBox is licensed under the European Union Public Licence, version 1.2
-(EUPL-1.2). The [license](LICENSE) is a free and open-source copyleft licence
-that permits use, study, modification and distribution under its terms.
+See [LICENSE](LICENSE).

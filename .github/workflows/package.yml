@@ -45,6 +45,14 @@ jobs:
       - name: Build Go client
         working-directory: client-go
         run: go build -trimpath -ldflags='-s -w' -o "../dist/nasbox-go-${{ steps.version.outputs.version }}" ./cmd/nasbox
+      - name: Build NAS daemon (arm64 and amd64)
+        working-directory: client-go
+        run: |
+          for arch in arm64 amd64; do
+            CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go build -trimpath -ldflags='-s -w' \
+              -o "../dist/nasbox-server-linux-$arch" ./cmd/nasbox-server
+          done
+          cp ../server/server.conf.example ../dist/server.conf.example
       - name: Build Debian package
         run: packaging/build-deb-go.sh "dist/nasbox-go-${{ steps.version.outputs.version }}"
       - uses: actions/upload-artifact@v4
@@ -53,6 +61,8 @@ jobs:
           path: |
             dist/nasbox-go-*
             dist/nasbox-go_*.deb
+            dist/nasbox-server-linux-*
+            dist/server.conf.example
           if-no-files-found: error
 
   windows:

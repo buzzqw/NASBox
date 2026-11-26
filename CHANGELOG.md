@@ -4,6 +4,17 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+Documentazione:
+- **README e manuale riscritti, in inglese**: il README è una guida per chi usa
+  NASBox (cosa fa, avvio rapido, uso quotidiano, sicurezza) e `MANUAL.md` sostituisce
+  il vecchio manuale, che descriveva ancora il client Python ritirato.
+- **Documentazione interna resa privata**: note operative, roadmap, backlog, parità
+  con il client Python, note di design e procedura di rilascio non sono più nel
+  repository (restano nelle copie private di chi sviluppa). Restano nella cronologia
+  di Git dei commit precedenti.
+- **Le release includono il demone per il NAS** (`nasbox-server-linux-arm64` e
+  `-amd64`) e `server.conf.example`, con le istruzioni di installazione nel manuale.
+
 ## 1.20.0 - 2026-11-26
 
 Client 1.20.0 e server 3.36.0.
