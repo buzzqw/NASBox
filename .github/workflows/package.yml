@@ -107,10 +107,15 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v5
       - uses: actions/download-artifact@v4
         with:
           name: nasbox-go
           path: dist
+      - name: Prepare release notes
+        run: |
+          python3 packaging/changelog_section.py "${GITHUB_REF_NAME#v}" > "$RUNNER_TEMP/release-notes.md"
       - uses: softprops/action-gh-release@v2
         with:
           files: dist/*
+          body_path: ${{ runner.temp }}/release-notes.md
