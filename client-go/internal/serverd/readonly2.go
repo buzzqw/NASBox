@@ -143,6 +143,13 @@ func floatString(value float64) string {
 }
 
 func cmdMetrics(ctx *Context) error {
+	for _, line := range ctx.metricsLines() {
+		fmt.Println(line)
+	}
+	return nil
+}
+
+func (ctx *Context) metricsLines() []string {
 	p := ctx.paths()
 	uptime := "0"
 	if fields := procFields("/proc/uptime", 0, 1); fields != nil {
@@ -311,8 +318,5 @@ func cmdMetrics(ctx *Context) error {
 		fmt.Sprintf("JOURNAL_BYTES=%d", fileSize(p.Journal)),
 		fmt.Sprintf("MANIFEST_BYTES=%d", fileSize(p.Manifest)),
 	}
-	for _, line := range lines {
-		fmt.Println(line)
-	}
-	return nil
+	return lines
 }

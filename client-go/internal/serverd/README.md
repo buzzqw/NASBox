@@ -62,8 +62,23 @@ Implementati: `--journal-append`, `--staging-publish` (V1/V2),
   milestone 4.
 - `--print-config` riporta `RUNNING=true` quando il demone Go è avviato.
 
-## Milestone successiva
+## Milestone 4 — web UI e self-update nativo (completata)
 
-4. web UI nello stesso binario e self-update nativo del demone Go; poi
-   disattivazione dello script bash e collegamento del transfer lato client
-   allo store a chunk.
+- `--web [INDIRIZZO]`: UI minimale e API JSON (`/api/status`, `/api/metrics`,
+  `/api/browse`, `/api/chunks`) servite dallo stesso binario. Default
+  `127.0.0.1:8080`, quindi non esposta alla LAN per impostazione predefinita.
+- `--server-update-check` / `--server-update-install VERSION`: il binario
+  versionato `nasbox-server-<v>` viene verificato (sha256 opzionale), copiato
+  in `.prev` e sostituito con rename atomico; la versione effettiva è letta da
+  un sidecar `<binario>.version`, quindi `--print-config` riporta la nuova
+  versione dopo il riavvio.
+- Provato in locale: 9.9.9 installato, `VERSION=9.9.9`, `RUNNING=true`.
+- E2E client: 8 PASS, 1 SKIP (il test di self-update usa ancora uno script
+  bash con `VERSION="…"`; il percorso Go è coperto dal test locale sopra).
+- Parity read-only: 11/11.
+
+## Ultimo passo
+
+Collegare il transfer lato client allo store a chunk (sostituendo rsync),
+poi disattivare lo script bash in produzione. Lo store e i verbi di
+snapshot/restore sono già pronti dalla milestone 1.

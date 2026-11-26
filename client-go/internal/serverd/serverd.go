@@ -12,7 +12,24 @@ import (
 	"strings"
 )
 
-const version = "3.32.4"
+var version = "3.32.4"
+
+// LoadVersion allows a versioned binary to report its own version through a
+// small sidecar file next to the executable. This is how --server-update-install
+// makes the new version visible to --print-config without rebuilding Go code.
+func LoadVersion() {
+	executable, err := os.Executable()
+	if err != nil {
+		return
+	}
+	data, err := os.ReadFile(executable + ".version")
+	if err != nil {
+		return
+	}
+	if candidate := strings.TrimSpace(string(data)); candidate != "" {
+		version = candidate
+	}
+}
 
 // Options are the global flags accepted before the verb.
 type Options struct {
@@ -252,6 +269,12 @@ func Dispatch(ctx *Context, verb string, args []string) error {
 		return cmdRestart(ctx)
 	case "--run-foreground":
 		return cmdDaemonForeground(ctx)
+	case "--web":
+		return cmdWeb(ctx, args)
+	case "--server-update-check":
+		return cmdServerUpdateCheck(ctx)
+	case "--server-update-install":
+		return cmdServerUpdateInstall(ctx, args)
 	default:
 		return fmt.Errorf("verbo %q non ancora implementato nella milestone 0", verb)
 	}
@@ -281,6 +304,12 @@ Datapath a chunk (milestone 1, non ancora usato dai client):
   nasbox-server -c FILE --chunk-snapshot-create DEVICE PATH [PATH...]
   nasbox-server -c FILE --chunk-snapshot-list
   nasbox-server -c FILE --chunk-restore ID PATH DEST
+
+Servizio e aggiornamenti:
+  nasbox-server -c FILE --start | --stop | --restart | --run-foreground
+  nasbox-server -c FILE --web [INDIRIZZO]
+  nasbox-server -c FILE --server-update-check
+  nasbox-server -c FILE --server-update-install VERSION
 `, version)
 	return nil
 }
