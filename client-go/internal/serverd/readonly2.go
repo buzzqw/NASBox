@@ -2,6 +2,7 @@ package serverd
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"math"
 	"os"
@@ -18,16 +19,54 @@ var internalNames = map[string]bool{
 	".nasbox-root": true, "@eaDir": true,
 }
 
-func validRelative(path string) bool {
+var errInvalidPath = errors.New("percorso non valido")
+
+func relativeComponents(path string) ([]string, bool) {
 	if path == "" || filepath.IsAbs(path) {
+		return nil, false
+	}
+	components := strings.Split(path, "/")
+	for _, component := range components {
+		if component == "" || component == "." || component == ".." {
+			return nil, false
+		}
+	}
+	return components, true
+}
+
+func validRelative(path string) bool {
+	components, ok := relativeComponents(path)
+	if !ok {
 		return false
 	}
-	for _, component := range strings.Split(path, "/") {
-		if component == ".." || internalNames[component] {
+	for _, component := range components {
+		if internalNames[component] {
 			return false
 		}
 	}
 	return true
+}
+
+// resolveRelativeNoSymlinks validates and resolves one component at a time so
+// a symlink in any ancestor cannot redirect access outside root. The final
+// component is checked too, allowing callers to reject symlinks uniformly.
+func resolveRelativeNoSymlinks(root, relative string) (string, error) {
+	components, ok := relativeComponents(relative)
+	if !ok {
+		return "", errInvalidPath
+	}
+	current := root
+	for _, component := range components {
+		current = filepath.Join(current, component)
+		info, err := os.Lstat(current)
+		if err != nil {
+			return "", err
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return "", errInvalidPath
+		}
+	}
+	return current, nil
 }
 
 func cmdBrowseList(ctx *Context, args []string) error {
@@ -41,7 +80,16 @@ func cmdBrowseList(ctx *Context, args []string) error {
 	}
 	target := ctx.ShareRoot
 	if relative != "" {
-		target = filepath.Join(target, relative)
+		var err error
+		target, err = resolveRelativeNoSymlinks(ctx.ShareRoot, relative)
+		if errors.Is(err, errInvalidPath) {
+			fmt.Fprintln(os.Stderr, "browse-list: percorso non valido")
+			return exitCode(1)
+		}
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "browse-list: cartella non trovata")
+			return exitCode(1)
+		}
 	}
 	info, err := os.Lstat(target)
 	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {

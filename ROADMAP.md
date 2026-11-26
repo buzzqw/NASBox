@@ -93,6 +93,26 @@ stesso percorso offline e ottengono un conflitto deterministico e recuperabile.
 - Conflict center completo: diff, metadati, selezione multipla e storico.
 - Aggiornamenti firmati e distribuzione atomica.
 
+## Ispirazione da Kopia
+
+Kopia è un sistema di backup, non un motore di sync continua. È utile come
+riferimento per il livello storage e manutenzione:
+
+- **Chunking content-defined**: confini dei chunk basati sul contenuto, così un
+  inserimento all'inizio di un file non invalida la deduplica di tutto il resto.
+- **Snapshot manifest immutabili**: un manifest compatto descrive puntualmente
+  interi snapshot, invece di ricostruire lo stato da molte copie `.sync-trash`.
+- **Mark-and-sweep GC**: oggetti raggiungibili dagli snapshot attivi; eliminazione
+  solo dopo verifica e con periodo di grazia.
+- **Manutenzione verificabile**: health check, compattazione controllata e
+  riparazione esplicita dei blob danneggiati.
+- **Compressione, encryption ed error correction opzionali** per chunk, con
+  capability negoziate e formato versionato.
+- **Storage astratto**: locale, SFTP o object storage dietro la stessa interfaccia.
+
+Da non copiare: il modello di backup non sostituisce journal, lease e conflict
+handling di NASBox. La sincronizzazione continua resta il nucleo del progetto.
+
 ## Cosa non fare
 
 - Non introdurre un database client-server pesante finché SQLite + WAL basta.

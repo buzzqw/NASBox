@@ -83,9 +83,15 @@ func cmdBrowseRename(ctx *Context) error {
 			if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
 				return failBrowse(magic, "sorgente non regolare")
 			}
-			expectedSize, _ := strconv.ParseInt(fields[7], 10, 64)
-			expectedMTime, _ := strconv.ParseInt(fields[8], 10, 64)
-			if info.Size() != expectedSize || info.ModTime().Unix() != expectedMTime {
+			expectedSize, err := strconv.ParseInt(fields[7], 10, 64)
+			if err != nil {
+				return failBrowse(magic, "dimensione non valida")
+			}
+			expectedMTimeNS, err := strconv.ParseInt(fields[8], 10, 64)
+			if err != nil {
+				return failBrowse(magic, "mtime non valido")
+			}
+			if info.Size() != expectedSize || info.ModTime().Unix() != expectedMTimeNS/1_000_000_000 {
 				return failBrowse(magic, "sorgente cambiata")
 			}
 			digest, err := sha256File(source)

@@ -12,7 +12,7 @@ import (
 	"strings"
 )
 
-var version = "3.32.4"
+var version = "3.33.0"
 
 // LoadVersion allows a versioned binary to report its own version through a
 // small sidecar file next to the executable. This is how --server-update-install
@@ -247,6 +247,10 @@ func Dispatch(ctx *Context, verb string, args []string) error {
 		return cmdChunkRestore(ctx, args)
 	case "--chunk-put-batch":
 		return cmdChunkPutBatch(ctx)
+	case "--chunk-has":
+		return cmdChunkHas(ctx)
+	case "--chunk-put-compressed":
+		return cmdChunkPutCompressed(ctx)
 	case "--chunk-get":
 		return cmdChunkGet(ctx, args)
 	case "--file-chunks":
@@ -269,6 +273,8 @@ func Dispatch(ctx *Context, verb string, args []string) error {
 		return cmdTransferWait(ctx)
 	case "--checked-delete":
 		return cmdCheckedDelete(ctx)
+	case "--restore-batch":
+		return cmdRestoreBatch(ctx)
 	case "--browse-rename":
 		return cmdBrowseRename(ctx)
 	case "--browse-delete":
@@ -314,6 +320,7 @@ Uso:
   nasbox-server -c FILE --manifest-get PATH
   nasbox-server -c FILE --file-states
   nasbox-server -c FILE --history-list
+  nasbox-server -c FILE --restore-batch
 
 Datapath a chunk (milestone 1, non ancora usato dai client):
   nasbox-server -c FILE --chunk-stats

@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"time"
 )
 
 func readNULString(reader *bufio.Reader) (string, error) {
@@ -19,6 +18,26 @@ func readNULString(reader *bufio.Reader) (string, error) {
 		return "", err
 	}
 	return strings.TrimSuffix(value, "\x00"), nil
+}
+
+// validatePublishContent keeps empty files representable without requiring a
+// synthetic chunk. Every non-empty file must carry at least one chunk.
+func validatePublishContent(digest, sizeRaw string, chunks []string) error {
+	size, err := strconv.ParseInt(sizeRaw, 10, 64)
+	if err != nil || size < 0 {
+		return exitCode(1)
+	}
+	if size == 0 {
+		empty := sha256.Sum256(nil)
+		if len(chunks) != 0 || digest != hex.EncodeToString(empty[:]) {
+			return exitCode(1)
+		}
+		return nil
+	}
+	if len(chunks) == 0 {
+		return exitCode(1)
+	}
+	return nil
 }
 
 // cmdChunkPutBatch stores chunks sent by a client. Framing is NUL for the
@@ -238,8 +257,14 @@ func cmdFilePublish(ctx *Context, args []string) error {
 	if err != nil {
 		return exitCode(1)
 	}
+	if _, err := strconv.ParseInt(mtime, 10, 64); err != nil {
+		return exitCode(1)
+	}
 	causal, err := readNULString(reader)
 	if err != nil {
+		return exitCode(1)
+	}
+	if causal != "" && !causalPattern.MatchString(causal) {
 		return exitCode(1)
 	}
 	countRaw, err := readNULString(reader)
@@ -247,7 +272,7 @@ func cmdFilePublish(ctx *Context, args []string) error {
 		return exitCode(1)
 	}
 	count, err := strconv.Atoi(countRaw)
-	if err != nil || count < 1 || count > 100000 {
+	if err != nil || count < 0 || count > 100000 {
 		return exitCode(1)
 	}
 	chunks := make([]string, 0, count)
@@ -258,59 +283,14 @@ func cmdFilePublish(ctx *Context, args []string) error {
 		}
 		chunks = append(chunks, chunk)
 	}
-	if err := ctx.requireLease(device); err != nil {
-		return mapLeaseError(err)
-	}
-	store, err := ctx.chunkStore()
-	if err != nil {
+	if err := validatePublishContent(digest, sizeRaw, chunks); err != nil {
 		return err
 	}
-	target := filepath.Join(ctx.ShareRoot, path)
-	backup := filepath.Join(ctx.ShareRoot, ".sync-trash", path+"-"+runTS)
-	err = ctx.withJournalLock(func() error {
-		if _, err := os.Lstat(target); err == nil {
-			if err := os.MkdirAll(filepath.Dir(backup), 0o755); err != nil {
-				return err
-			}
-			if err := os.Rename(target, backup); err != nil {
-				return err
-			}
-		}
-		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-			return err
-		}
-		if err := store.Assemble(chunks, target); err != nil {
-			return err
-		}
-		requestedNS, _ := strconv.ParseInt(mtime, 10, 64)
-		stamp := time.Unix(0, requestedNS)
-		if err := os.Chtimes(target, stamp, stamp); err != nil {
-			return err
-		}
-		info, err := os.Lstat(target)
-		mtimeNS, _ := strconv.ParseInt(mtime, 10, 64)
-		if err != nil || strconv.FormatInt(info.Size(), 10) != sizeRaw ||
-			info.ModTime().UnixNano() != mtimeNS {
-			if _, statErr := os.Lstat(backup); statErr == nil {
-				_ = os.Rename(backup, target)
-			}
-			return exitCode(1)
-		}
-		mtime = strconv.FormatInt(info.ModTime().UnixNano(), 10)
-		actualDigest, err := sha256File(target)
-		if err != nil || actualDigest != digest {
-			if _, statErr := os.Lstat(backup); statErr == nil {
-				_ = os.Rename(backup, target)
-			}
-			return exitCode(1)
-		}
-		if err := store.SaveFileMeta(digest, chunks); err != nil {
-			return err
-		}
-		rows := []string{journalRowPUT(encodeField(path), digest, sizeRaw, mtime, encodeField(device), journalNow(), causal)}
-		return ctx.appendTransactionLocked(txid, device, rows)
-	})
-	if err != nil {
+	record := publishRecord{
+		path: path, digest: digest, size: sizeRaw, mtime: mtime, causal: causal,
+		chunks: chunks,
+	}
+	if err := ctx.publishChunkRecords(device, txid, runTS, "replace", []publishRecord{record}); err != nil {
 		return err
 	}
 	fmt.Print("FILE_PUBLISH_V1\x00OK\x00")

@@ -16,6 +16,7 @@ import (
 type StatePaths struct {
 	Dir         string
 	Journal     string
+	TxIntent    string
 	Manifest    string
 	Revision    string
 	Snapshot    string
@@ -35,6 +36,7 @@ func (c *Context) paths() StatePaths {
 	return StatePaths{
 		Dir:         dir,
 		Journal:     filepath.Join(dir, "transfer-journal.tsv"),
+		TxIntent:    filepath.Join(dir, txIntentDBName),
 		Manifest:    filepath.Join(dir, "manifest.tsv"),
 		Revision:    filepath.Join(dir, "manifest.revision"),
 		Snapshot:    filepath.Join(dir, "manifest.snapshot"),

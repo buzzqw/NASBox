@@ -8,6 +8,31 @@ import (
 	"testing"
 )
 
+func TestCapabilityValuesDeclareChunkTransfer(t *testing.T) {
+	ctx, _ := newTestContext(t)
+	values := map[string]string{}
+	for _, line := range capabilityValues(ctx) {
+		key, value, found := strings.Cut(line, "=")
+		if !found {
+			t.Fatalf("capability senza valore: %q", line)
+		}
+		values[key] = value
+	}
+	if values["CHUNK_TRANSFER_AVAILABLE"] != "true" {
+		t.Fatalf("CHUNK_TRANSFER_AVAILABLE = %q, want true", values["CHUNK_TRANSFER_AVAILABLE"])
+	}
+	found := false
+	for _, capability := range strings.Split(values["CAPABILITIES"], ",") {
+		if capability == "chunk_transfer_v3" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("chunk_transfer_v3 assente da CAPABILITIES: %q", values["CAPABILITIES"])
+	}
+}
+
 func TestChunkStoreDeduplicatesAndAssembles(t *testing.T) {
 	root := t.TempDir()
 	store, err := NewChunkStore(root)

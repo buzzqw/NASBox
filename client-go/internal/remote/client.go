@@ -383,6 +383,7 @@ func (c *Client) Bootstrap() error {
 	if err != nil {
 		return err
 	}
+	requestedBackend := strings.TrimSpace(c.cfg.String("transfer_backend"))
 	minimum := c.cfg.String("min_server_version")
 	if minimum == "" || versionLess(minimum, "3.25.0") {
 		minimum = "3.25.0"
@@ -414,6 +415,16 @@ func (c *Client) Bootstrap() error {
 		strings.ToLower(values["CAUSAL_VERSIONS_AVAILABLE"]) == "true", true)
 	c.cfg.Set("remote_change_feed_available",
 		strings.ToLower(values["CHANGE_FEED_AVAILABLE"]) == "true", true)
+	chunkTransferAvailable := strings.EqualFold(values["CHUNK_TRANSFER_AVAILABLE"], "true") &&
+		hasCapability(values["CAPABILITIES"], "chunk_transfer_v3")
+	c.cfg.Set("remote_chunk_transfer_available", chunkTransferAvailable, true)
+	// transfer_backend is a preference, not proof that the NAS implements the
+	// chunk protocol. Recompute the effective backend on every bootstrap.
+	effectiveBackend := "rsync"
+	if strings.EqualFold(requestedBackend, "chunks") && chunkTransferAvailable {
+		effectiveBackend = "chunks"
+	}
+	c.cfg.Set("effective_transfer_backend", effectiveBackend, true)
 	c.cfg.Set("server_version", strings.TrimSpace(values["VERSION"]), true)
 	c.cfg.Set("nas_capabilities", values["CAPABILITIES"], true)
 	c.cfg.Set("nas_cpu_count", atoiOr(values["CPU_COUNT"], 0), true)
@@ -427,6 +438,15 @@ func (c *Client) Bootstrap() error {
 	c.cfg.Set("nas_fs_type", strings.TrimSpace(values["FS_TYPE"]), true)
 	c.cfg.Set("nas_file_states_parallelism", atoiOr(values["FILE_STATES_PARALLELISM"], 0), true)
 	return nil
+}
+
+func hasCapability(list, wanted string) bool {
+	for _, capability := range strings.Split(list, ",") {
+		if strings.TrimSpace(capability) == wanted {
+			return true
+		}
+	}
+	return false
 }
 
 // atoiOr parses a capability value, falling back when the server did not send

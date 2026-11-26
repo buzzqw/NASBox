@@ -2,6 +2,7 @@ package serverd
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -100,11 +101,7 @@ func (c *Context) statusValues() map[string]string {
 	}
 }
 
-func cmdWeb(ctx *Context, args []string) error {
-	address := "127.0.0.1:8080"
-	if len(args) > 0 && args[0] != "" {
-		address = args[0]
-	}
+func (ctx *Context) webHandler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
@@ -128,7 +125,16 @@ func cmdWeb(ctx *Context, args []string) error {
 		}
 		target := ctx.ShareRoot
 		if relative != "" {
-			target = filepath.Join(target, relative)
+			var err error
+			target, err = resolveRelativeNoSymlinks(ctx.ShareRoot, relative)
+			if errors.Is(err, errInvalidPath) {
+				http.Error(w, "percorso non valido", http.StatusBadRequest)
+				return
+			}
+			if err != nil {
+				http.Error(w, "cartella non trovata", http.StatusNotFound)
+				return
+			}
 		}
 		info, err := os.Lstat(target)
 		if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
@@ -196,19 +202,21 @@ func cmdWeb(ctx *Context, args []string) error {
 			http.Error(w, "percorso non valido", http.StatusBadRequest)
 			return
 		}
-		fromTrash := strings.HasPrefix(relative, ".sync-trash/")
 		for _, component := range strings.Split(relative, "/") {
-			if component == ".." || component == ".nasbox-staging" || component == ".sync-partial" || component == "@eaDir" {
+			if component == ".nasbox-staging" || component == ".sync-partial" || component == "@eaDir" {
 				http.Error(w, "percorso non valido", http.StatusBadRequest)
 				return
 			}
 		}
-		base := ctx.ShareRoot
-		if fromTrash {
-			base = filepath.Join(base, ".sync-trash")
-			relative = strings.TrimPrefix(relative, ".sync-trash/")
+		full, err := resolveRelativeNoSymlinks(ctx.ShareRoot, relative)
+		if errors.Is(err, errInvalidPath) {
+			http.Error(w, "percorso non valido", http.StatusBadRequest)
+			return
 		}
-		full := filepath.Join(base, filepath.FromSlash(relative))
+		if err != nil {
+			http.Error(w, "file non trovato", http.StatusNotFound)
+			return
+		}
 		info, err := os.Lstat(full)
 		if err != nil || !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
 			http.Error(w, "file non trovato", http.StatusNotFound)
@@ -238,7 +246,15 @@ func cmdWeb(ctx *Context, args []string) error {
 			"objects": objects, "bytes": bytes, "snapshots": len(snapshots), "chunk_size": ctx.ChunkSize(),
 		})
 	})
-	server := &http.Server{Addr: address, Handler: ctx.withBasicAuth(mux), ReadHeaderTimeout: 5 * time.Second}
+	return ctx.withBasicAuth(mux)
+}
+
+func cmdWeb(ctx *Context, args []string) error {
+	address := "127.0.0.1:8080"
+	if len(args) > 0 && args[0] != "" {
+		address = args[0]
+	}
+	server := &http.Server{Addr: address, Handler: ctx.webHandler(), ReadHeaderTimeout: 5 * time.Second}
 	fmt.Printf("NASBox web UI in ascolto su http://%s\n", address)
 	return server.ListenAndServe()
 }

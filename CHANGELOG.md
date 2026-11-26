@@ -4,6 +4,9 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 1.15.3 / 3.33.0 - 2026-11-26
+
+Client e server Go:
 - **Metadata NAS indicizzata da SQLite**: `server/state/metadata.sqlite3` è un
   indice derivato e ricostruibile di manifest e journal. Export delta, lookup
   manifest e `file-states-current` non rendono più l'intero repository; journal e
@@ -21,6 +24,29 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
   invia già `FALLBACK_FULL`.
 - **File states precisi**: lookup indicizzato che include il journal recente e
   mtime in nanosecondi, senza rihash inutili sui file invariati.
+- **Upload chunk in streaming**: il file viene riletto e inviato un chunk alla
+  volta, senza mantenere in RAM l'intero contenuto; il lease NAS è tenuto solo
+  per precondition e pubblicazione.
+- **Deduplica di rete e compressione**: il client chiede al NAS quali chunk
+  mancano e comprime solo quelli da inviare quando conviene; gli oggetti sul NAS
+  restano raw e content-addressed.
+- **Limiti di banda e ripresa**: upload/download rispettano i limiti KB/s già
+  presenti nelle Impostazioni; il download conserva un checkpoint verificato e
+  riprende dai chunk mancanti dopo un'interruzione.
+- **Progresso e cancellazione chunk**: callback di avanzamento per upload e
+  download e propagazione del context di annullamento alle operazioni SSH.
+- **File vuoti e digest intero**: pubblicazione/download dei file da zero byte e
+  verifica SHA-256 dell'intero file scaricato.
+- **Pubblicazioni atomiche**: rollback completo dei nuovi target, retry
+  idempotenti e modalità `create` che rifiuta un percorso creato nel frattempo.
+- **Capability del backend**: il client negozia `chunk_transfer_v3` e ripiega su
+  rsync se il server non la supporta.
+- **Recovery delle pubblicazioni**: intent persistente `PREPARED/READY/COMMITTED`,
+  recupero sotto lease e nessun rollback dopo il commit.
+- **Restore batch**: ripristino NAS multiplo con backup, journal, retry idempotente
+  e protezioni sui percorsi.
+- **Sicurezza web e protocollo**: rifiuto di symlink antenati e validazione dei
+  percorsi/operazioni server.
 
 ## 1.15.2 - 2026-11-26
 

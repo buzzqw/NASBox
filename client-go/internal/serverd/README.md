@@ -119,6 +119,18 @@ perché i verbi a chunk non esistono nel vecchio server.
 - Il retry di una transazione ripara un bump di revisione mancante; un errore
   di compattazione dopo il commit viene registrato ma non annulla la mutazione.
 
+## Milestone 8 — trasferimenti robusti e recovery (completata)
+
+- Upload streaming con deduplica di rete (`--chunk-has`) e compressione zlib
+  trasparente (`--chunk-put-compressed`); gli oggetti restano raw su disco.
+- File vuoti, digest intero verificato, limiti di banda e ripresa download dal
+  checkpoint locale.
+- Pubblicazione batch V2 con modalità `create`/`replace`, precondition contro
+  target concorrenti e rollback completo prima del commit.
+- Intent persistenti `tx-intent.sqlite3` con recupero sotto lease per crash
+  durante la pubblicazione.
+- `--restore-batch`, validazione dei percorsi e protezione contro symlink antenati.
+
 ## Distribuzione futura
 
 1. Distribuire il demone Go sul NAS e verificare i 11 comandi read-only.

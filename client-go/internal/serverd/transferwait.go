@@ -184,6 +184,13 @@ func cmdTransferWait(ctx *Context) error {
 	if err := ctx.writeOwner(device, host, "", 0, 0); err != nil {
 		return err
 	}
+	// The global lease is now ours. Finish any interrupted chunk publication
+	// before telling the client that the NAS is ready for mutations.
+	if err := ctx.withJournalLock(func() error {
+		return ctx.recoverTxIntentsLocked(device, nil)
+	}); err != nil {
+		return err
+	}
 	fmt.Println("NASBOX_LOCKED")
 
 	signals := make(chan os.Signal, 1)

@@ -56,7 +56,7 @@ func capabilityValues(ctx *Context) []string {
 	systemVersion := rsyncVersion("rsync")
 	privatePath := filepath.Join(ctx.ServerDir, "bin", "nasbox-rsync")
 	privateVersion := rsyncVersion(privatePath)
-	caps := "change_feed,causal_versions,v3_rename,batch_delete,quiet_lock,empty_dir_prune,capabilities_v1"
+	caps := "change_feed,causal_versions,v3_rename,batch_delete,quiet_lock,empty_dir_prune,capabilities_v1,chunk_transfer_v1,chunk_transfer_v2,chunk_transfer_v3"
 	if privateVersion != "" {
 		caps += ",private_rsync"
 	}
@@ -84,6 +84,8 @@ func capabilityValues(ctx *Context) []string {
 		"CAPABILITIES=" + caps,
 		"CHANGE_FEED_AVAILABLE=true",
 		"CAUSAL_VERSIONS_AVAILABLE=true",
+		"CHUNK_TRANSFER_AVAILABLE=true",
+		"CHUNK_TRANSFER_VERSION=3",
 		"BROWSE_RENAME_PROTOCOLS=BROWSE_RENAME_V1,BROWSE_RENAME_V2,BROWSE_RENAME_V3",
 		fmt.Sprintf("CPU_COUNT=%d", cores),
 		fmt.Sprintf("MEM_TOTAL_MB=%d", memMB),

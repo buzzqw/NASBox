@@ -14,8 +14,8 @@ The staged plan for a self-hosted, Dropbox-like NAS cloud is in
 
 | Component | Current version |
 |---|---|
-| NASBox Go client (official) | **1.15.2** |
-| NASBox Go server (`client-go/cmd/nasbox-server`) | **3.32.4** |
+| NASBox Go client (official) | **1.15.3** |
+| NASBox Go server (`client-go/cmd/nasbox-server`) | **3.33.0** |
 
 ### Official client
 

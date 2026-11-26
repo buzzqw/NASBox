@@ -79,6 +79,103 @@ func fakeRunCommand(t *testing.T, fn commandFunc) {
 	t.Cleanup(func() { runCommand = old })
 }
 
+func TestBootstrapNegotiatesTransferBackend(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		backend       string
+		capabilities  string
+		available     string
+		wantAvailable bool
+		wantEffective string
+	}{
+		{
+			name: "chunks supportato", backend: "chunks",
+			capabilities: "change_feed,chunk_transfer_v1,chunk_transfer_v2,chunk_transfer_v3", available: "true",
+			wantAvailable: true, wantEffective: "chunks",
+		},
+		{
+			name: "solo chunk v1", backend: "chunks",
+			capabilities: "change_feed,chunk_transfer_v1", available: "true",
+			wantAvailable: false, wantEffective: "rsync",
+		},
+		{
+			name: "solo chunk v2", backend: "chunks",
+			capabilities: "change_feed,chunk_transfer_v1,chunk_transfer_v2", available: "true",
+			wantAvailable: false, wantEffective: "rsync",
+		},
+		{
+			name: "chunks non supportato", backend: "chunks",
+			capabilities: "change_feed", available: "false",
+			wantAvailable: false, wantEffective: "rsync",
+		},
+		{
+			name: "capability chunk assente", backend: "chunks",
+			capabilities: "change_feed", available: "",
+			wantAvailable: false, wantEffective: "rsync",
+		},
+		{
+			name: "rsync richiesto", backend: "rsync",
+			capabilities: "change_feed,chunk_transfer_v1,chunk_transfer_v2,chunk_transfer_v3", available: "true",
+			wantAvailable: true, wantEffective: "rsync",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "client.json")
+			cfg := config.New(path)
+			cfg.Set("transfer_backend", tc.backend, true)
+			// Bootstrap must replace stale negotiated values, not trust the
+			// previous server's capabilities.
+			cfg.Set("remote_chunk_transfer_available", !tc.wantAvailable, true)
+			cfg.Set("effective_transfer_backend", "stale", true)
+
+			lines := []string{
+				"VERSION=3.32.4",
+				"REPOSITORY_READY=true",
+				"JOURNAL_READY=true",
+				"PATH_RECONCILIATION_AVAILABLE=true",
+				"REPOSITORY_ID=0123456789abcdef",
+				"SHARE_ROOT=/volume1/NASBox",
+				"CAPABILITIES=" + tc.capabilities,
+			}
+			if tc.available != "" {
+				lines = append(lines, "CHUNK_TRANSFER_AVAILABLE="+tc.available)
+			}
+			output := []byte(strings.Join(lines, "\n") + "\n")
+			fakeRunCommand(t, func(_ context.Context, _ []byte, name string, args ...string) ([]byte, []byte, error) {
+				if name != "ssh" || !strings.Contains(strings.Join(args, " "), "--print-config") {
+					return nil, nil, fmt.Errorf("comando inatteso: %s %v", name, args)
+				}
+				return output, nil, nil
+			})
+
+			client := NewWithConnection(cfg, Connection{Host: "192.168.1.119"})
+			if err := client.Bootstrap(); err != nil {
+				t.Fatal(err)
+			}
+			if got := cfg.Bool("remote_chunk_transfer_available"); got != tc.wantAvailable {
+				t.Fatalf("remote_chunk_transfer_available = %v, want %v", got, tc.wantAvailable)
+			}
+			if got := cfg.String("effective_transfer_backend"); got != tc.wantEffective {
+				t.Fatalf("effective_transfer_backend = %q, want %q", got, tc.wantEffective)
+			}
+			if got := cfg.String("transfer_backend"); got != tc.backend {
+				t.Fatalf("transfer_backend modificato: %q, want %q", got, tc.backend)
+			}
+
+			reloaded, err := config.LoadFrom(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := reloaded.Bool("remote_chunk_transfer_available"); got != tc.wantAvailable {
+				t.Fatalf("capability non salvata: got %v, want %v", got, tc.wantAvailable)
+			}
+			if got := reloaded.String("effective_transfer_backend"); got != tc.wantEffective {
+				t.Fatalf("backend effettivo non salvato: got %q, want %q", got, tc.wantEffective)
+			}
+		})
+	}
+}
+
 func TestSSHBuilderLANOptions(t *testing.T) {
 	deterministicMultiplex(t)
 	b := NewSSHBuilder(testConfig(), Connection{Host: "192.168.1.119"})

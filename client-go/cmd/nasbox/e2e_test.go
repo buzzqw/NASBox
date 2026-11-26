@@ -707,6 +707,19 @@ func TestE2EChunkProtocol(t *testing.T) {
 			t.Fatalf("chunk %s corrotto", chunk)
 		}
 	}
+	emptySum := sha256.Sum256(nil)
+	emptyDigest := hex.EncodeToString(emptySum[:])
+	if err := client.FilePublish("cartella/empty.bin", emptyDigest, 0, stamp, "device-chunks:2",
+		nil, "device-chunks", "chunk-tx-empty", remote.RunTimestamp()); err != nil {
+		t.Fatalf("pubblicazione file vuoto: %v", err)
+	}
+	if got, err := os.ReadFile(filepath.Join(nas.share, "cartella", "empty.bin")); err != nil || len(got) != 0 {
+		t.Fatalf("file vuoto sul NAS diverso: len=%d err=%v", len(got), err)
+	}
+	emptyInfo, err := client.FileChunks("cartella/empty.bin")
+	if err != nil || !emptyInfo.Found || emptyInfo.Digest != emptyDigest || len(emptyInfo.Chunks) != 0 {
+		t.Fatalf("file-chunks vuoto: %+v err=%v", emptyInfo, err)
+	}
 	if !nas.lockFree() {
 		t.Fatal("il lock NAS deve essere libero")
 	}

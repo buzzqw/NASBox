@@ -78,10 +78,10 @@ func cmdJournalAppend(ctx *Context) error {
 		} else {
 			offset += 5
 		}
-		if action != "PUT" && action != "DELETE" || path == "" {
+		if action != "PUT" && action != "DELETE" || !validRelative(path) {
 			return exitCode(1)
 		}
-		if digest != "" && !digest64.MatchString(digest) {
+		if (action == "PUT" || digest != "") && !digest64.MatchString(digest) {
 			return exitCode(1)
 		}
 		if _, err := strconv.ParseInt(size, 10, 64); err != nil {

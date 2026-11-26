@@ -35,6 +35,18 @@ func TestLoadOverlaysFileOnDefaults(t *testing.T) {
 	}
 }
 
+func TestTransferBackendNegotiationDefaults(t *testing.T) {
+	cfg := New("")
+	available, ok := cfg.Get("remote_chunk_transfer_available").(bool)
+	if !ok || available {
+		t.Fatalf("remote_chunk_transfer_available default = %#v, want false", cfg.Get("remote_chunk_transfer_available"))
+	}
+	effective, ok := cfg.Get("effective_transfer_backend").(string)
+	if !ok || effective != "" {
+		t.Fatalf("effective_transfer_backend default = %#v, want empty string", cfg.Get("effective_transfer_backend"))
+	}
+}
+
 func TestSaveIsAtomic(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "client.json")
 	cfg := New(path)
