@@ -4,6 +4,10 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 1.21.2 - 2026-11-26
+
+Client 1.21.2 e server 3.36.0.
+
 - **La finestra non lampeggia più quando sincronizza un file**: un solo
   caricamento causava più passate ravvicinate e il banner passava ogni volta da
   «in corso» a «sincronizzato». Ora «sincronizzato» attende 1,2 secondi e viene
