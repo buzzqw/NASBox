@@ -2,7 +2,7 @@ package ui
 
 import (
 	"fmt"
-	"os/exec"
+	"nasbox-go/internal/osx"
 	"path/filepath"
 	"strings"
 	"time"
@@ -226,7 +226,7 @@ func (c *clientApp) openContainingFolder(relative string) {
 		return
 	}
 	dir := filepath.Dir(filepath.Join(root, filepath.FromSlash(relative)))
-	_ = exec.Command("xdg-open", dir).Start()
+	_ = osx.Open(dir)
 }
 
 // ---------------------------------------------------------------------------

@@ -3,7 +3,8 @@ package update
 import (
 	"os"
 	"path/filepath"
-	"syscall"
+
+	"nasbox-go/internal/filelock"
 )
 
 // withFileLock serializes state-file writes across processes and goroutines.
@@ -18,22 +19,9 @@ func withFileLock(path string, fn func() error) error {
 		return err
 	}
 	defer file.Close()
-	for {
-		err = syscall.Flock(int(file.Fd()), syscall.LOCK_EX)
-		if err != syscall.EINTR {
-			break
-		}
-	}
-	if err != nil {
+	if err := filelock.Lock(file, true, false); err != nil {
 		return err
 	}
-	defer func() {
-		for {
-			err := syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
-			if err != syscall.EINTR {
-				break
-			}
-		}
-	}()
+	defer filelock.Unlock(file)
 	return fn()
 }

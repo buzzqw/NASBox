@@ -2,8 +2,8 @@ package ui
 
 import (
 	"fmt"
+	"nasbox-go/internal/osx"
 	"os"
-	"os/exec"
 	"path"
 	"path/filepath"
 	"sort"
@@ -152,7 +152,7 @@ func (c *clientApp) openFile(relative string) {
 				"This file is not on this PC (selective sync or not downloaded yet). Find it in Browse NAS."), c.window)
 		return
 	}
-	_ = exec.Command("xdg-open", full).Start()
+	_ = osx.Open(full)
 }
 
 func (c *clientApp) buildSearchPane() fyne.CanvasObject {
@@ -280,6 +280,6 @@ func (c *clientApp) focusSearch() {
 // openLocalFolder opens the NASBox folder in the file manager.
 func (c *clientApp) openLocalFolder() {
 	if root := c.cfg.LocalRoot(); root != "" {
-		_ = exec.Command("xdg-open", root).Start()
+		_ = osx.Open(root)
 	}
 }

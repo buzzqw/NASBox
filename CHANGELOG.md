@@ -4,6 +4,18 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+Windows (sperimentale, **non ancora provato su un PC Windows**):
+- **Il client ora compila per Windows**: nuovi pacchetti `filelock` (flock su Unix,
+  `LockFileEx` su Windows) e `osx` (aprire file/cartelle, processo staccato, spazio
+  libero, riavvio), identità dei file e del volume con versioni per sistema.
+  Nessun cambiamento di comportamento su Linux.
+- La release GitHub allega `nasbox-go-X-windows-amd64-sperimentale.exe` se la
+  build su runner Windows riesce; se fallisce la release Linux non è toccata.
+- Limiti noti su Windows: nessun aggiornamento automatico (si installa a mano),
+  stato locale in `~/.config/sync-daemon`, trasporto solo via backend a chunk su
+  `ssh` (OpenSSH di Windows non ha ControlMaster, quindi più lento), cache dei
+  file senza inode/ctime.
+
 ## 1.18.1 - 2026-11-26
 
 Client 1.18.1 e server 3.36.0.

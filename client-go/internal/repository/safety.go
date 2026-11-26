@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"syscall"
 )
 
 type marker struct {
@@ -46,12 +45,12 @@ func Initialize(localRoot, repositoryID string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
-	raw, ok := info.Sys().(*syscall.Stat_t)
+	device, ok := deviceID(root, info)
 	if !ok {
 		return fmt.Errorf("informazioni filesystem non disponibili")
 	}
 	value := marker{
-		Version: 1, LocalRoot: root, Dev: raw.Dev, RepositoryID: repositoryID,
+		Version: 1, LocalRoot: root, Dev: device, RepositoryID: repositoryID,
 	}
 	content, err := json.MarshalIndent(value, "", "  ")
 	if err != nil {
@@ -135,8 +134,8 @@ func Validate(localRoot, repositoryID string, destructive bool) error {
 	if err != nil || markerRoot != root {
 		return fmt.Errorf("la cartella locale non e' quella configurata: %s", root)
 	}
-	raw, ok := info.Sys().(*syscall.Stat_t)
-	if !ok || raw.Dev != value.Dev {
+	device, ok := deviceID(root, info)
+	if !ok || device != value.Dev {
 		return fmt.Errorf("il filesystem locale e' cambiato (volume non montato?)")
 	}
 	if destructive && (repositoryID == "" || value.RepositoryID == "" || value.RepositoryID != repositoryID) {

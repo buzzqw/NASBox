@@ -2,11 +2,11 @@ package ui
 
 import (
 	"context"
+	"nasbox-go/internal/osx"
 	"os"
-	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
-	"syscall"
 	"time"
 
 	"fyne.io/fyne/v2"
@@ -104,7 +104,9 @@ func (c *clientApp) installClientUpdate(manifest *update.Manifest, interactive b
 	}
 	// Installed by a package manager (e.g. /usr/bin from the .deb): the
 	// package manager updates it, not the built-in updater.
-	if syscall.Access(filepath.Dir(binary), 2 /* W_OK */) != nil {
+	if runtime.GOOS == "windows" || !osx.Writable(filepath.Dir(binary)) {
+		// On Windows a running .exe cannot be replaced in place: updates there
+		// are installed by hand until a dedicated installer exists.
 		if interactive {
 			c.appendAction(tr("ui.update.package_managed", nil))
 		}
@@ -135,8 +137,8 @@ func (c *clientApp) installClientUpdate(manifest *update.Manifest, interactive b
 // restartSelf starts the new binary (after this process released its
 // instance lock) and quits. The relaunch survives the parent's exit.
 func (c *clientApp) restartSelf(binary string) {
-	command := exec.Command("sh", "-c", `sleep 2; exec "$0" gui`, binary)
-	command.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	command := osx.RelaunchCommand(binary, "gui")
+	osx.Detach(command)
 	command.Stdin, command.Stdout, command.Stderr = nil, nil, nil
 	if err := command.Start(); err != nil {
 		c.appendAction(tr("ui.update.failed", map[string]any{"detail": err.Error()}))

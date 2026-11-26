@@ -2,7 +2,7 @@ package ui
 
 import (
 	"fmt"
-	"os/exec"
+	"nasbox-go/internal/osx"
 	"strings"
 	"time"
 
@@ -45,7 +45,7 @@ func (c *clientApp) buildTrayItems() []*fyne.MenuItem {
 		fyne.NewMenuItem(tr("ui.tray.show", nil), c.showWindow),
 		fyne.NewMenuItem(tr("tray.open_folder", nil), func() {
 			if root := c.cfg.LocalRoot(); root != "" {
-				_ = exec.Command("xdg-open", root).Start()
+				_ = osx.Open(root)
 			}
 		}),
 		fyne.NewMenuItem(lt("Cerca un file…", "Search a file…"), func() { c.showWindow(); c.focusSearch() }),

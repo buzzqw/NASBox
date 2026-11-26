@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"syscall"
 	"time"
 
 	"nasbox-go/internal/causal"
@@ -1085,14 +1084,6 @@ func hashFile(path string) (string, error) {
 }
 
 type fileStat struct{ size, mtimeNS, ctimeNS int64 }
-
-func statOf(info os.FileInfo) fileStat {
-	stat := fileStat{size: info.Size(), mtimeNS: info.ModTime().UnixNano()}
-	if raw, ok := info.Sys().(*syscall.Stat_t); ok {
-		stat.ctimeNS = raw.Ctim.Sec*1e9 + int64(raw.Ctim.Nsec)
-	}
-	return stat
-}
 
 // localDeleteGuard blocks a pass that would remove more local files than the
 // configured batch limit because of NAS deletions (for example a NAS folder

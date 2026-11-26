@@ -9,13 +9,13 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"nasbox-go/internal/osx"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"nasbox-go/internal/config"
@@ -1116,7 +1116,7 @@ func sendOrStart(command, argument string) {
 	if command == "versions" {
 		start.Env = append(start.Env, "NASBOX_OPEN_VERSIONS="+argument)
 	}
-	start.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	osx.Detach(start)
 	if err := start.Start(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)

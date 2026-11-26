@@ -55,6 +55,39 @@ jobs:
             dist/nasbox-go_*.deb
           if-no-files-found: error
 
+  windows:
+    # SPERIMENTALE: compila il client per Windows (Fyne richiede CGO: il runner
+    # Windows ha gia' MinGW). Non e' stato ancora provato su un PC Windows e un
+    # suo fallimento non blocca la release Linux.
+    runs-on: windows-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: client-go/go.mod
+          cache-dependency-path: client-go/go.sum
+      - name: Vet (compilazione di tutto per Windows)
+        shell: bash
+        working-directory: client-go
+        run: go vet ./...
+      - name: Test dei pacchetti portabili
+        shell: bash
+        working-directory: client-go
+        run: go test ./internal/filelock ./internal/osx
+      - name: Build Windows client
+        shell: bash
+        working-directory: client-go
+        run: |
+          version="$(../packaging/version-go.sh)"
+          mkdir -p ../dist
+          go build -trimpath -ldflags='-s -w -H=windowsgui' -o "../dist/nasbox-go-${version}-windows-amd64-sperimentale.exe" ./cmd/nasbox
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nasbox-go-windows
+          path: dist/nasbox-go-*-windows-*.exe
+          if-no-files-found: error
+
   python-legacy:
     # Solo ricostruzione manuale del vecchio client: non viene piu pubblicato.
     if: github.event_name == 'workflow_dispatch'
@@ -101,8 +134,10 @@ jobs:
           if-no-files-found: error
 
   release:
-    if: startsWith(github.ref, 'refs/tags/')
-    needs: go
+    # Parte sempre che il job Linux riesca, anche se la build Windows (sperimentale)
+    # fallisce o viene saltata.
+    if: ${{ always() && startsWith(github.ref, 'refs/tags/') && needs.go.result == 'success' }}
+    needs: [go, windows]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -110,7 +145,8 @@ jobs:
       - uses: actions/checkout@v5
       - uses: actions/download-artifact@v4
         with:
-          name: nasbox-go
+          pattern: nasbox-go*
+          merge-multiple: true
           path: dist
       - name: Prepare release notes
         run: |

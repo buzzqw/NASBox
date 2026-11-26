@@ -8,12 +8,12 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"nasbox-go/internal/filelock"
 	"os"
 	"path/filepath"
 	"strconv"
 	"sync"
 	"sync/atomic"
-	"syscall"
 )
 
 //go:embed defaults.json
@@ -116,27 +116,12 @@ func fileLock(path string, exclusive bool) (func(), error) {
 	if err != nil {
 		return nil, err
 	}
-	how := syscall.LOCK_SH
-	if exclusive {
-		how = syscall.LOCK_EX
-	}
-	for {
-		err = syscall.Flock(int(file.Fd()), how)
-		if err != syscall.EINTR {
-			break
-		}
-	}
-	if err != nil {
+	if err := filelock.Lock(file, exclusive, false); err != nil {
 		_ = file.Close()
 		return nil, err
 	}
 	return func() {
-		for {
-			err := syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
-			if err != syscall.EINTR {
-				break
-			}
-		}
+		filelock.Unlock(file)
 		_ = file.Close()
 	}, nil
 }

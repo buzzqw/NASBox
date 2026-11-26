@@ -7,9 +7,9 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"nasbox-go/internal/filelock"
 	"os"
 	"path/filepath"
-	"syscall"
 	"time"
 
 	"nasbox-go/internal/remote"
@@ -133,11 +133,11 @@ func acquireDownloadLock(ctx context.Context, local string) (*os.File, error) {
 		return nil, err
 	}
 	for {
-		err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+		err := filelock.Lock(file, true, true)
 		if err == nil {
 			return file, nil
 		}
-		if !errors.Is(err, syscall.EWOULDBLOCK) && !errors.Is(err, syscall.EAGAIN) {
+		if !errors.Is(err, filelock.ErrLocked) {
 			file.Close()
 			return nil, err
 		}
@@ -156,6 +156,6 @@ func releaseDownloadLock(file *os.File) {
 	if file == nil {
 		return
 	}
-	_ = syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
+	filelock.Unlock(file)
 	_ = file.Close()
 }

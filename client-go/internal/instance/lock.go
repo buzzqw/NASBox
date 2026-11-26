@@ -3,9 +3,9 @@ package instance
 
 import (
 	"fmt"
+	"nasbox-go/internal/filelock"
 	"os"
 	"path/filepath"
-	"syscall"
 )
 
 // Acquire returns a release function and keeps the lock file open for the
@@ -30,12 +30,12 @@ func Acquire() (func(), error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+	if err := filelock.Lock(file, true, true); err != nil {
 		file.Close()
 		return nil, fmt.Errorf("un'altra istanza del client Go e' gia' in esecuzione")
 	}
 	return func() {
-		_ = syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
+		filelock.Unlock(file)
 		_ = file.Close()
 	}, nil
 }

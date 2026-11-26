@@ -9,12 +9,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"nasbox-go/internal/filelock"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 )
 
@@ -484,15 +484,15 @@ func ProbeLocalLock(dir string) LocalLockStatus {
 		return status
 	}
 	defer file.Close()
-	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
-		if errors.Is(err, syscall.EWOULDBLOCK) || errors.Is(err, syscall.EAGAIN) {
+	if err := filelock.Lock(file, true, true); err != nil {
+		if errors.Is(err, filelock.ErrLocked) {
 			status.State = "held"
 			return status
 		}
 		status.Error = err.Error()
 		return status
 	}
-	_ = syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
+	filelock.Unlock(file)
 	status.State = "free"
 	return status
 }

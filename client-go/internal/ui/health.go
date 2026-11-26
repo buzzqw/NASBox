@@ -2,12 +2,12 @@ package ui
 
 import (
 	"fmt"
+	"nasbox-go/internal/osx"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"fyne.io/fyne/v2"
@@ -46,10 +46,9 @@ func (c *clientApp) runHealthChecks() []healthCheck {
 			add("error", tr("ui.health.local_root", nil), err.Error(), tr("ui.health.local_root_hint", nil))
 		} else {
 			_ = os.Remove(probe)
-			var stat syscall.Statfs_t
 			free := ""
-			if syscall.Statfs(root, &stat) == nil {
-				freeBytes := int64(stat.Bavail) * int64(stat.Bsize)
+			if available, _, ok := osx.FreeBytes(root); ok {
+				freeBytes := int64(available)
 				free = humanBytes(freeBytes)
 				if freeBytes < 2<<30 {
 					add("warn", tr("ui.health.local_space", nil), free, tr("ui.health.local_space_hint", nil))

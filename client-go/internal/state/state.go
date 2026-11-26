@@ -13,7 +13,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -852,20 +851,6 @@ func (s *Store) String(key string) (string, error) {
 
 type fileStat struct {
 	dev, ino, ctimeNS, size, mtimeNS int64
-}
-
-func statInfo(info os.FileInfo) fileStat {
-	raw, ok := info.Sys().(*syscall.Stat_t)
-	if !ok {
-		return fileStat{size: info.Size(), mtimeNS: info.ModTime().UnixNano()}
-	}
-	return fileStat{
-		dev:     int64(raw.Dev),
-		ino:     int64(raw.Ino),
-		ctimeNS: raw.Ctim.Sec*1e9 + int64(raw.Ctim.Nsec),
-		size:    info.Size(),
-		mtimeNS: info.ModTime().UnixNano(),
-	}
 }
 
 // SetString stores a small value in meta (used for "already done once" marks).
