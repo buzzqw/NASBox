@@ -4,9 +4,9 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
-## 1.15.3 / 3.33.0 - 2026-11-26
+## 1.15.3 - 2026-11-26
 
-Client e server Go:
+Client 1.15.3 e server 3.33.0:
 - **Metadata NAS indicizzata da SQLite**: `server/state/metadata.sqlite3` è un
   indice derivato e ricostruibile di manifest e journal. Export delta, lookup
   manifest e `file-states-current` non rendono più l'intero repository; journal e
