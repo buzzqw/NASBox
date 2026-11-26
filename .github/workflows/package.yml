@@ -67,10 +67,12 @@ jobs:
         with:
           go-version-file: client-go/go.mod
           cache-dependency-path: client-go/go.sum
-      - name: Vet (compilazione di tutto per Windows)
+      - name: Compila il client per Windows
+        # Solo il client: il demone del NAS (serverd) e i test con chiamate Unix
+        # non girano su Windows e non fanno parte di questa verifica.
         shell: bash
         working-directory: client-go
-        run: go vet ./...
+        run: go build ./cmd/nasbox
       - name: Test dei pacchetti portabili
         shell: bash
         working-directory: client-go
