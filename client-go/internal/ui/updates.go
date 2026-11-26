@@ -113,7 +113,13 @@ func (c *clientApp) installClientUpdate(manifest *update.Manifest, interactive b
 	applied, versionName, err := update.Apply(c.cfg, c.client, binary)
 	if err != nil {
 		if interactive || err != update.ErrUnmanagedBinary {
-			c.appendAction(tr("ui.update.failed", map[string]any{"detail": err.Error()}))
+			detail := tr("ui.update.failed", map[string]any{"detail": err.Error()})
+			c.appendAction(detail)
+			if interactive {
+				// A failed confirmation must never look like a no-op: the
+				// Activity tab is easy to miss while the tray is visible.
+				c.notify("update-failed:"+err.Error(), tr("ui.update.failed_title", nil), detail, 5*time.Minute)
+			}
 		}
 		return
 	}

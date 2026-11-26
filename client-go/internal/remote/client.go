@@ -367,6 +367,15 @@ func (c *Client) ServerOutdated(minimum string) (bool, string, error) {
 	return versionLess(current, minimum), current, nil
 }
 
+// ServerVersion implements update.ServerVersionProvider. The updater needs it
+// to enforce requires_server; without this method the GUI passed a plain
+// *Client and every interactive update failed with "versione server
+// sconosciuta", while the CLI (which wrapped the client) worked.
+func (c *Client) ServerVersion() (string, error) {
+	_, current, err := c.ServerOutdated("0.0.0")
+	return current, err
+}
+
 // Bootstrap validates the NAS contract and persists the authoritative paths,
 // repository ID and capabilities before any destructive operation.
 func (c *Client) Bootstrap() error {

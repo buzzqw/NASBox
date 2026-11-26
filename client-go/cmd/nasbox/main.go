@@ -111,15 +111,6 @@ func bootstrapConfig(cfg *config.Config) error {
 	return repository.Bind(cfg.LocalRoot(), cfg.RepositoryID())
 }
 
-// serverInfoClient adds the server-version lookup required by the updater's
-// requires_server validation to the ordinary SSH client.
-type serverInfoClient struct{ *remote.Client }
-
-func (c serverInfoClient) ServerVersion() (string, error) {
-	_, current, err := c.ServerOutdated("0.0.0")
-	return current, err
-}
-
 // startupUpdateRecovery runs before gui/sync so an interrupted update is
 // repaired and a successfully started binary is confirmed. A rollback forces
 // a restart; a first failed health check is only reported.
@@ -611,7 +602,7 @@ func updateCheck(args []string) {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-	manifest, err := update.Newest(cfg, serverInfoClient{remote.New(cfg)})
+	manifest, err := update.Newest(cfg, remote.New(cfg))
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
@@ -638,7 +629,7 @@ func updateInstall(args []string) {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-	applied, versionName, err := update.Apply(cfg, serverInfoClient{remote.New(cfg)}, binary)
+	applied, versionName, err := update.Apply(cfg, remote.New(cfg), binary)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)

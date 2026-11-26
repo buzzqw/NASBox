@@ -4,6 +4,20 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 1.14.1 - 2026-11-26
+
+Client Go:
+
+- **Corretto l'aggiornamento avviato dalla GUI.** Il pulsante *Controlla
+  aggiornamenti* mostrava il dialog e accettava la conferma, ma l'installazione
+  falliva sempre con `versione server sconosciuta, impossibile verificare
+  requires_server`: il client passato all'updater non esponeva `ServerVersion()`
+  (solo la CLI lo avvolgeva in un adapter). Ora `remote.Client` implementa
+  direttamente l'interfaccia, quindi il controllo `requires_server` funziona
+  sia dalla GUI sia dalla CLI. In caso di errore, il dialog di conferma mostra
+  anche una notifica nella tray invece di limitarsi a scrivere nella scheda
+  Attività.
+
 ## 1.14.0 - 2026-11-26
 
 Client Go:

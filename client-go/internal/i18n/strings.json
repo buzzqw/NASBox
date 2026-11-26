@@ -6062,6 +6062,10 @@
     "en": "Sync summary",
     "it": "Riepilogo sincronizzazioni"
   },
+  "ui.update.failed_title": {
+    "en": "NASBox: update failed",
+    "it": "NASBox: aggiornamento non riuscito"
+  },
   "guard.blocked_local_deletes": {
     "en": "Sync blocked: other PCs deleted {count} files that exist here (limit {limit}). Check the NAS before confirming: no local file was touched.",
     "it": "Sincronizzazione bloccata: altri PC hanno cancellato {count} file presenti qui (limite {limit}). Controlla il NAS prima di confermare: nessun file locale è stato toccato."

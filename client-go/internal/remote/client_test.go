@@ -12,7 +12,13 @@ import (
 	"time"
 
 	"nasbox-go/internal/config"
+	"nasbox-go/internal/update"
 )
+
+// The GUI updater passes this client straight to update.Apply; without the
+// ServerVersion method the requires_server check failed and the dialog silently
+// did nothing (the CLI used to wrap the client to supply it).
+var _ update.ServerVersionProvider = (*Client)(nil)
 
 func TestParsePairedStatus(t *testing.T) {
 	data := []byte("RESTORE_BATCH_V1\x002\x00a.txt\x00RESTORED\x00b.txt\x00NO_VERSION\x00")
