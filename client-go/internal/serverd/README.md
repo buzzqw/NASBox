@@ -49,7 +49,21 @@ Implementati: `--journal-append`, `--staging-publish` (V1/V2),
   server, che richiede lo script bash).
 - I 11 comandi read-only della milestone 0 restano uguali (11/11).
 
-## Milestone successive
+## Milestone 3 — ciclo del demone e retention (completata)
 
-3. retention/loop del demone e disattivazione dello script bash;
-4. web UI nello stesso binario.
+- `--start`, `--stop`, `--restart`, `--run-foreground`: PID file, lock del
+  demone, timer interno `CHECK_INTERVAL_MINUTES`, gestione SIGTERM/SIGINT/SIGHUP.
+- `--run-once` ora applica anche `RETENTION_DAYS`, ruota `events.jsonl` e
+  `server.log`, ripulisce i temporanei vecchi e scrive `last-run` e
+  `trash-usage`.
+- Nuovi E2E: sempre 8 PASS, 1 SKIP. Lo skip è il self-update del server, che
+  negli E2E sostituisce uno **script bash** con `VERSION="…"`: con un demone
+  Go il self-update dovrà sostituire il **binario** e sarà implementato nella
+  milestone 4.
+- `--print-config` riporta `RUNNING=true` quando il demone Go è avviato.
+
+## Milestone successiva
+
+4. web UI nello stesso binario e self-update nativo del demone Go; poi
+   disattivazione dello script bash e collegamento del transfer lato client
+   allo store a chunk.

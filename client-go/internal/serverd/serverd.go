@@ -244,6 +244,14 @@ func Dispatch(ctx *Context, verb string, args []string) error {
 		return cmdBrowseDelete(ctx)
 	case "--run-once":
 		return cmdRunOnce(ctx)
+	case "--start":
+		return cmdStart(ctx)
+	case "--stop":
+		return cmdStop(ctx)
+	case "--restart":
+		return cmdRestart(ctx)
+	case "--run-foreground":
+		return cmdDaemonForeground(ctx)
 	default:
 		return fmt.Errorf("verbo %q non ancora implementato nella milestone 0", verb)
 	}
