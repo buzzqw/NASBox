@@ -10,7 +10,9 @@ service.
 > It is only useful for migrating data, which stays in the same place.
 
 The staged plan for a self-hosted, Dropbox-like NAS cloud is in
-[`ROADMAP.md`](ROADMAP.md).
+[`ROADMAP.md`](ROADMAP.md) (storage, metadata, reliability) and
+[`roadmap-claude.md`](roadmap-claude.md) (what is missing to replace Dropbox:
+simpler GUI, web browse/upload, Windows client, on-demand files).
 
 | Component | Current version |
 |---|---|
@@ -44,9 +46,14 @@ compatibility fallback for older installations.
   recommended version.
 - Deletion guards (mass deletion, disappearing folders, sentinels, fail-closed
   on unreadable files) and confirmation of held deletions.
-- GUI with status home, live transfers (file, speed, ETA), recent activity,
-  NAS monitor with charts, "Check system" diagnostics, timed tray pauses and
-  selective sync of NAS folders.
+- GUI with a **simple view by default** (Home, Files, Settings: sync state,
+  recent activity, NAS space, file browser, versions/trash). Queue, log, NAS
+  monitor, devices, storage and counters live behind "Advanced tools" in the
+  sidebar. Also live transfers (file, speed, ETA), "Check system" diagnostics,
+  timed tray pauses and selective sync of NAS folders.
+- Server maintenance: `--chunk-gc` (garbage collection of unreferenced chunks,
+  24 h grace) and `--chunk-fsck [--repair]` (SHA-256 verification of the chunk
+  store).
 - Desktop integration: "NASBox: versioni precedenti" in Thunar, Nautilus, Nemo,
   Dolphin and Caja, plus a status emblem on the NASBox folder.
 - Automatic client updates with verification and rollback; the server can be

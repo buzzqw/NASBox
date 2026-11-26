@@ -136,3 +136,17 @@ perché i verbi a chunk non esistono nel vecchio server.
 1. Distribuire il demone Go sul NAS e verificare i 11 comandi read-only.
 2. Impostare `transfer_backend=chunks` nei client.
 3. Disattivare rsync e lo script bash.
+
+## Manutenzione dei chunk (fase 0 della roadmap)
+
+Il chunk store è una cache di deduplica: i byte autorevoli stanno nell'albero,
+gli snapshot sono l'unica parte non ricostruibile.
+
+- `--chunk-gc [--dry-run] [--grace-hours N]`: rimuove chunk e meta-file non
+  raggiungibili dal manifest vivo o da uno snapshot. Periodo di grazia di 24 ore
+  (un upload non ancora pubblicato ha chunk ma non ancora il meta); nessuna
+  cancellazione se uno snapshot è illeggibile. `--chunk-has` aggiorna la data dei
+  chunk riusati, così non vengono raccolti tra la richiesta e la pubblicazione.
+- `--chunk-fsck [--repair]`: rilegge ogni chunk e ne verifica lo SHA-256,
+  controlla meta-file e snapshot; con `--repair` rimuove solo ciò che si
+  ricostruisce (mai gli snapshot). Esce con codice 2 se restano problemi.

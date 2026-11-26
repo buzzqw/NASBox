@@ -70,13 +70,17 @@ func (c *clientApp) statusView() fyne.CanvasObject {
 	)
 
 	columns := container.NewGridWithColumns(2, c.buildRecentCard(), c.buildNASCard())
+	toolsTitle := c.cardTitle(tr("ui.home.more_actions", nil))
+	// Counters and technical tools are for people who want them: the simple
+	// home is the state, what changed and the NAS space.
+	c.advancedHome = []fyne.CanvasObject{stats, toolsTitle, more}
 	c.homeBox = container.NewVBox(
 		c.buildBanner(),
 		c.buildHeldCards(),
 		c.buildTransferCard(),
 		stats,
 		columns,
-		c.cardTitle(tr("ui.home.more_actions", nil)),
+		toolsTitle,
 		more,
 	)
 	return container.NewPadded(c.homeBox)

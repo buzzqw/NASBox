@@ -19,9 +19,13 @@ Wayland). Il client Python resta disponibile solo per la migrazione.
   versione perdente resta recuperabile.
 - **Protezioni**: blocco delle cancellazioni di massa, sentinelle, guardia per
   cartelle che spariscono, fail-closed su file illeggibili.
-- **Interfaccia** con stato chiaro, trasferimenti in tempo reale (file,
-  velocità, tempo stimato), attività recente, tray con pause temporizzate,
-  monitor del NAS con grafici, "Controlla il sistema".
+- **Interfaccia semplice**: di default si vedono solo *Stato* (sincronizzato?
+  cosa è cambiato? spazio sul NAS), *File* (sfoglia il NAS, versioni, cestino,
+  conflitti) e *Impostazioni*. Coda, log, monitor del NAS, dispositivi,
+  contatori e strumenti tecnici stanno sotto «Strumenti avanzati» nella barra
+  laterale (impostazione `ui_advanced`); un rimando interno li mostra da solo.
+  Trasferimenti in tempo reale (file, velocità, tempo stimato), tray con pause
+  temporizzate, «Controlla il sistema».
 - **Sync selettiva** sull'albero delle cartelle del NAS, con dimensioni.
 - **Integrazione desktop**: voce "NASBox: versioni precedenti" nel clic destro
   di Thunar, Nautilus, Nemo, Dolphin e Caja; emblema di stato sulla cartella.

@@ -238,6 +238,10 @@ type clientApp struct {
 	heroIcon         *widget.Icon
 	transferCard     *fyne.Container
 	homeBox          *fyne.Container
+	advancedHome     []fyne.CanvasObject
+	advancedToggle   *widget.Button
+	advancedOn       bool
+	navBox           *fyne.Container
 	homeTransfer     *transferView
 	tabTransfer      *transferView
 	tabTransferIdle  *widget.Label
@@ -480,6 +484,7 @@ func (c *clientApp) buildRoot() fyne.CanvasObject {
 	sidebar := c.buildSidebar()
 	header := c.buildHeader()
 	c.buildSections()
+	c.setAdvanced(c.cfg.Bool("ui_advanced"), false)
 	c.showSection(c.active)
 	c.installShortcuts()
 	main := container.NewBorder(header, nil, nil, nil, container.NewPadded(c.content))
@@ -545,6 +550,11 @@ func (c *clientApp) showSection(id sectionID) {
 	view, ok := c.views[id]
 	if !ok {
 		return
+	}
+	if isAdvancedSection(id) && !c.advancedOn {
+		// An internal link (banner, tile, shortcut) leads to a technical area:
+		// reveal the advanced tools for this session instead of a dead end.
+		c.setAdvanced(true, false)
 	}
 	c.active = id
 	c.content.Objects = []fyne.CanvasObject{view}
@@ -1028,6 +1038,13 @@ func (c *clientApp) applyStatusUI(level statusLevel, reason string) {
 	c.bannerTitle.SetText(plainTitle(title))
 	c.bannerReason.SetText(reason)
 	c.bannerNext.SetText(fmt.Sprintf("%s: %s", tr("assurance.guidance_title", nil), next))
+	// When everything is fine there is nothing to do: the "what to do now"
+	// line only repeated the title, so it is shown just when action is needed.
+	if level == statusOK {
+		c.bannerNext.Hide()
+	} else {
+		c.bannerNext.Show()
+	}
 	c.bannerGo = goFn
 	if c.headerStatus != nil {
 		c.headerStatus.SetText(plainTitle(title))

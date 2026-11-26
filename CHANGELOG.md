@@ -4,6 +4,18 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+Interfaccia più semplice (feedback: «la GUI è complessa, un utente si perde»):
+- **Vista semplice di default**: barra laterale con Stato, File, Impostazioni.
+  Attività (coda, log) e NAS (monitor, dispositivi, storage) stanno sotto
+  «Strumenti avanzati» (`ui_advanced`); i rimandi interni li mostrano da soli.
+- **Home essenziale**: banner, attività recente, spazio NAS. Contatori e
+  strumenti tecnici solo in avanzato; niente più «cosa fare ora» ridondante
+  quando è tutto sincronizzato.
+- **File › Sfoglia** su due righe (navigazione e azioni sulla selezione), senza
+  percorso duplicato né campo «Percorso remoto»; «Scarica cartella» a un clic.
+- Etichette senza gergo (Audit → Verifica, «Differenze audit» → «Differenze
+  trovate»).
+
 Fase 0 della roadmap (`roadmap-claude.md`):
 - **La conferma delle cancellazioni di massa sblocca davvero la protezione
   cartella**: `confirm-delete` (CLI e pulsante della GUI) valeva solo per la

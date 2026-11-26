@@ -335,3 +335,28 @@ func TestBackendSelectionSupportsX11AndWayland(t *testing.T) {
 		t.Fatalf("auto backend did not select Wayland: %q / %q", got, displayBackend(c.cfg))
 	}
 }
+
+func TestSimpleModeHidesTechnicalAreasAndLinksRevealThem(t *testing.T) {
+	c := newTestClient(t)
+	c.setAdvanced(false, false)
+	if c.navs[sectionActivity].Visible() || c.navs[sectionNAS].Visible() {
+		t.Fatal("in modalità semplice Attività e NAS non devono comparire nella barra")
+	}
+	if !c.navs[sectionStatus].Visible() || !c.navs[sectionFiles].Visible() || !c.navs[sectionSettings].Visible() {
+		t.Fatal("Home, File e Impostazioni devono restare sempre visibili")
+	}
+	for _, object := range c.advancedHome {
+		if object.Visible() {
+			t.Fatal("contatori e strumenti tecnici nascosti nella Home semplice")
+		}
+	}
+	// Un rimando interno (es. il banner verso il log) non deve finire nel vuoto.
+	c.navigate(sectionActivity, 3)
+	if !c.navs[sectionActivity].Visible() || c.active != sectionActivity {
+		t.Fatal("un rimando a un'area tecnica deve mostrarla")
+	}
+	c.setAdvanced(false, false)
+	if c.active != sectionStatus {
+		t.Fatal("nascondendo gli strumenti avanzati si torna alla Home")
+	}
+}

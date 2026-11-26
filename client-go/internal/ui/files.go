@@ -168,30 +168,26 @@ func (c *clientApp) buildBrowsePane() fyne.CanvasObject {
 	c.browseUpBtn = plainButton(tr("browse.up_btn", nil), theme.NavigateBackIcon(),
 		tr("ui.file.up_hint", nil), widget.LowImportance, c.onBrowseUp, c.setHint)
 
+	refreshBtn := newHintButton(tr("browse.refresh_btn", nil), theme.ViewRefreshIcon(),
+		tr("ui.file.refresh_hint", nil), widget.LowImportance, func() {
+			c.appendAction(tr("browse.refresh_btn", nil))
+			c.refreshBrowse()
+		}, c.setHint)
+	downloadFolderBtn := newHintButton("", theme.FolderOpenIcon(),
+		tr("ui.file.download_path_hint", nil), widget.LowImportance, c.onDownloadPath, c.setHint)
+
+	// Two rows: where am I (navigation) and what can I do with the selection.
+	// The text path and the "remote path" box duplicated the breadcrumbs, and
+	// the folder download is now one button; the entry stays as hidden state.
+	navigation := container.NewBorder(nil, nil, c.browseUpBtn,
+		container.NewHBox(minWidth(c.browseSortSelect(), 200), downloadFolderBtn, refreshBtn), c.breadcrumbs)
+	selection := container.NewBorder(nil, nil, nil,
+		container.NewHBox(c.browseVersionsBtn, c.browseRenameBtn, c.browseDeleteBtn, c.browseDownloadBtn),
+		c.browseSelectedLabel)
 	header := container.NewVBox(
 		c.sectionTitle("", tr("ui.file.browse_note", nil)),
-		c.browsePathLabel,
-		c.breadcrumbs,
-		container.NewBorder(nil, nil, widget.NewLabel(lt("Ordina per", "Sort by")), nil, container.NewHBox(minWidth(c.browseSortSelect(), 220))),
-		c.browseSelectedLabel,
-		buttonRows(3,
-			c.browseUpBtn,
-			newHintButton(tr("browse.refresh_btn", nil), theme.ViewRefreshIcon(),
-				tr("ui.file.refresh_hint", nil), widget.LowImportance, func() {
-					c.appendAction(tr("browse.refresh_btn", nil))
-					c.refreshBrowse()
-				}, c.setHint),
-			c.browseDeleteBtn,
-			c.browseRenameBtn,
-			c.browseVersionsBtn,
-			c.browseDownloadBtn,
-		),
-		container.NewBorder(nil, nil,
-			widget.NewLabel(tr("ui.file.download_path", nil)),
-			newHintButton(tr("ui.action.download_path_short", nil), theme.DownloadIcon(),
-				tr("ui.file.download_path_hint", nil), widget.HighImportance, c.onDownloadPath, c.setHint),
-			c.downloadPathEntry,
-		),
+		navigation,
+		selection,
 	)
 	c.updateBreadcrumbs()
 	c.updateBrowseSelection()

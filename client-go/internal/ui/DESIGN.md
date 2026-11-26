@@ -50,3 +50,22 @@ Gli stessi colori semantici sono usati da banner, pill, bordi delle card e pulsa
 - **Tema «auto»:** non esiste un indicatore affidabile di tema di sistema via Fyne 2.7 su Linux; `auto`/valori sconosciuti restano sul tema chiaro, dark esplicito è disponibile.
 - **Aggiornamenti:** il pulsante controlla la disponibilità e lo segnala nel log; l'installazione resta il comando `nasbox update-install` (non è stata introdotta una nuova API).
 - Il backend dati, il protocollo SSH/rsync, i lock e la riconciliazione non sono stati toccati: l'UI continua a usare solo `Runner.Events()`, `SyncNow()`, `SetPaused()`, `IsPaused()` e i package esistenti.
+
+## Vista semplice e strumenti avanzati (2026-11-26)
+
+Feedback: la GUI era complessa, un utente si perdeva. Regola adottata: **la
+vista di default contiene solo ciò che serve ogni giorno**.
+
+- Barra laterale: *Stato*, *File*, *Impostazioni*. *Attività* (coda, log) e *NAS*
+  (monitor, dispositivi, storage) compaiono con «Strumenti avanzati»
+  (`ui_advanced` in `client.json`, funzione `setAdvanced`). Un rimando interno
+  (banner, tessere) verso un'area tecnica la mostra per la sessione.
+- Home: banner di stato, attività recente e spazio NAS. Contatori e strumenti
+  (Anteprima, Verifica, Ripristina eliminati, Ferma) solo in avanzato. Il banner
+  non ripete più «cosa fare ora» quando è tutto a posto.
+- File → Sfoglia: due righe (navigazione: Su, percorso, ordinamento, scarica
+  cartella, Aggiorna; selezione: Versioni, Rinomina, Elimina, Scarica). Tolti il
+  percorso testuale duplicato e il campo «Percorso remoto».
+- Linguaggio: niente gergo (Audit → Verifica, «Differenze audit» → «Differenze
+  trovate»).
+- Le schede interne mantengono gli indici, perché i rimandi li usano.

@@ -2728,8 +2728,8 @@
     "it": "{count} operazioni in coda"
   },
   "overview.stat_audit": {
-    "en": "Last audit differences",
-    "it": "Differenze audit"
+    "en": "Differences found",
+    "it": "Differenze trovate"
   },
   "overview.stat_conflicts": {
     "en": "Conflicts",
@@ -4944,8 +4944,8 @@
     "it": "Imposta un nome computer e un indirizzo IP leggibili per l'ID selezionato."
   },
   "ui.action.audit_short": {
-    "en": "Audit",
-    "it": "Audit"
+    "en": "Verify",
+    "it": "Verifica"
   },
   "ui.action.cancel": {
     "en": "Stop transfer",
@@ -5947,8 +5947,8 @@
     "it": "In pausa fino a {time}"
   },
   "ui.home.more_actions": {
-    "en": "More actions",
-    "it": "Altre azioni"
+    "en": "Tools",
+    "it": "Strumenti"
   },
   "ui.home.see_all": {
     "en": "See all",

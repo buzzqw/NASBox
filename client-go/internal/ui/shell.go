@@ -222,9 +222,16 @@ func (c *clientApp) buildSidebar() fyne.CanvasObject {
 		c.newNav(sectionSettings, tr("main_window.tab_settings", nil), theme.SettingsIcon()),
 	)
 
+	c.navBox = items
+	c.advancedToggle = widget.NewButtonWithIcon("", theme.MenuDropDownIcon(), func() {
+		c.setAdvanced(!c.advancedOn, true)
+	})
+	c.advancedToggle.Importance = widget.LowImportance
+	c.advancedToggle.Alignment = widget.ButtonAlignLeading
+
 	body := container.NewBorder(
 		container.NewVBox(container.NewPadded(brand), widget.NewSeparator()),
-		c.buildSidebarStatus(),
+		container.NewVBox(c.advancedToggle, c.buildSidebarStatus()),
 		nil, nil,
 		container.NewVBox(items, layout.NewSpacer()),
 	)
@@ -318,3 +325,49 @@ func (c *clientApp) updateNavBadges() {
 		item.setBadge(badge)
 	}
 }
+
+// setAdvanced shows or hides the technical areas (Activity: queue and log;
+// NAS: monitor, devices, storage) and the counters/tools on the home page. The
+// simple view keeps what people use every day: Home, Files and Settings.
+func (c *clientApp) setAdvanced(on, persist bool) {
+	c.advancedOn = on
+	if persist {
+		_ = c.cfg.Set("ui_advanced", on, true)
+	}
+	for _, id := range []sectionID{sectionActivity, sectionNAS} {
+		if item, ok := c.navs[id]; ok {
+			if on {
+				item.Show()
+			} else {
+				item.Hide()
+			}
+		}
+	}
+	for _, object := range c.advancedHome {
+		if on {
+			object.Show()
+		} else {
+			object.Hide()
+		}
+	}
+	if c.advancedToggle != nil {
+		if on {
+			c.advancedToggle.SetText(lt("Strumenti avanzati", "Advanced tools"))
+			c.advancedToggle.SetIcon(theme.MenuDropUpIcon())
+		} else {
+			c.advancedToggle.SetText(lt("Strumenti avanzati", "Advanced tools"))
+			c.advancedToggle.SetIcon(theme.MenuDropDownIcon())
+		}
+	}
+	if c.navBox != nil {
+		c.navBox.Refresh() // a container does not re-layout children shown later
+	}
+	if c.homeBox != nil {
+		c.homeBox.Refresh()
+	}
+	if !on && (c.active == sectionActivity || c.active == sectionNAS) {
+		c.showSection(sectionStatus)
+	}
+}
+
+func isAdvancedSection(id sectionID) bool { return id == sectionActivity || id == sectionNAS }
