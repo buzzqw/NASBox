@@ -71,6 +71,24 @@ func TestStateBackupKeepsOnlyTheLastCopiesAndCanBeDisabled(t *testing.T) {
 	}
 }
 
+func TestScrubWindowSkipsOutsideHours(t *testing.T) {
+	ctx, _ := newTestContext(t)
+	ctx.Config["CHUNK_SCRUB_HOUR"] = "3"
+	ctx.Config["CHUNK_SCRUB_WINDOW_HOURS"] = "2"
+	ctx.Now = func() time.Time { return time.Date(2026, 11, 26, 14, 0, 0, 0, time.Local) }
+	if ctx.inScrubWindow() {
+		t.Fatal("14:00 non deve essere nella finestra 03:00-04:59")
+	}
+	ctx.Now = func() time.Time { return time.Date(2026, 11, 26, 3, 30, 0, 0, time.Local) }
+	if !ctx.inScrubWindow() {
+		t.Fatal("03:30 deve essere nella finestra 03:00-04:59")
+	}
+	delete(ctx.Config, "CHUNK_SCRUB_WINDOW_HOURS")
+	if !ctx.inScrubWindow() {
+		t.Fatal("senza finestra configurata la manutenzione deve restare sempre attiva")
+	}
+}
+
 func TestChunkGCCanBeDisabled(t *testing.T) {
 	ctx, _ := newWebTestContext(t, "")
 	ctx.Config["CHUNK_GC"] = "false"

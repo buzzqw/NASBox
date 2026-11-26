@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 )
 
 func readNULString(reader *bufio.Reader) (string, error) {
@@ -44,6 +45,8 @@ func validatePublishContent(digest, sizeRaw string, chunks []string) error {
 // digest/size fields and raw bytes of exactly `size` after them, so binary
 // chunk contents are never confused with delimiters.
 func cmdChunkPutBatch(ctx *Context) error {
+	start := time.Now()
+	defer func() { ctx.recordPhase("chunk_put", time.Since(start)) }()
 	reader := bufio.NewReader(os.Stdin)
 	magic, err := readNULString(reader)
 	if err != nil || magic != "CHUNK_PUT_V1" {
@@ -90,11 +93,14 @@ func cmdChunkPutBatch(ctx *Context) error {
 			return err
 		}
 	}
+	ctx.recordChunkPut(int64(stored))
 	fmt.Printf("CHUNK_PUT_V1\x00%d\x00%d\x00", stored, count)
 	return nil
 }
 
 func cmdChunkGet(ctx *Context, args []string) error {
+	start := time.Now()
+	defer func() { ctx.recordPhase("chunk_get", time.Since(start)) }()
 	if len(args) != 1 || !digest64.MatchString(args[0]) {
 		return exitCode(1)
 	}

@@ -4,6 +4,37 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 1.23.0 / 3.37.0 - 2026-11-26
+
+Client 1.23.0 e server 3.37.0.
+
+- **Delta del manifest anche per cursori vecchi**: l'indice SQLite continua a
+  servire il delta per riga ai client recenti; per gli altri il server tiene
+  una cache del render completo per revisione e restituisce solo le righe
+  cambiate (con `REMOVED=`) invece dell'export da 11 MB. Lo snapshot resta
+  byte-identico a quello del renderer storico; se la cache non c'è scatta
+  ancora `FALLBACK_FULL=1`.
+- **Il cursore del manifest sopravvive al riavvio** del client (`last_manifest_revision`,
+  legato al `repository_id`): dopo un riavvio non serve più scaricare il
+  manifest intero.
+- **Statistiche lato NAS**: `--metrics` e `/api/metrics` espongono tempi delle
+  fasi lato server, hit rate di `--chunk-has` e byte risparmiati, byte di delta
+  serviti e fallback, attesa/durata del lease per dispositivo, esito dell'ultimo
+  fsck dei chunk. I contatori sono su disco, quindi visibili anche dai comandi
+  SSH di breve durata.
+- **Web UI: pagina Stato** con lock, coda, deduplica, manifest, lock per
+  dispositivo, integrità e tempi delle fasi (nessuna libreria esterna).
+- **Quota dello store chunk** (`CHUNK_MAX_MB`) con rimozione dei chunk non
+  referenziati più vecchi: non tocca mai chunk vivi o di snapshot e, se la quota
+  non è raggiungibile, segnala `chunk_quota_blocked` invece di cancellare dati.
+- **Manutenzione in finestra notturna** (`CHUNK_SCRUB_HOUR`,
+  `CHUNK_SCRUB_WINDOW_HOURS`) ed eseguita con priorità CPU bassa
+  (`CHUNK_SCRUB_NICE`): GC e fsck non girano più in qualsiasi momento.
+- Nuove capacità dichiarate: `chunk_quota_v1`, `chunk_scrub_v1`,
+  `server_metrics_v1`. Il lease resta globale per le mutazioni: una sua
+  suddivisione per prefisso richiederebbe journal, revisione e tx-intent
+  separati e non è stata fatta.
+
 ## 1.22.0 - 2026-11-26
 
 Client 1.22.0 e server 3.36.0 (invariato).

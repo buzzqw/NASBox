@@ -61,6 +61,56 @@ func TestManifestDeltaIsIncremental(t *testing.T) {
 	}
 }
 
+func TestDeltaUsesCachedRenderForOldCursor(t *testing.T) {
+	ctx, _ := newTestContext(t)
+	digestA := strings.Repeat("a", 64)
+	digestB := strings.Repeat("b", 64)
+	writeMetadataFixture(t, ctx,
+		"NASBOX_MANIFEST_V1\n"+"a.txt\t"+digestA+"\t1\t100\tdev\t100\n",
+		"NASBOX_JOURNAL_V1\n", 10,
+	)
+	// A full export keeps a render at revision 10: this is the client's base.
+	if _, err := ctx.exportManifest(0, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := ctx.appendTransaction("tx2", "dev", []string{
+		journalRowPUT("b.txt", digestB, "2", "200", "dev", "101", "dev:1"),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// Simulate a cursor older than the row index can serve.
+	index, err := openMetadataIndex(ctx.paths())
+	if err != nil {
+		t.Fatal(err)
+	}
+	tx, err := index.db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := index.setMetaInt64(tx, "feed_start_revision", 11); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	_ = index.Close()
+
+	view, err := ctx.exportManifest(10, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if view.FallbackFull || len(view.Rows) != 1 || !strings.Contains(view.Rows[0], "b.txt") {
+		t.Fatalf("delta dalla cache non riuscito: %+v", view)
+	}
+	render, err := ctx.exportManifest(0, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(strings.Join(render.Rows, "\n"), "b.txt") {
+		t.Fatal("il manifest completo non contiene la modifica")
+	}
+}
+
 func TestMetadataIndexReplaysOnlyCompleteTransactions(t *testing.T) {
 	ctx, _ := newTestContext(t)
 	digestA := strings.Repeat("a", 64)

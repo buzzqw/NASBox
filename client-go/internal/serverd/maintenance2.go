@@ -20,7 +20,11 @@ import (
 //
 //	CHUNK_GC=true              GC dei chunk a ogni passo (false per disattivarla)
 //	CHUNK_GC_GRACE_HOURS=24    periodo di grazia prima di rimuovere un chunk
+//	CHUNK_MAX_MB=0             quota dello store chunk (0 = nessun limite)
 //	CHUNK_FSCK_DAYS=7          ogni quanti giorni rileggere tutti i chunk (0 = mai)
+//	CHUNK_SCRUB_HOUR=3         prima ora della finestra di manutenzione
+//	CHUNK_SCRUB_WINDOW_HOURS=0 durata della finestra (0 = sempre, 5 = solo di notte)
+//	CHUNK_SCRUB_NICE=10        priorità CPU durante GC e fsck (0 = normale)
 //	STATE_BACKUP_KEEP=7        copie giornaliere di journal e manifest (0 = nessuna)
 //	AUDIT_AUTO=report          report (default) | adopt (adotta i file orfani) | off
 
@@ -58,10 +62,29 @@ func stampOlderThan(path string, age time.Duration) bool {
 
 func touchStamp(path string) { _ = os.WriteFile(path, []byte(journalNow()+"\n"), 0o600) }
 
+func (c *Context) inScrubWindow() bool {
+	window := int(parseConfigInt(c.Config["CHUNK_SCRUB_WINDOW_HOURS"], 0))
+	if window <= 0 || window >= 24 {
+		return true // default: compatibile con il comportamento storico
+	}
+	start := int(parseConfigInt(c.Config["CHUNK_SCRUB_HOUR"], 3)) % 24
+	hour := c.now().Hour()
+	for offset := 0; offset < window; offset++ {
+		if hour == (start+offset)%24 {
+			return true
+		}
+	}
+	return false
+}
+
 func (c *Context) maintainChunks() {
 	if strings.EqualFold(firstField(c.Config["CHUNK_GC"]), "false") {
 		return
 	}
+	if !c.inScrubWindow() {
+		return
+	}
+	nice := int(parseConfigInt(c.Config["CHUNK_SCRUB_NICE"], 10))
 	store, err := c.chunkStore()
 	if err != nil {
 		c.logEvent("chunk_maintenance_error", map[string]any{"error": err.Error()})
@@ -73,7 +96,10 @@ func (c *Context) maintainChunks() {
 		return
 	}
 	grace := time.Duration(parseConfigInt(c.Config["CHUNK_GC_GRACE_HOURS"], 24)) * time.Hour
-	report, err := store.GC(GCOptions{Live: live, Grace: grace})
+	maxBytes := parseConfigInt(c.Config["CHUNK_MAX_MB"], 0) * 1024 * 1024
+	report, err := withLowPriority(func() (GCReport, error) {
+		return store.GC(GCOptions{Live: live, Grace: grace, MaxBytes: maxBytes, Now: c.now()})
+	}, nice)
 	if err != nil {
 		c.logEvent("chunk_gc_error", map[string]any{"error": err.Error()})
 		return
@@ -81,19 +107,37 @@ func (c *Context) maintainChunks() {
 	if report.ObjectsRemoved > 0 || report.MetasRemoved > 0 {
 		c.logEvent("chunk_gc", map[string]any{
 			"objects_removed": report.ObjectsRemoved, "bytes_freed": report.BytesFreed,
-			"metas_removed": report.MetasRemoved,
+			"metas_removed": report.MetasRemoved, "bytes_before": report.BytesBefore,
+			"bytes_after": report.BytesAfter, "quota_triggered": maxBytes > 0,
 		})
+	}
+	if report.QuotaBlocked {
+		c.logEvent("chunk_quota_blocked", map[string]any{
+			"bytes": report.BytesAfter, "quota_bytes": maxBytes,
+			"reachable": report.BytesAfter,
+		})
+		c.notifyOnce("chunk_quota", "NASBox: quota chunk non raggiungibile",
+			fmt.Sprintf("Lo store chunk usa %d byte con quota %d: tutti i chunk sono ancora referenziati. Aumenta CHUNK_MAX_MB.",
+				report.BytesAfter, maxBytes))
+	}
+	if objects, bytes, err := store.Stats(); err == nil {
+		usage := filepath.Join(c.StateDir, "chunk-usage")
+		line := fmt.Sprintf("%d %d %d\n", bytes, objects, c.now().Unix())
+		_ = os.WriteFile(usage, []byte(line), 0o600)
 	}
 	days := parseConfigInt(c.Config["CHUNK_FSCK_DAYS"], 7)
 	stamp := filepath.Join(c.StateDir, "chunk-fsck.stamp")
 	if days <= 0 || !stampOlderThan(stamp, time.Duration(days)*24*time.Hour) {
 		return
 	}
-	check, err := store.Fsck(false)
+	check, err := withLowPriority(func() (FsckReport, error) {
+		return store.Fsck(false)
+	}, nice)
 	if err != nil {
 		c.logEvent("chunk_fsck_error", map[string]any{"error": err.Error()})
 		return
 	}
+	c.recordFsck(check)
 	touchStamp(stamp)
 	if problems := check.Corrupt + check.MetasBroken + check.SnapshotsBad; problems > 0 {
 		c.notifyOnce("fsck", "NASBox: problemi nei chunk",

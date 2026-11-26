@@ -140,8 +140,11 @@ func cmdTransferWait(ctx *Context) error {
 	defer lock.Close()
 
 	granted := false
+	var wait time.Duration
+	var grantedAt time.Time
 	defer func() {
 		if granted {
+			ctx.recordLease(device, wait, time.Since(grantedAt))
 			_ = syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
 			_ = os.Remove(p.Owner)
 		}
@@ -175,6 +178,11 @@ func cmdTransferWait(ctx *Context) error {
 		if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 			return fmt.Errorf("lock occupato")
 		}
+		wait = time.Duration(time.Now().Unix()-tickets[0].Created) * time.Second
+		if wait < 0 {
+			wait = 0
+		}
+		grantedAt = time.Now()
 		granted = true
 		return nil
 	}); err != nil {

@@ -38,26 +38,78 @@ dialog::backdrop{background:rgba(0,0,0,.5)}
 dialog img,dialog video,dialog iframe{max-width:100%;max-height:70vh;display:block;margin:.6rem auto}dialog iframe{width:100%;height:70vh;border:0}
 .note{color:var(--mut);font-size:.85rem;margin:.6rem 0}
 @media(max-width:640px){.row{grid-template-columns:2rem 1fr auto}.row .meta{display:none}}
+#tabs{display:flex;gap:.4rem;padding:.5rem 1rem}
+#tabs button[aria-current=true]{border-color:var(--pri);color:var(--pri)}
+.statgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(15rem,1fr));gap:.7rem;padding:0 1rem 1rem}
+.statcard{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:.8rem}
+.statcard h3{margin:0 0 .5rem;font-size:.95rem}
+.statcard .big{font-size:1.35rem;font-weight:600}
+.statcard p{margin:.3rem 0;color:var(--mut);font-size:.85rem}
+canvas.spark{width:100%;height:52px}
+.bar{height:8px;background:var(--hover);border-radius:6px;overflow:hidden;margin:.35rem 0}.bar i{display:block;height:100%;background:var(--pri)}
 </style></head><body>
 <header><h1>NASBox</h1>
 <input id="q" type="search" placeholder="Cerca per nome…" aria-label="Cerca">
 <button id="linksBtn" style="display:none">Link condivisi</button>
 <label id="upLabel" class="btn primary" style="display:none">Carica<input id="pick" type="file" multiple hidden></label></header>
-<main><div id="crumbs"></div><div class="card" id="list"></div>
-<p class="note" id="foot"></p></main>
+<nav id="tabs"><button data-page="file" aria-current="true">File</button><button data-page="stato">Stato</button></nav>
+<main><section id="filesPage"><div id="crumbs"></div><div class="card" id="list"></div>
+<p class="note" id="foot"></p></section>
+<section id="statusPage" style="display:none"><div class="statgrid">
+<div class="statcard"><h3>NAS</h3><div class="big" id="stLock"></div><p id="stQueue"></p><canvas class="spark" id="sparkLoad"></canvas></div>
+<div class="statcard"><h3>Deduplica chunk</h3><div class="big" id="stDedup"></div><p id="stDedupBytes"></p><div class="bar"><i id="stDedupBar"></i></div></div>
+<div class="statcard"><h3>Manifest</h3><div id="stDelta"></div><div class="bar"><i id="stDeltaBar"></i></div></div>
+<div class="statcard"><h3>Lock per dispositivo</h3><div id="stLocks"></div></div>
+<div class="statcard"><h3>Integrità chunk</h3><div class="big" id="stFsck"></div><p id="stFsckDetail"></p></div>
+<div class="statcard"><h3>Fasi lato NAS (secondi totali)</h3><div id="stPhases"></div></div>
+</div></section></main>
 <div id="drop">Rilascia i file per caricarli qui</div>
 <div id="up" class="card"><div id="upt"></div><div class="bar"><i id="upb"></i></div></div>
 <div id="toast"></div>
 <dialog id="dlg"><div style="display:flex;justify-content:space-between;gap:1rem"><strong id="dt"></strong><button id="dc">Chiudi</button></div><div id="db"></div></dialog>
 <script>
 (function(){
-var cwd="",writable=false,canShare=false,maxUp=0,mode="dir";
+var cwd="",writable=false,canShare=false,maxUp=0,mode="dir",page="file",metricHistory=[];
 var $=function(id){return document.getElementById(id)};
 function el(tag,text,cls){var e=document.createElement(tag);if(text!=null)e.textContent=text;if(cls)e.className=cls;return e}
 function fmtSize(n){n=+n;if(n<1024)return n+" B";var u=["KB","MB","GB","TB"],i=-1;do{n/=1024;i++}while(n>=1024&&i<3);return n.toFixed(n<10?1:0)+" "+u[i]}
 function fmtDate(t){if(!+t)return"";var d=new Date(t*1000);return d.toLocaleDateString()+" "+d.toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})}
 function toast(msg){var t=$("toast");t.textContent=msg;t.style.display="block";clearTimeout(toast.t);toast.t=setTimeout(function(){t.style.display="none"},4500)}
 function api(path,opts){return fetch(path,opts).then(function(r){if(!r.ok)return r.text().then(function(m){throw new Error(m.trim()||r.status)});return r.json()})}
+function num(v){return +(v||0)}
+function showPage(p){page=p;$("filesPage").style.display=p==="file"?"":"none";$("statusPage").style.display=p==="stato"?"":"none";
+ var tabs=document.querySelectorAll("#tabs button");for(var i=0;i<tabs.length;i++)tabs[i].setAttribute("aria-current",tabs[i].getAttribute("data-page")===p?"true":"false");
+ if(p==="stato")loadMetrics()}
+function pct(a,b){return b>0?Math.min(100,Math.round(a*100/b)):0}
+function loadMetrics(){api("/api/metrics").then(function(m){metricHistory.push(num(m.LOAD_1));if(metricHistory.length>120)metricHistory.shift();renderStatus(m)}).catch(function(e){toast(e.message)})}
+function renderStatus(m){
+ var held=m.NASBOX_LOCK_HELD==="true";$("stLock").textContent=held?"Lock occupato":"Libero";
+ $("stLock").style.color=held?"var(--err)":"var(--ok)";
+ $("stQueue").textContent="Coda: "+(m.NASBOX_QUEUE_COUNT||0)+" · fase: "+(m.NASBOX_LOCK_PHASE||"—")+" · revisione: "+(m.MANIFEST_BYTES?"attiva":"—");
+ var hits=num(m.CHUNK_HAS_HITS),miss=num(m.CHUNK_HAS_MISSES),digests=hits+miss;
+ $("stDedup").textContent=(m.CHUNK_HAS_HIT_RATE_PERCENT||"0")+"%";
+ $("stDedupBytes").textContent=fmtSize(num(m.CHUNK_HAS_BYTES_SAVED))+" risparmiati su "+digests+" digest";
+ $("stDedupBar").style.width=pct(hits,digests)+"%";
+ var dbytes=num(m.MANIFEST_DELTA_BYTES),fbytes=num(m.MANIFEST_FULL_BYTES);
+ $("stDelta").textContent="";
+ ["Richieste delta: "+num(m.MANIFEST_DELTA_REQUESTS),"Fallback completi: "+num(m.MANIFEST_DELTA_FULL_FALLBACKS),"Render riutilizzati: "+num(m.MANIFEST_RENDER_CACHE_HITS),"Byte risparmiati: "+fmtSize(num(m.MANIFEST_DELTA_BYTES_SAVED))].forEach(function(t){$("stDelta").appendChild(el("p",t))});
+ $("stDeltaBar").style.width=pct(fbytes-dbytes,fbytes)+"%";
+ $("stLocks").textContent="";
+ var devices=[];try{devices=JSON.parse(m.LOCK_DEVICE_STATS_JSON||"[]")}catch(e){}
+ if(!devices.length)$("stLocks").appendChild(el("p","Nessun lease registrato"));
+ devices.forEach(function(d){$("stLocks").appendChild(el("p",d.device+": "+d.grants+" lease, "+d.wait_s+"s attesa, "+d.hold_s+"s occupazione"))});
+ var ok=m.CHUNK_FSCK_LAST_OK==="1";$("stFsck").textContent=num(m.CHUNK_FSCK_RUNS)?"Ultimo controllo: "+(ok?"ok":"problemi"):"Mai eseguito";
+ $("stFsck").style.color=ok?"var(--ok)":"var(--err)";
+ $("stFsckDetail").textContent=fmtDate(num(m.CHUNK_FSCK_LAST_TS))+" · corrotti "+num(m.CHUNK_FSCK_LAST_CORRUPT)+" · meta rotti "+num(m.CHUNK_FSCK_LAST_METAS_BROKEN);
+ $("stPhases").textContent="";
+ var phases=(m.PERF_PHASES||"").split(",").filter(function(x){return !!x});
+ phases.forEach(function(name){var sec=num(m["PERF_"+name+"_SECONDS_TOTAL"]),calls=num(m["PERF_"+name+"_CALLS"]);
+  $("stPhases").appendChild(el("p",name+": "+sec.toFixed(2)+"s su "+calls+" chiamate"))});
+ drawSpark($("sparkLoad"),metricHistory,2)
+}
+function drawSpark(canvas,values,max){if(!canvas||!canvas.getContext)return;var g=canvas.getContext("2d"),w=canvas.width=canvas.clientWidth||300,h=canvas.height=52;
+ g.clearRect(0,0,w,h);if(values.length<2)return;g.strokeStyle=getComputedStyle(canvas).color||"#2563eb";g.beginPath();
+ for(var i=0;i<values.length;i++){var x=i*w/(values.length-1),y=h-Math.min(1,values[i]/max)*(h-4)-2;if(i)g.lineTo(x,y);else g.moveTo(x,y)}g.stroke()}
 function enc(p){return encodeURIComponent(p)}
 function join(a,b){return a?a+"/"+b:b}
 function ext(n){var i=n.lastIndexOf(".");return i<0?"":n.slice(i+1).toLowerCase()}
@@ -78,7 +130,7 @@ function render(items,searching){var l=$("list");l.textContent="";
    if(canShare){var sh=el("button","Condividi");sh.onclick=function(){shareDialog(full,it.name||full)};a.appendChild(sh)}}
   r.appendChild(a);l.appendChild(r)})}
 function sortItems(a){return a.slice().sort(function(x,y){if(x.kind!==y.kind)return x.kind==="DIR"?-1:1;return x.name.toLowerCase()<y.name.toLowerCase()?-1:1})}
-function go(path){mode="dir";cwd=path;$("q").value="";crumbs();
+function go(path){mode="dir";cwd=path;showPage("file");$("q").value="";crumbs();
  api("/api/browse?path="+enc(path)).then(function(a){render(sortItems(a.map(function(e){return{name:e.name,kind:e.kind,size:e.size,mtime:e.mtime}})),false);$("foot").textContent=a.length+" elementi"}).catch(function(e){render([],false);toast(e.message)})}
 function open(path,name){var k=kindOf(name),u="/api/download?inline=1&path="+enc(path);if(!k){location.href="/api/download?path="+enc(path);return}
  var b=$("db");b.textContent="";$("dt").textContent=name;var m;
@@ -125,6 +177,8 @@ window.addEventListener("dragleave",function(){depth=Math.max(0,depth-1);if(!dep
 window.addEventListener("dragover",function(e){e.preventDefault()});
 window.addEventListener("drop",function(e){e.preventDefault();depth=0;$("drop").style.display="none";if(e.dataTransfer&&e.dataTransfer.files.length)upload(e.dataTransfer.files)});
 $("dc").onclick=function(){$("dlg").close();$("db").textContent=""};$("dlg").addEventListener("close",function(){$("db").textContent=""});
+var tabs=document.querySelectorAll("#tabs button");for(var ti=0;ti<tabs.length;ti++)tabs[ti].onclick=function(){showPage(this.getAttribute("data-page"))};
+setInterval(function(){if(page==="stato")loadMetrics()},5000);
 api("/api/info").then(function(i){writable=!!i.writable;canShare=!!i.can_share;maxUp=i.max_upload_bytes||0;if(canShare)$("linksBtn").style.display="";if(writable)$("upLabel").style.display="";else $("foot").textContent="Sola lettura (imposta WEB_PASSWORD per caricare file).";go("")}).catch(function(e){toast(e.message);go("")});
 })();
 </script></body></html>`

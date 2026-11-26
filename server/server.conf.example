@@ -77,6 +77,13 @@ STATE_TEMP_MAX_AGE_HOURS=24 # remove stale temporary files after N hours (0 = ke
 # CHUNK_GC=true               GC dei chunk non più referenziati (false = spenta)
 # CHUNK_GC_GRACE_HOURS=24     periodo di grazia prima di rimuovere un chunk
 # CHUNK_FSCK_DAYS=7           ogni quanti giorni rileggere e verificare tutti i chunk (0 = mai)
+# CHUNK_MAX_MB=0              quota dello store chunk in MB (0 = nessun limite).
+#                             Se tutti i chunk sono ancora referenziati la GC non cancella
+#                             nulla e segnala chunk_quota_blocked: va alzato il limite.
+# CHUNK_SCRUB_HOUR=3          prima ora della finestra di GC/fsck (default 3)
+# CHUNK_SCRUB_WINDOW_HOURS=0  durata in ore (0 = sempre; 5 = solo 03:00-07:59, consigliato
+#                             su dischi meccanici: il demone si sveglia ogni 12 ore)
+# CHUNK_SCRUB_NICE=10         priorita' CPU della manutenzione (0 = normale)
 # STATE_BACKUP_KEEP=7         copie giornaliere di journal e manifest in state/backup (0 = nessuna)
 # AUDIT_AUTO=report           report (solo segnala) | adopt (adotta i file orfani) | off
 #                             Le righe "fantasma" non si dimenticano mai da sole.

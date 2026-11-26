@@ -77,6 +77,32 @@ type Runner struct {
 	skippedReported  map[string]bool
 }
 
+// persistedManifestRevision lets a restarted client ask for a delta instead of
+// downloading the whole 11 MB manifest again. The cursor is bound to the
+// repository id: a different NAS must never be merged with an old snapshot.
+func persistedManifestRevision(cfg *config.Config) int {
+	if cfg.String("last_manifest_repository") != cfg.RepositoryID() {
+		return -1
+	}
+	revision := cfg.Int("last_manifest_revision")
+	if revision < 0 {
+		return -1
+	}
+	return revision
+}
+
+func (r *Runner) saveManifestRevision() {
+	if r.manifestRevision < 0 {
+		return
+	}
+	if r.cfg.Int("last_manifest_revision") == r.manifestRevision &&
+		r.cfg.String("last_manifest_repository") == r.cfg.RepositoryID() {
+		return
+	}
+	_ = r.cfg.Set("last_manifest_repository", r.cfg.RepositoryID(), true)
+	_ = r.cfg.Set("last_manifest_revision", r.manifestRevision, true)
+}
+
 func NewRunner(
 	cfg *config.Config, store *state.Store, client ConfigSource, transfers Transferer,
 	loggers ...*diagnostics.Logger,
@@ -87,7 +113,7 @@ func NewRunner(
 		dirty: map[string]bool{}, events: make(chan Event, 64), wake: make(chan struct{}, 1),
 		activity: make(chan struct{}, 1), lastActivity: time.Now(),
 		transferCtx: ctx, cancelTransfer: cancel,
-		manifestRevision: -1,
+		manifestRevision: persistedManifestRevision(cfg),
 		skippedReported:  map[string]bool{},
 		storm: conflicts.NewStormTracker(conflicts.StormConfig{
 			ConflictStormLimit:         cfg.Int("conflict_storm_limit"),
@@ -528,6 +554,7 @@ func (r *Runner) loadManifest(full bool) (map[string]classify.RemoteState, error
 		// snapshot with a newer revision.
 		r.manifest = remote.MergeDelta(nil, delta)
 		r.manifestRevision = int(delta.CurrentRevision)
+		r.saveManifestRevision()
 		return r.manifest, nil
 	}
 	if delta.BaseRevision != int64(r.manifestRevision) {
@@ -536,6 +563,7 @@ func (r *Runner) loadManifest(full bool) (map[string]classify.RemoteState, error
 	}
 	r.manifest = remote.MergeDelta(r.manifest, delta)
 	r.manifestRevision = int(delta.CurrentRevision)
+	r.saveManifestRevision()
 	return r.manifest, nil
 }
 
@@ -558,6 +586,7 @@ func (r *Runner) loadFullManifest() (map[string]classify.RemoteState, error) {
 	}
 	r.manifest = manifest
 	r.manifestRevision = revision
+	r.saveManifestRevision()
 	return manifest, nil
 }
 

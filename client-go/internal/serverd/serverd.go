@@ -10,9 +10,10 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
-var version = "3.36.0"
+var version = "3.37.0"
 
 // LoadVersion allows a versioned binary to report its own version through a
 // small sidecar file next to the executable. This is how --server-update-install
@@ -72,6 +73,15 @@ type Context struct {
 	StateDir   string
 	ShareRoot  string
 	ScriptPath string
+	// Now makes maintenance scheduling testable; nil means time.Now.
+	Now func() time.Time
+}
+
+func (c *Context) now() time.Time {
+	if c != nil && c.Now != nil {
+		return c.Now()
+	}
+	return time.Now()
 }
 
 // Open reads server.conf. Missing files are allowed: the bash daemon falls
@@ -85,6 +95,9 @@ var configDefaults = map[string]string{
 	"JOURNAL_MAX_BYTES": "10485760", "JOURNAL_MAX_LINES": "50000",
 	"LOG_RETENTION_DAYS": "30", "EVENTS_MAX_BYTES": "5242880",
 	"STATE_TEMP_MAX_AGE_HOURS": "24", "FILE_STATES_PARALLELISM": "",
+	"CHUNK_GC": "true", "CHUNK_GC_GRACE_HOURS": "24", "CHUNK_FSCK_DAYS": "7",
+	"CHUNK_MAX_MB": "0", "CHUNK_SCRUB_HOUR": "3",
+	"CHUNK_SCRUB_WINDOW_HOURS": "0", "CHUNK_SCRUB_NICE": "10",
 }
 
 func applyDefaults(cfg map[string]string) {

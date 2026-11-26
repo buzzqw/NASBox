@@ -211,8 +211,16 @@ func (ctx *Context) webHandler() http.Handler {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+		limit := parseConfigInt(ctx.Config["CHUNK_MAX_MB"], 0) * 1024 * 1024
+		usedPct := 0
+		if limit > 0 {
+			usedPct = int(bytes * 100 / limit)
+		}
 		writeJSON(w, map[string]any{
 			"objects": objects, "bytes": bytes, "snapshots": len(snapshots), "chunk_size": ctx.ChunkSize(),
+			"quota_bytes": limit, "used_percent": usedPct,
+			"scrub_hour":         ctx.Config["CHUNK_SCRUB_HOUR"],
+			"scrub_window_hours": ctx.Config["CHUNK_SCRUB_WINDOW_HOURS"],
 		})
 	})
 	return ctx.withWebAuth(mux)

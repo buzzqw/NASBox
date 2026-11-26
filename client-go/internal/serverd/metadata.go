@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -18,7 +19,7 @@ import (
 )
 
 const (
-	metadataSchemaVersion  = "1"
+	metadataSchemaVersion  = "2"
 	metadataDBName         = "metadata.sqlite3"
 	journalHashWindow      = 64 * 1024
 	metadataEntryUpsertSQL = `
@@ -57,8 +58,10 @@ type metadataEntry struct {
 }
 
 type journalCommit struct {
-	TxID string
-	Rows []string
+	TxID        string
+	Rows        []string
+	StartOffset int64 // byte offset of BEGIN, used by the revision->offset index
+	EndOffset   int64 // byte offset just after COMMIT
 }
 
 type journalCheckpoint struct {
@@ -71,6 +74,7 @@ type manifestView struct {
 	Current      int64
 	FallbackFull bool
 	Rows         []string
+	Removed      []string // paths absent from the rendered set (delta from cached base)
 }
 
 func openMetadataIndex(paths StatePaths) (*metadataIndex, error) {
@@ -149,11 +153,19 @@ func openMetadataIndexOnce(paths StatePaths) (*metadataIndex, error) {
 		CREATE TABLE IF NOT EXISTS journal_tx (
 			txid TEXT PRIMARY KEY,
 			revision INTEGER NOT NULL,
-			committed_at INTEGER NOT NULL DEFAULT 0
+			committed_at INTEGER NOT NULL DEFAULT 0,
+			start_offset INTEGER NOT NULL DEFAULT 0,
+			end_offset INTEGER NOT NULL DEFAULT 0,
+			epoch INTEGER NOT NULL DEFAULT 0
 		) WITHOUT ROWID;
 		CREATE INDEX IF NOT EXISTS idx_journal_tx_revision
 			ON journal_tx(revision);
-		INSERT OR IGNORE INTO meta(key, value) VALUES('schema_version', '1');
+		CREATE TABLE IF NOT EXISTS render_cache (
+			revision INTEGER PRIMARY KEY,
+			payload BLOB NOT NULL,
+			created_at INTEGER NOT NULL
+		) WITHOUT ROWID;
+		INSERT OR IGNORE INTO meta(key, value) VALUES('schema_version', '2');
 	`); err != nil {
 		db.Close()
 		return nil, err
@@ -162,6 +174,25 @@ func openMetadataIndexOnce(paths StatePaths) (*metadataIndex, error) {
 	if err := tx.QueryRow(`SELECT value FROM meta WHERE key='schema_version'`).Scan(&schema); err != nil {
 		db.Close()
 		return nil, err
+	}
+	if schema == "1" {
+		// Existing indexes are disposable, but an in-place migration is cheap
+		// and keeps the delta history of clients that already use them.
+		for _, statement := range []string{
+			`ALTER TABLE journal_tx ADD COLUMN start_offset INTEGER NOT NULL DEFAULT 0`,
+			`ALTER TABLE journal_tx ADD COLUMN end_offset INTEGER NOT NULL DEFAULT 0`,
+			`ALTER TABLE journal_tx ADD COLUMN epoch INTEGER NOT NULL DEFAULT 0`,
+			`CREATE TABLE IF NOT EXISTS render_cache (
+				revision INTEGER PRIMARY KEY, payload BLOB NOT NULL, created_at INTEGER NOT NULL
+			) WITHOUT ROWID`,
+			`INSERT OR REPLACE INTO meta(key, value) VALUES('schema_version', '2')`,
+		} {
+			if _, err := tx.Exec(statement); err != nil {
+				db.Close()
+				return nil, err
+			}
+		}
+		schema = "2"
 	}
 	if schema != metadataSchemaVersion {
 		db.Close()
@@ -179,6 +210,25 @@ func (i *metadataIndex) Close() error { return i.db.Close() }
 func (i *metadataIndex) metaInt64(key string) (int64, bool, error) {
 	var value string
 	err := i.db.QueryRow(`SELECT value FROM meta WHERE key=?`, key).Scan(&value)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, err
+	}
+	number, err := strconv.ParseInt(value, 10, 64)
+	if err != nil {
+		return 0, false, fmt.Errorf("metadata %s non valido: %w", key, err)
+	}
+	return number, true, nil
+}
+
+// metaInt64Tx reads a meta key using the caller's transaction. The index uses a
+// single SQLite connection, so querying through db while a transaction is open
+// would block forever (compaction and commit replay both hold one).
+func metaInt64Tx(tx *sql.Tx, key string) (int64, bool, error) {
+	var value string
+	err := tx.QueryRow(`SELECT value FROM meta WHERE key=?`, key).Scan(&value)
 	if errors.Is(err, sql.ErrNoRows) {
 		return 0, false, nil
 	}
@@ -430,9 +480,14 @@ func (i *metadataIndex) writeRevision(revision int64) error {
 }
 
 func applyMetadataCommit(tx *sql.Tx, commit journalCommit, revision int64) error {
+	epoch, _, err := metaInt64Tx(tx, "journal_epoch")
+	if err != nil {
+		return err
+	}
 	if _, err := tx.Exec(`
-		INSERT INTO journal_tx(txid, revision, committed_at) VALUES(?, ?, ?)
-	`, commit.TxID, revision, time.Now().Unix()); err != nil {
+		INSERT INTO journal_tx(txid, revision, committed_at, start_offset, end_offset, epoch)
+		VALUES(?, ?, ?, ?, ?, ?)
+	`, commit.TxID, revision, time.Now().Unix(), commit.StartOffset, commit.EndOffset, epoch); err != nil {
 		return err
 	}
 	for _, row := range commit.Rows {
@@ -568,6 +623,7 @@ func readJournalCommits(path string, offset int64) ([]journalCommit, int64, erro
 	var current *journalCommit
 	commits := make([]journalCommit, 0)
 	for {
+		lineStart := position
 		line, readErr := reader.ReadString('\n')
 		if len(line) > 0 {
 			position += int64(len(line))
@@ -577,7 +633,7 @@ func readJournalCommits(path string, offset int64) ([]journalCommit, int64, erro
 			switch fields[0] {
 			case "BEGIN":
 				if len(fields) > 1 {
-					current = &journalCommit{TxID: fields[1]}
+					current = &journalCommit{TxID: fields[1], StartOffset: lineStart}
 				}
 			case "PUT", "DELETE":
 				if current != nil {
@@ -585,6 +641,7 @@ func readJournalCommits(path string, offset int64) ([]journalCommit, int64, erro
 				}
 			case "COMMIT":
 				if current != nil && len(fields) > 1 && fields[1] == current.TxID {
+					current.EndOffset = position
 					commits = append(commits, *current)
 					current = nil
 					completeEnd = position
@@ -759,6 +816,108 @@ func (i *metadataIndex) lookupEntry(path string, ttlConfig string) (metadataEntr
 	return entry, true, nil
 }
 
+// manifestRowPath returns both the encoded path (as it appears in a manifest
+// row) and its decoded form. Removed paths are emitted encoded: the client
+// decodes them with decodeField before validating them.
+func manifestRowPath(row string) (encoded, decoded string, ok bool) {
+	fields := strings.SplitN(row, "\t", 2)
+	if len(fields) == 0 || fields[0] == "" {
+		return "", "", false
+	}
+	return fields[0], decodeField(fields[0]), true
+}
+
+// cachedRender reads a full manifest render kept for one revision. The payload
+// is the same bytes as the exported rows, without the header.
+func (i *metadataIndex) cachedRender(revision int64) ([]string, bool, error) {
+	var payload []byte
+	err := i.db.QueryRow(`SELECT payload FROM render_cache WHERE revision=?`, revision).Scan(&payload)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	text := string(payload)
+	text = strings.TrimSuffix(text, "\n")
+	if text == "" {
+		return []string{}, true, nil
+	}
+	return strings.Split(text, "\n"), true, nil
+}
+
+// storeRender keeps a small ring of full renders. With a cached base a client
+// whose cursor is older than feed_start_revision can still receive a real
+// delta instead of the 11 MB full fallback.
+func (i *metadataIndex) storeRender(revision int64, rows []string, keep int) error {
+	payload := ""
+	if len(rows) > 0 {
+		payload = strings.Join(rows, "\n") + "\n"
+	}
+	tx, err := i.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`INSERT OR REPLACE INTO render_cache(revision, payload, created_at) VALUES(?, ?, ?)`,
+		revision, []byte(payload), time.Now().Unix()); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM render_cache WHERE revision NOT IN (
+		SELECT revision FROM render_cache ORDER BY revision DESC LIMIT ?
+	)`, keep); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// deltaFromCachedBase diffs a cached full render against the current one. Both
+// sides use the exact formatter, so emitted rows are byte-identical to a full
+// export and clients can merge them without a second download.
+func (i *metadataIndex) deltaFromCachedBase(since, current int64, ttlConfig string) (manifestView, bool, error) {
+	var view manifestView
+	base, found, err := i.cachedRender(since)
+	if err != nil || !found {
+		return view, false, err
+	}
+	nowRows, err := i.manifestRows(false, 0, current, ttlConfig)
+	if err != nil {
+		return view, false, err
+	}
+	baseByPath := make(map[string]string, len(base))
+	for _, row := range base {
+		encoded, _, ok := manifestRowPath(row)
+		if ok {
+			baseByPath[encoded] = row
+		}
+	}
+	nowByPath := make(map[string]string, len(nowRows))
+	for _, row := range nowRows {
+		encoded, _, ok := manifestRowPath(row)
+		if ok {
+			nowByPath[encoded] = row
+		}
+	}
+	changed := make([]string, 0)
+	for path, row := range nowByPath {
+		if baseByPath[path] != row {
+			changed = append(changed, row)
+		}
+	}
+	sort.Strings(changed) // manifestRows orders by encoded path
+	removed := make([]string, 0)
+	for path := range baseByPath {
+		if _, ok := nowByPath[path]; !ok {
+			removed = append(removed, path)
+		}
+	}
+	sort.Strings(removed)
+	view.Current = current
+	view.Rows = changed
+	view.Removed = removed
+	return view, true, nil
+}
+
 func (i *metadataIndex) resetCheckpointAfterCompaction() error {
 	info, err := os.Stat(i.paths.Journal)
 	if err != nil {
@@ -774,6 +933,21 @@ func (i *metadataIndex) resetCheckpointAfterCompaction() error {
 	}
 	defer tx.Rollback()
 	if err := i.saveCheckpoint(tx, journalCheckpoint{Offset: info.Size(), Head: head, Tail: tail}); err != nil {
+		return err
+	}
+	// Compaction truncates the journal: offsets from the previous epoch no
+	// longer identify the same bytes. Forget them and the rendered snapshots.
+	epoch, _, err := metaInt64Tx(tx, "journal_epoch")
+	if err != nil {
+		return err
+	}
+	if err := i.setMetaInt64(tx, "journal_epoch", epoch+1); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM render_cache`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`UPDATE journal_tx SET start_offset=0, end_offset=0, epoch=?`, epoch+1); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -809,6 +983,9 @@ func (c *Context) exportManifest(since int64, delta bool) (manifestView, error) 
 			view.Current = current
 			if !delta {
 				view.Rows, err = index.manifestRows(false, 0, current, c.Config["TOMBSTONE_TTL_DAYS"])
+				if err == nil {
+					_ = index.storeRender(current, view.Rows, 3)
+				}
 				return err
 			}
 			if since == current {
@@ -826,8 +1003,19 @@ func (c *Context) exportManifest(since int64, delta bool) (manifestView, error) 
 				view.Rows, err = index.manifestRows(true, since, current, c.Config["TOMBSTONE_TTL_DAYS"])
 				return err
 			}
+			// The row index cannot serve this cursor. A cached full render at
+			// the client's exact revision can: diffing two renders is safe even
+			// after the journal was compacted, unlike replaying byte offsets.
+			if fromCache, ok, cacheErr := index.deltaFromCachedBase(since, current, c.Config["TOMBSTONE_TTL_DAYS"]); cacheErr == nil && ok {
+				c.recordRenderCacheHit()
+				view = fromCache
+				return nil
+			}
 			view.FallbackFull = true
 			view.Rows, err = index.manifestRows(false, 0, current, c.Config["TOMBSTONE_TTL_DAYS"])
+			if err == nil {
+				_ = index.storeRender(current, view.Rows, 3)
+			}
 			return err
 		}
 		// The index is derived: never make reads unavailable because it is

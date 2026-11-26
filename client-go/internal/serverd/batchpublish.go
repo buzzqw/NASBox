@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type publishRecord struct {
@@ -233,6 +234,8 @@ func (c *Context) buildPublishIntentPayloadLocked(device, txid, runTS, mode stri
 // caller's global lease and the journal lock before any publish precondition or
 // filesystem mutation.
 func (c *Context) publishChunkRecords(device, txid, runTS, mode string, records []publishRecord) error {
+	start := time.Now()
+	defer func() { c.recordPhase("file_publish_batch", time.Since(start)) }()
 	if !tokenPattern.MatchString(device) || !tokenPattern.MatchString(txid) || !runTSPattern.MatchString(runTS) {
 		return exitCode(1)
 	}

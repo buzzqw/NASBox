@@ -366,5 +366,6 @@ func (ctx *Context) metricsLines() []string {
 		fmt.Sprintf("JOURNAL_BYTES=%d", fileSize(p.Journal)),
 		fmt.Sprintf("MANIFEST_BYTES=%d", fileSize(p.Manifest)),
 	}
+	lines = append(lines, ctx.countersLines()...)
 	return lines
 }

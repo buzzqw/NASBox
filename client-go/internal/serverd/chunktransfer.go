@@ -10,12 +10,15 @@ import (
 	"io"
 	"os"
 	"strconv"
+	"time"
 )
 
 // cmdChunkHas reports which content-addressed objects are not on the NAS yet.
 // The client uses it before uploading, turning disk-side dedup into network-side
 // dedup as well.
 func cmdChunkHas(ctx *Context) error {
+	start := time.Now()
+	defer func() { ctx.recordPhase("chunk_has", time.Since(start)) }()
 	reader := bufio.NewReader(os.Stdin)
 	magic, err := readNULString(reader)
 	if err != nil || magic != "CHUNK_HAS_V1" {
@@ -50,6 +53,7 @@ func cmdChunkHas(ctx *Context) error {
 			missing = append(missing, digest)
 		}
 	}
+	ctx.recordChunkHas(int64(len(seen)), int64(len(seen)-len(missing)))
 	fmt.Printf("CHUNK_HAS_V1\x00%d\x00", len(missing))
 	for _, digest := range missing {
 		fmt.Print(digest + "\x00")
@@ -61,6 +65,8 @@ func cmdChunkHas(ctx *Context) error {
 // uncompressed and content-addressed on disk, so the repository format and all
 // existing readers stay compatible.
 func cmdChunkPutCompressed(ctx *Context) error {
+	start := time.Now()
+	defer func() { ctx.recordPhase("chunk_put", time.Since(start)) }()
 	reader := bufio.NewReader(os.Stdin)
 	magic, err := readNULString(reader)
 	if err != nil || magic != "CHUNK_PUT_COMPRESSED_V1" {
@@ -136,6 +142,7 @@ func cmdChunkPutCompressed(ctx *Context) error {
 			return err
 		}
 	}
+	ctx.recordChunkPut(int64(stored))
 	fmt.Printf("CHUNK_PUT_V1\x00%d\x00%d\x00", stored, count)
 	return nil
 }

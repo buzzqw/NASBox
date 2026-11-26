@@ -56,7 +56,7 @@ func capabilityValues(ctx *Context) []string {
 	systemVersion := rsyncVersion("rsync")
 	privatePath := filepath.Join(ctx.ServerDir, "bin", "nasbox-rsync")
 	privateVersion := rsyncVersion(privatePath)
-	caps := "change_feed,causal_versions,v3_rename,batch_delete,quiet_lock,empty_dir_prune,capabilities_v1,chunk_transfer_v1,chunk_transfer_v2,chunk_transfer_v3"
+	caps := "change_feed,causal_versions,v3_rename,batch_delete,quiet_lock,empty_dir_prune,capabilities_v1,chunk_transfer_v1,chunk_transfer_v2,chunk_transfer_v3,chunk_quota_v1,chunk_scrub_v1,server_metrics_v1"
 	if privateVersion != "" {
 		caps += ",private_rsync"
 	}
@@ -86,6 +86,9 @@ func capabilityValues(ctx *Context) []string {
 		"CAUSAL_VERSIONS_AVAILABLE=true",
 		"CHUNK_TRANSFER_AVAILABLE=true",
 		"CHUNK_TRANSFER_VERSION=3",
+		"CHUNK_QUOTA_AVAILABLE=true",
+		"CHUNK_SCRUB_AVAILABLE=true",
+		"SERVER_METRICS_AVAILABLE=true",
 		"BROWSE_RENAME_PROTOCOLS=BROWSE_RENAME_V1,BROWSE_RENAME_V2,BROWSE_RENAME_V3",
 		fmt.Sprintf("CPU_COUNT=%d", cores),
 		fmt.Sprintf("MEM_TOTAL_MB=%d", memMB),
@@ -289,6 +292,13 @@ func cmdPrintConfig(ctx *Context) error {
 			trashBytes, trashFiles, trashAt = fields[0], fields[1], fields[2]
 		}
 	}
+	chunkBytes, chunkObjects, chunkAt := "", "", ""
+	if raw := readString(filepath.Join(p.Dir, "chunk-usage")); raw != "" {
+		fields := strings.Fields(raw)
+		if len(fields) >= 3 {
+			chunkBytes, chunkObjects, chunkAt = fields[0], fields[1], fields[2]
+		}
+	}
 	lock := ctx.readLock()
 	lockHeld := "false"
 	if lock.Held {
@@ -321,6 +331,13 @@ func cmdPrintConfig(ctx *Context) error {
 		"TRASH_USED_BYTES=" + trashBytes,
 		"TRASH_FILES=" + trashFiles,
 		"TRASH_USAGE_AT=" + trashAt,
+		"CHUNK_MAX_MB=" + ctx.Config["CHUNK_MAX_MB"],
+		"CHUNK_USED_BYTES=" + chunkBytes,
+		"CHUNK_OBJECTS=" + chunkObjects,
+		"CHUNK_USAGE_AT=" + chunkAt,
+		"CHUNK_SCRUB_HOUR=" + ctx.Config["CHUNK_SCRUB_HOUR"],
+		"CHUNK_SCRUB_WINDOW_HOURS=" + ctx.Config["CHUNK_SCRUB_WINDOW_HOURS"],
+		"CHUNK_SCRUB_NICE=" + ctx.Config["CHUNK_SCRUB_NICE"],
 		"TOMBSTONE_TTL_DAYS=" + ctx.Config["TOMBSTONE_TTL_DAYS"],
 		"SYNC_LOCK_MAX_AGE_MINUTES=0",
 		"SYNC_LOCK_HELD=" + lockHeld,
@@ -578,6 +595,8 @@ func cmdDevices(ctx *Context) error {
 }
 
 func cmdManifestExport(ctx *Context, args []string) error {
+	start := time.Now()
+	defer func() { ctx.recordPhase("manifest_export", time.Since(start)) }()
 	delta := len(args) > 0 && args[0] != ""
 	since := int64(0)
 	if delta {
@@ -592,6 +611,11 @@ func cmdManifestExport(ctx *Context, args []string) error {
 	if err != nil {
 		return err
 	}
+	rowBytes := int64(0)
+	for _, row := range view.Rows {
+		rowBytes += int64(len(row)) + 1
+	}
+	ctx.recordManifestExport(delta, view.FallbackFull, len(view.Rows), rowBytes)
 	if !delta {
 		fmt.Println("NASBOX_MANIFEST_V1")
 		for _, row := range view.Rows {
@@ -618,6 +642,9 @@ func cmdManifestExport(ctx *Context, args []string) error {
 		fmt.Println(row)
 	}
 	fmt.Println("REMOVED=")
+	for _, path := range view.Removed {
+		fmt.Println(path)
+	}
 	return nil
 }
 

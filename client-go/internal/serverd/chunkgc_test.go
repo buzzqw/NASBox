@@ -15,6 +15,36 @@ func ageFile(t *testing.T, path string, age time.Duration) {
 	}
 }
 
+func TestChunkGCQuotaEvictsOldestUnreferenced(t *testing.T) {
+	store, err := NewChunkStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	digests := []string{}
+	for _, text := range []string{"a", "b", "c", "d"} {
+		digest, err := store.Put([]byte(text))
+		if err != nil {
+			t.Fatal(err)
+		}
+		digests = append(digests, digest)
+	}
+	for index, digest := range digests {
+		ageFile(t, store.objectPath(digest), time.Duration(4-index)*24*time.Hour)
+	}
+	report, err := store.GC(GCOptions{Grace: time.Hour, MaxBytes: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.ObjectsRemoved != 2 || report.BytesFreed != 2 || report.BytesBefore != 4 || report.BytesAfter != 2 {
+		t.Fatalf("quota GC sbagliata: %+v", report)
+	}
+	for index, digest := range digests {
+		if got := store.Has(digest); got != (index >= 2) {
+			t.Errorf("chunk %d: presente=%v, atteso %v", index, got, index >= 2)
+		}
+	}
+}
+
 func TestChunkGCKeepsLiveSnapshotAndRecentChunks(t *testing.T) {
 	store, err := NewChunkStore(t.TempDir())
 	if err != nil {

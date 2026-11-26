@@ -73,6 +73,8 @@ func (c *Context) appendTransactionLockedAtRevision(txid, device string, rows []
 }
 
 func (c *Context) appendTransactionLockedOptions(txid, device string, rows []string, targetRevision int64, compact bool) error {
+	start := time.Now()
+	defer func() { c.recordPhase("journal_append", time.Since(start)) }()
 	p := c.paths()
 	index, indexErr := openMetadataIndex(p)
 	if indexErr == nil {

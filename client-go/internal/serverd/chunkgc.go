@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -46,10 +47,11 @@ func (s *ChunkStore) Touch(digest string) {
 
 // GCOptions configura una passata di garbage collection.
 type GCOptions struct {
-	Live   map[string]bool // digest di file interi presenti nel manifest vivo
-	Grace  time.Duration
-	DryRun bool
-	Now    time.Time
+	Live     map[string]bool // digest di file interi presenti nel manifest vivo
+	Grace    time.Duration
+	DryRun   bool
+	Now      time.Time
+	MaxBytes int64 // 0 = nessuna quota; >0 = libera fino a rientrare sotto questo limite
 }
 
 // GCReport riassume una passata di GC.
@@ -60,6 +62,9 @@ type GCReport struct {
 	MetasScanned   int
 	MetasRemoved   int
 	TmpRemoved     int
+	BytesBefore    int64
+	BytesAfter     int64
+	QuotaBlocked   bool // la quota non è raggiungibile senza toccare dati vivi
 }
 
 func isDigest(value string) bool { return digest64.MatchString(value) }
@@ -185,9 +190,22 @@ func (s *ChunkStore) GC(opts GCOptions) (GCReport, error) {
 		}
 	}
 
+	type candidate struct {
+		path string
+		info os.FileInfo
+	}
+	candidates := []candidate{}
+	var totalBytes int64
 	err = s.walkObjects(func(digest, path string, info os.FileInfo) error {
 		report.ObjectsScanned++
+		totalBytes += info.Size()
 		if marked[digest] || !old(info) {
+			return nil
+		}
+		if opts.MaxBytes > 0 {
+			// With a quota the oldest unreferenced chunks go first: Touch()
+			// refreshes mtime, so recent reuse protects them automatically.
+			candidates = append(candidates, candidate{path: path, info: info})
 			return nil
 		}
 		report.ObjectsRemoved++
@@ -202,6 +220,30 @@ func (s *ChunkStore) GC(opts GCOptions) (GCReport, error) {
 	})
 	if err != nil {
 		return report, err
+	}
+	if opts.MaxBytes > 0 {
+		report.BytesBefore = totalBytes
+		target := totalBytes - opts.MaxBytes
+		if target > 0 {
+			sort.Slice(candidates, func(i, j int) bool {
+				return candidates[i].info.ModTime().Before(candidates[j].info.ModTime())
+			})
+			for _, item := range candidates {
+				if report.BytesFreed >= target {
+					break
+				}
+				report.ObjectsRemoved++
+				report.BytesFreed += item.info.Size()
+				if opts.DryRun {
+					continue
+				}
+				if err := os.Remove(item.path); err != nil && !os.IsNotExist(err) {
+					return report, err
+				}
+			}
+		}
+		report.BytesAfter = totalBytes - report.BytesFreed
+		report.QuotaBlocked = report.BytesFreed < target
 	}
 	// I meta si tolgono dopo i chunk: un'interruzione lascia al peggio un
 	// meta che punta a chunk mancanti, che l'fsck segnala e `--file-chunks`
@@ -407,7 +449,10 @@ func cmdChunkGC(ctx *Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	report, err := store.GC(GCOptions{Live: live, Grace: grace, DryRun: dryRun})
+	maxBytes := parseConfigInt(ctx.Config["CHUNK_MAX_MB"], 0) * 1024 * 1024
+	report, err := withLowPriority(func() (GCReport, error) {
+		return store.GC(GCOptions{Live: live, Grace: grace, DryRun: dryRun, MaxBytes: maxBytes})
+	}, int(parseConfigInt(ctx.Config["CHUNK_SCRUB_NICE"], 10)))
 	if err != nil {
 		return err
 	}
@@ -417,6 +462,8 @@ func cmdChunkGC(ctx *Context, args []string) error {
 		report.ObjectsScanned, report.ObjectsRemoved, report.BytesFreed)
 	fmt.Printf("METAS_SCANNED=%d\nMETAS_REMOVED=%d\nTMP_REMOVED=%d\n",
 		report.MetasScanned, report.MetasRemoved, report.TmpRemoved)
+	fmt.Printf("BYTES_BEFORE=%d\nBYTES_AFTER=%d\nQUOTA_BLOCKED=%t\n",
+		report.BytesBefore, report.BytesAfter, report.QuotaBlocked)
 	return nil
 }
 
@@ -429,10 +476,13 @@ func cmdChunkFsck(ctx *Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	report, err := store.Fsck(repair)
+	report, err := withLowPriority(func() (FsckReport, error) {
+		return store.Fsck(repair)
+	}, int(parseConfigInt(ctx.Config["CHUNK_SCRUB_NICE"], 10)))
 	if err != nil {
 		return err
 	}
+	ctx.recordFsck(report)
 	fmt.Println("CHUNK_FSCK_V1")
 	fmt.Printf("OBJECTS=%d\nCORRUPT=%d\nMETAS=%d\nMETAS_BROKEN=%d\nSNAPSHOT_PROBLEMS=%d\nREPAIRED=%d\n",
 		report.Objects, report.Corrupt, report.Metas, report.MetasBroken, report.SnapshotsBad, report.Repaired)
