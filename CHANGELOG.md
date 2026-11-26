@@ -4,6 +4,10 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 1.19.1 - 2026-11-26
+
+Client 1.19.1 e server 3.36.0.
+
 ## 1.19.0 - 2026-11-26
 
 Client 1.19.0 e server 3.36.0.
