@@ -29,16 +29,23 @@ type fakeNAS struct {
 	deleted        []remote.CheckedRequest
 	renames        [][2]string
 	journalAppends int
+	manifestCalls  int
+	journalCalls   int
+	callOrder      []string
 }
 
 func (f *fakeNAS) PrintConfig() (map[string]string, error) { return f.config, nil }
 func (f *fakeNAS) ManifestExport(since string) ([]byte, error) {
+	f.manifestCalls++
+	f.callOrder = append(f.callOrder, "manifest:"+since)
 	if since != "" && f.delta != "" {
 		return []byte(f.delta), nil
 	}
 	return []byte(f.manifest), nil
 }
 func (f *fakeNAS) JournalStatus() (map[string]string, error) {
+	f.journalCalls++
+	f.callOrder = append(f.callOrder, "journal")
 	revision := f.revision
 	if revision == 0 {
 		revision = 1

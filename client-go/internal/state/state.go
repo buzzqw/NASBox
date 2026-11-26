@@ -3,12 +3,15 @@
 package state
 
 import (
+	"context"
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -17,6 +20,16 @@ import (
 
 	"nasbox-go/internal/causal"
 	"nasbox-go/internal/config"
+)
+
+const (
+	schemaVersion     = 1
+	schemaVersionKey  = "schema_version"
+	sqlitePragmaQuery = "_pragma=busy_timeout(10000)" +
+		"&_pragma=foreign_keys(1)" +
+		"&_pragma=journal_mode(WAL)" +
+		"&_pragma=synchronous(FULL)" +
+		"&_txlock=immediate"
 )
 
 // Store wraps the shared SQLite database.
@@ -38,65 +51,309 @@ func Open(cfg *config.Config) (*Store, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, err
 	}
-	db, err := sql.Open("sqlite", filepath.Join(dir, "sync-state.sqlite3"))
+	dbPath := filepath.Join(dir, "sync-state.sqlite3")
+	dsn := (&url.URL{Scheme: "file", Path: dbPath}).String() + "?" + sqlitePragmaQuery
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, err
 	}
-	// One writer at a time keeps WAL contention predictable on a desktop.
+	// One connection per Store keeps the connection-local PRAGMAs predictable.
+	// Immediate transactions (see sqlitePragmaOpts) also serialize the
+	// read-merge-write in Observe with other processes, including Python.
 	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
 	store := &Store{db: db}
 	if err := store.init(); err != nil {
 		db.Close()
-		return nil, err
+		return nil, fmt.Errorf("initialize SQLite state: %w", err)
 	}
 	return store, nil
 }
 
 func (s *Store) Close() error { return s.db.Close() }
 
+type columnMigration struct {
+	name       string
+	definition string
+}
+
+type tableExpectation struct {
+	name       string
+	columns    []string
+	primaryKey []string
+	additions  []columnMigration
+}
+
+// The tables and column types intentionally match sync_state.py. Go and Python
+// take turns opening this file, so a Go-only schema or a destructive rebuild
+// would make rollback to Python unsafe.
+var schemaTableStatements = []string{
+	`CREATE TABLE IF NOT EXISTS meta (
+		key TEXT PRIMARY KEY, value TEXT NOT NULL
+	)`,
+	`CREATE TABLE IF NOT EXISTS entry (
+		repository TEXT NOT NULL, path TEXT NOT NULL,
+		digest TEXT, size INTEGER, mtime_ns INTEGER, causal TEXT,
+		synced_at REAL NOT NULL, PRIMARY KEY (repository, path)
+	)`,
+	`CREATE TABLE IF NOT EXISTS local_observation (
+		repository TEXT NOT NULL, path TEXT NOT NULL,
+		digest TEXT, size INTEGER, mtime_ns INTEGER, causal TEXT,
+		observed_at REAL NOT NULL, PRIMARY KEY (repository, path)
+	)`,
+	`CREATE TABLE IF NOT EXISTS file_identity (
+		repository TEXT NOT NULL, path TEXT NOT NULL,
+		dev INTEGER, ino INTEGER, ctime_ns INTEGER, size INTEGER,
+		mtime_ns INTEGER, digest TEXT, observed_at REAL NOT NULL,
+		PRIMARY KEY (repository, path)
+	)`,
+	`CREATE TABLE IF NOT EXISTS undo_event (
+		repository TEXT NOT NULL, batch_id TEXT NOT NULL, path TEXT NOT NULL,
+		version_ts TEXT NOT NULL, created_at REAL NOT NULL,
+		applied INTEGER NOT NULL DEFAULT 0,
+		PRIMARY KEY (repository, batch_id, path)
+	)`,
+	`CREATE TABLE IF NOT EXISTS pending (
+		repository TEXT NOT NULL, path TEXT NOT NULL, queued_at REAL NOT NULL,
+		last_reason TEXT NOT NULL DEFAULT '', last_attempt_at REAL,
+		attempt_count INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (repository, path)
+	)`,
+	`CREATE TABLE IF NOT EXISTS conflict_group (
+		repository TEXT NOT NULL, group_id TEXT NOT NULL,
+		original_path TEXT NOT NULL, status TEXT NOT NULL,
+		created_at REAL NOT NULL, updated_at REAL NOT NULL,
+		resolved_at REAL, chosen_path TEXT,
+		PRIMARY KEY (repository, group_id)
+	)`,
+	`CREATE TABLE IF NOT EXISTS conflict_member (
+		repository TEXT NOT NULL, group_id TEXT NOT NULL,
+		relative_path TEXT NOT NULL, origin_device TEXT NOT NULL DEFAULT '',
+		digest TEXT NOT NULL DEFAULT '', size INTEGER NOT NULL DEFAULT 0,
+		mtime_ns INTEGER NOT NULL DEFAULT 0, present INTEGER NOT NULL DEFAULT 1,
+		PRIMARY KEY (repository, group_id, relative_path),
+		FOREIGN KEY (repository, group_id)
+			REFERENCES conflict_group(repository, group_id)
+			ON DELETE CASCADE
+	)`,
+	`CREATE TABLE IF NOT EXISTS scheduler_queue (
+		repository TEXT NOT NULL, request_id TEXT NOT NULL, device_id TEXT NOT NULL,
+		kind TEXT NOT NULL, sequence INTEGER NOT NULL, queued_at REAL NOT NULL,
+		PRIMARY KEY (repository, request_id)
+	)`,
+}
+
+var schemaTableExpectations = []tableExpectation{
+	{
+		name:       "meta",
+		columns:    []string{"key", "value"},
+		primaryKey: []string{"key"},
+	},
+	{
+		name:       "entry",
+		columns:    []string{"repository", "path", "digest", "size", "mtime_ns", "causal", "synced_at"},
+		primaryKey: []string{"repository", "path"},
+		additions:  []columnMigration{{"causal", "TEXT"}},
+	},
+	{
+		name:       "local_observation",
+		columns:    []string{"repository", "path", "digest", "size", "mtime_ns", "causal", "observed_at"},
+		primaryKey: []string{"repository", "path"},
+		additions:  []columnMigration{{"causal", "TEXT"}},
+	},
+	{
+		name:       "file_identity",
+		columns:    []string{"repository", "path", "dev", "ino", "ctime_ns", "size", "mtime_ns", "digest", "observed_at"},
+		primaryKey: []string{"repository", "path"},
+		additions:  []columnMigration{{"digest", "TEXT"}},
+	},
+	{
+		name:       "undo_event",
+		columns:    []string{"repository", "batch_id", "path", "version_ts", "created_at", "applied"},
+		primaryKey: []string{"repository", "batch_id", "path"},
+		additions:  []columnMigration{{"applied", "INTEGER NOT NULL DEFAULT 0"}},
+	},
+	{
+		name:       "pending",
+		columns:    []string{"repository", "path", "queued_at", "last_reason", "last_attempt_at", "attempt_count"},
+		primaryKey: []string{"repository", "path"},
+		additions: []columnMigration{
+			{"last_reason", "TEXT NOT NULL DEFAULT ''"},
+			{"last_attempt_at", "REAL"},
+			{"attempt_count", "INTEGER NOT NULL DEFAULT 0"},
+		},
+	},
+	{
+		name:       "conflict_group",
+		columns:    []string{"repository", "group_id", "original_path", "status", "created_at", "updated_at", "resolved_at", "chosen_path"},
+		primaryKey: []string{"repository", "group_id"},
+	},
+	{
+		name:       "conflict_member",
+		columns:    []string{"repository", "group_id", "relative_path", "origin_device", "digest", "size", "mtime_ns", "present"},
+		primaryKey: []string{"repository", "group_id", "relative_path"},
+	},
+	{
+		name:       "scheduler_queue",
+		columns:    []string{"repository", "request_id", "device_id", "kind", "sequence", "queued_at"},
+		primaryKey: []string{"repository", "request_id"},
+	},
+}
+
+var schemaIndexStatements = []string{
+	// Existing Python indexes: digest lookups and undo age scans.
+	`CREATE INDEX IF NOT EXISTS idx_file_identity_digest
+		ON file_identity(repository, digest)`,
+	`CREATE INDEX IF NOT EXISTS idx_undo_created ON undo_event(repository, created_at)`,
+	// RecentUndo/UndoCount always restrict unapplied rows before the time range.
+	`CREATE INDEX IF NOT EXISTS idx_undo_pending_created
+		ON undo_event(repository, applied, created_at)`,
+	// pending_summary orders the latest attempt inside one repository.
+	`CREATE INDEX IF NOT EXISTS idx_pending_last_attempt
+		ON pending(repository, last_attempt_at)`,
+	// The scheduler primary key orders by request_id, not by sequence.
+	`CREATE INDEX IF NOT EXISTS idx_scheduler_queue_sequence
+		ON scheduler_queue(repository, sequence)`,
+	// The Conflicts tab lists only open groups, ordered by original path.
+	`CREATE INDEX IF NOT EXISTS idx_conflict_group_open
+		ON conflict_group(repository, status, original_path)`,
+}
+
 func (s *Store) init() error {
-	_, err := s.db.Exec(`
-		PRAGMA journal_mode=WAL;
-		CREATE TABLE IF NOT EXISTS meta (
-			key TEXT PRIMARY KEY, value TEXT NOT NULL
-		);
-		CREATE TABLE IF NOT EXISTS entry (
-			repository TEXT NOT NULL, path TEXT NOT NULL,
-			digest TEXT, size INTEGER, mtime_ns INTEGER, causal TEXT,
-			synced_at REAL NOT NULL, PRIMARY KEY (repository, path)
-		);
-		CREATE TABLE IF NOT EXISTS local_observation (
-			repository TEXT NOT NULL, path TEXT NOT NULL,
-			digest TEXT, size INTEGER, mtime_ns INTEGER, causal TEXT,
-			observed_at REAL NOT NULL, PRIMARY KEY (repository, path)
-		);
-		CREATE TABLE IF NOT EXISTS file_identity (
-			repository TEXT NOT NULL, path TEXT NOT NULL,
-			dev INTEGER, ino INTEGER, ctime_ns INTEGER, size INTEGER,
-			mtime_ns INTEGER, digest TEXT, observed_at REAL NOT NULL,
-			PRIMARY KEY (repository, path)
-		);
-		CREATE INDEX IF NOT EXISTS idx_file_identity_digest
-			ON file_identity(repository, digest);
-		CREATE TABLE IF NOT EXISTS undo_event (
-			repository TEXT NOT NULL, batch_id TEXT NOT NULL, path TEXT NOT NULL,
-			version_ts TEXT NOT NULL, created_at REAL NOT NULL,
-			applied INTEGER NOT NULL DEFAULT 0,
-			PRIMARY KEY (repository, batch_id, path)
-		);
-		CREATE INDEX IF NOT EXISTS idx_undo_created ON undo_event(repository, created_at);
-		CREATE TABLE IF NOT EXISTS pending (
-			repository TEXT NOT NULL, path TEXT NOT NULL, queued_at REAL NOT NULL,
-			last_reason TEXT NOT NULL DEFAULT '', last_attempt_at REAL,
-			attempt_count INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (repository, path)
-		);
-		CREATE TABLE IF NOT EXISTS scheduler_queue (
-			repository TEXT NOT NULL, request_id TEXT NOT NULL, device_id TEXT NOT NULL,
-			kind TEXT NOT NULL, sequence INTEGER NOT NULL, queued_at REAL NOT NULL,
-			PRIMARY KEY (repository, request_id)
-		);
-	`)
-	return err
+	ctx := context.Background()
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+
+	// The driver starts this as BEGIN IMMEDIATE. Schema creation, additive
+	// migrations and the version marker therefore commit or roll back together,
+	// even if Python or another Go process opens the same file concurrently.
+	tx, err := conn.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.ExecContext(ctx, schemaTableStatements[0]); err != nil {
+		return fmt.Errorf("create meta table: %w", err)
+	}
+	if err := ensureTable(ctx, tx, schemaTableExpectations[0]); err != nil {
+		return err
+	}
+	currentVersion, err := readSchemaVersion(ctx, tx)
+	if err != nil {
+		return err
+	}
+	if currentVersion > schemaVersion {
+		return fmt.Errorf("SQLite state schema version %d is newer than supported version %d", currentVersion, schemaVersion)
+	}
+
+	for _, statement := range schemaTableStatements[1:] {
+		if _, err := tx.ExecContext(ctx, statement); err != nil {
+			return fmt.Errorf("create SQLite state table: %w", err)
+		}
+	}
+	for _, expectation := range schemaTableExpectations[1:] {
+		if err := ensureTable(ctx, tx, expectation); err != nil {
+			return err
+		}
+	}
+	for _, statement := range schemaIndexStatements {
+		if _, err := tx.ExecContext(ctx, statement); err != nil {
+			return fmt.Errorf("create SQLite state index: %w", err)
+		}
+	}
+	if currentVersion != schemaVersion {
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO meta(key, value) VALUES(?, ?)
+			ON CONFLICT(key) DO UPDATE SET value=excluded.value
+		`, schemaVersionKey, strconv.Itoa(schemaVersion)); err != nil {
+			return fmt.Errorf("record SQLite state schema version: %w", err)
+		}
+	}
+	return tx.Commit()
+}
+
+func readSchemaVersion(ctx context.Context, tx *sql.Tx) (int, error) {
+	var value string
+	err := tx.QueryRowContext(ctx, `SELECT value FROM meta WHERE key = ?`, schemaVersionKey).Scan(&value)
+	if err == sql.ErrNoRows {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, fmt.Errorf("read SQLite state schema version: %w", err)
+	}
+	version, err := strconv.Atoi(strings.TrimSpace(value))
+	if err != nil || version < 0 {
+		return 0, fmt.Errorf("invalid SQLite state schema version %q", value)
+	}
+	return version, nil
+}
+
+// ensureTable adds only backward-compatible optional columns. Missing identity
+// or timestamp columns indicate an incompatible database and are reported
+// instead of being papered over with defaults that could hide data loss.
+func ensureTable(ctx context.Context, tx *sql.Tx, expectation tableExpectation) error {
+	rows, err := tx.QueryContext(ctx, `PRAGMA table_info(`+expectation.name+`)`)
+	if err != nil {
+		return fmt.Errorf("inspect SQLite table %s: %w", expectation.name, err)
+	}
+	columns := make(map[string]bool, len(expectation.columns))
+	primaryKey := make(map[int]string, len(expectation.primaryKey))
+	for rows.Next() {
+		var cid, notNull, pk int
+		var name, columnType string
+		var defaultValue any
+		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &pk); err != nil {
+			rows.Close()
+			return fmt.Errorf("inspect SQLite table %s: %w", expectation.name, err)
+		}
+		columns[name] = true
+		if pk > 0 {
+			primaryKey[pk] = name
+		}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return fmt.Errorf("inspect SQLite table %s: %w", expectation.name, err)
+	}
+	if err := rows.Close(); err != nil {
+		return fmt.Errorf("close SQLite table inspection for %s: %w", expectation.name, err)
+	}
+
+	for _, addition := range expectation.additions {
+		if columns[addition.name] {
+			continue
+		}
+		if _, err := tx.ExecContext(ctx,
+			`ALTER TABLE `+expectation.name+` ADD COLUMN `+addition.name+` `+addition.definition,
+		); err != nil {
+			return fmt.Errorf("add SQLite column %s.%s: %w", expectation.name, addition.name, err)
+		}
+		columns[addition.name] = true
+	}
+	for _, name := range expectation.columns {
+		if !columns[name] {
+			return fmt.Errorf("SQLite table %s is missing required column %s", expectation.name, name)
+		}
+	}
+	if len(primaryKey) != len(expectation.primaryKey) {
+		return fmt.Errorf("SQLite table %s has an incompatible primary key", expectation.name)
+	}
+	actualPrimaryKey := make([]string, len(expectation.primaryKey))
+	for position := range actualPrimaryKey {
+		name := primaryKey[position+1]
+		if name == "" {
+			return fmt.Errorf("SQLite table %s has an incompatible primary key", expectation.name)
+		}
+		actualPrimaryKey[position] = name
+	}
+	if strings.Join(actualPrimaryKey, ",") != strings.Join(expectation.primaryKey, ",") {
+		return fmt.Errorf("SQLite table %s has primary key (%s), expected (%s)",
+			expectation.name, strings.Join(actualPrimaryKey, ","), strings.Join(expectation.primaryKey, ","))
+	}
+	return nil
 }
 
 // DeviceID returns the stable per-client identifier stored in meta.
@@ -222,10 +479,18 @@ type Observation struct {
 // observations reuse the previous clock; real changes merge baseline+previous
 // and increment this device exactly once.
 func (s *Store) Observe(repository, path, device string, observation Observation) (string, error) {
+	// Hold the write lock across both reads and the upsert. Without this,
+	// concurrent observers can read the same clock and lose an increment.
+	tx, err := s.db.Begin()
+	if err != nil {
+		return "", err
+	}
+	defer tx.Rollback()
+
 	var previousDigest sql.NullString
 	var previousSize, previousMTime sql.NullInt64
 	var previousCausal sql.NullString
-	err := s.db.QueryRow(`
+	err = tx.QueryRow(`
 		SELECT digest, size, mtime_ns, causal FROM local_observation
 		WHERE repository = ? AND path = ?
 	`, repository, path).Scan(&previousDigest, &previousSize, &previousMTime, &previousCausal)
@@ -242,12 +507,15 @@ func (s *Store) Observe(repository, path, device string, observation Observation
 	}
 	if same && previousCausal.Valid {
 		if _, ok := causal.Parse(previousCausal.String); ok {
-			return previousCausal.String, nil
+			return previousCausal.String, tx.Commit()
 		}
 	}
 	var baselineCausal sql.NullString
-	_ = s.db.QueryRow(`SELECT causal FROM entry WHERE repository = ? AND path = ?`,
+	err = tx.QueryRow(`SELECT causal FROM entry WHERE repository = ? AND path = ?`,
 		repository, path).Scan(&baselineCausal)
+	if err != nil && err != sql.ErrNoRows {
+		return "", err
+	}
 	base, _ := causal.Parse(baselineCausal.String)
 	previous, _ := causal.Parse(previousCausal.String)
 	version := (&causal.Version{}).Merge(base).Merge(previous).Increment(device)
@@ -256,14 +524,17 @@ func (s *Store) Observe(repository, path, device string, observation Observation
 	if observation.Present {
 		digest, size, mtime = observation.Digest, observation.Size, observation.MTimeNS
 	}
-	_, err = s.db.Exec(`
+	_, err = tx.Exec(`
 		INSERT INTO local_observation(repository, path, digest, size, mtime_ns, causal, observed_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(repository, path) DO UPDATE SET
 			digest=excluded.digest, size=excluded.size, mtime_ns=excluded.mtime_ns,
 			causal=excluded.causal, observed_at=excluded.observed_at
 	`, repository, path, digest, size, mtime, encoded, float64(time.Now().UnixNano())/1e9)
-	return encoded, err
+	if err != nil {
+		return "", err
+	}
+	return encoded, tx.Commit()
 }
 
 func (s *Store) RecordEntry(repository, path string, entry EntryState) error {
@@ -411,12 +682,15 @@ func (s *Store) IdentitySnapshot(repository string) (map[string]Identity, error)
 	defer rows.Close()
 	result := make(map[string]Identity)
 	for rows.Next() {
-		var path, digest string
+		var path string
+		var digest sql.NullString
 		var id Identity
 		if err := rows.Scan(&path, &id.Dev, &id.Ino, &id.CtimeNS, &id.Size, &id.MTimeNS, &digest); err != nil {
 			return nil, err
 		}
-		id.Digest = digest
+		if digest.Valid {
+			id.Digest = digest.String
+		}
 		result[path] = id
 	}
 	return result, rows.Err()

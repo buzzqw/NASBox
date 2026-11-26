@@ -17,7 +17,7 @@ func TestRunnerMergesManifestDelta(t *testing.T) {
 	full := "NASBOX_MANIFEST_V1\na.txt\t" + strings.Repeat("a", 64) + "\t1\t1000\t\t\t\n"
 	delta := "NASBOX_MANIFEST_DELTA_V1\nBASE_REVISION=1\nCURRENT_REVISION=2\nCHANGED=1\n" +
 		"b.txt\t" + strings.Repeat("b", 64) + "\t1\t2000\t\t2000\t\nREMOVED=\n"
-	nas := &fakeNAS{config: nasConfig(), manifest: full, delta: delta, revision: 2}
+	nas := &fakeNAS{config: nasConfig(), manifest: full, delta: delta, revision: 1}
 	runner := NewRunner(cfg, store, nas, &fakeTransfer{})
 
 	first, err := runner.loadManifest(true)
@@ -39,6 +39,55 @@ func TestRunnerMergesManifestDelta(t *testing.T) {
 	}
 	if runner.manifestRevision != 2 {
 		t.Fatalf("revision = %d, want 2", runner.manifestRevision)
+	}
+	if got := strings.Join(nas.callOrder, ","); got != "journal,manifest:,manifest:1" {
+		t.Fatalf("ordine chiamate non sicuro: %s", got)
+	}
+}
+
+func TestRunnerFallbackFullDoesNotRefetch(t *testing.T) {
+	cfg, store, _ := setupTest(t)
+	full := "NASBOX_MANIFEST_V1\na.txt\t" + strings.Repeat("a", 64) + "\t1\t1000\t\t\t\n"
+	delta := "NASBOX_MANIFEST_DELTA_V1\nBASE_REVISION=1\nCURRENT_REVISION=2\nFALLBACK_FULL=1\nCHANGED=1\n" +
+		"b.txt\t" + strings.Repeat("b", 64) + "\t1\t2000\t\t2000\t\nREMOVED=\n"
+	nas := &fakeNAS{config: nasConfig(), manifest: full, delta: delta, revision: 1}
+	runner := NewRunner(cfg, store, nas, &fakeTransfer{})
+	if _, err := runner.loadManifest(true); err != nil {
+		t.Fatal(err)
+	}
+	manifest, err := runner.loadManifest(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if nas.manifestCalls != 2 || nas.journalCalls != 1 {
+		t.Fatalf("fallback ha rifatto l'export: manifest=%d journal=%d", nas.manifestCalls, nas.journalCalls)
+	}
+	if _, ok := manifest["a.txt"]; ok {
+		t.Fatal("il fallback non ha sostituito il baseline")
+	}
+	if _, ok := manifest["b.txt"]; !ok || runner.manifestRevision != 2 {
+		t.Fatalf("fallback non applicato: manifest=%+v revision=%d", manifest, runner.manifestRevision)
+	}
+}
+
+func TestRunnerReloadsWhenDeltaBaseDoesNotMatch(t *testing.T) {
+	cfg, store, _ := setupTest(t)
+	full := "NASBOX_MANIFEST_V1\na.txt\t" + strings.Repeat("a", 64) + "\t1\t1000\t\t\t\n"
+	delta := "NASBOX_MANIFEST_DELTA_V1\nBASE_REVISION=0\nCURRENT_REVISION=2\nCHANGED=0\nREMOVED=\n"
+	nas := &fakeNAS{config: nasConfig(), manifest: full, delta: delta, revision: 1}
+	runner := NewRunner(cfg, store, nas, &fakeTransfer{})
+	if _, err := runner.loadManifest(true); err != nil {
+		t.Fatal(err)
+	}
+	manifest, err := runner.loadManifest(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if nas.manifestCalls != 3 || nas.journalCalls != 2 {
+		t.Fatalf("base divergente non ha forzato il reload: manifest=%d journal=%d", nas.manifestCalls, nas.journalCalls)
+	}
+	if _, ok := manifest["a.txt"]; !ok || runner.manifestRevision != 1 {
+		t.Fatalf("reload non sicuro: manifest=%+v revision=%d", manifest, runner.manifestRevision)
 	}
 }
 

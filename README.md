@@ -9,10 +9,13 @@ service.
 > receives no further updates and its update channel is no longer published.
 > It is only useful for migrating data, which stays in the same place.
 
+The staged plan for a self-hosted, Dropbox-like NAS cloud is in
+[`ROADMAP.md`](ROADMAP.md).
+
 | Component | Current version |
 |---|---|
-| NASBox Go client (official) | **1.14.1** |
-| NAS server (`server/sync-daemon-server.sh`) | **3.32.4** |
+| NASBox Go client (official) | **1.15.2** |
+| NASBox Go server (`client-go/cmd/nasbox-server`) | **3.32.4** |
 
 ### Official client
 
@@ -22,10 +25,11 @@ retired: its update channel is no longer published and no new work targets it.
 Configuration, local state, history and trash are shared with the old client,
 so migrating does not move any data.
 
-The NAS runs a small, shell-only daemon. The clients talk to it over SSH and
-perform the transfers with rsync; the daemon owns the journal, the manifest,
-the remote history and the global transfer lease. Nothing needs Python on the
-NAS.
+The NAS runs the NASBox Go daemon. The default datapath is the chunk protocol:
+only missing content-addressed chunks are transferred, with deduplication between
+files and versions. The daemon owns the SQLite metadata index, journal, manifest,
+remote history and global transfer lease. The shell daemon and rsync remain a
+compatibility fallback for older installations.
 
 ### Features
 
@@ -56,10 +60,11 @@ NAS.
 
 ### Requirements
 
-- Linux PC (X11 or Wayland) with `ssh`, `rsync` ≥ 3.1 and, preferably,
-  `inotify-tools`.
-- NAS reachable over SSH with a key, with `bash`, `flock`, `sha256sum`,
-  `rsync` (even 3.1.2, as on Synology DSM) and standard shell utilities.
+- Linux PC (X11 or Wayland) with `ssh` and, preferably, `inotify-tools`.
+  `rsync` ≥ 3.1 is needed only for the legacy transfer backend.
+- NAS reachable over SSH with a key and the NASBox Go server binary. The shell
+  fallback additionally requires `bash`, `flock`, `sha256sum`, `rsync` (even
+  3.1.2, as on Synology DSM) and standard shell utilities.
 - Go 1.27+ and a CGO-capable toolchain are needed only to build the client.
 
 ### Install and update the client

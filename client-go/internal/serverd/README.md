@@ -105,6 +105,20 @@ perché i verbi a chunk non esistono nel vecchio server.
   single-transaction di `staging-publish` resta più efficiente e sarà il
   prossimo miglioramento.
 
+## Milestone 7 — metadata SQLite e delta reali (completata)
+
+- `STATE_DIR/metadata.sqlite3` è un indice derivato di `manifest.tsv` e
+  `transfer-journal.tsv`: WAL, schema versionato, checkpoint del journal e
+  ricostruzione automatica se manca, è stantio o è stato compattato.
+- `--manifest-export-delta` restituisce solo le righe il cui
+  `updated_revision` è successiva al cursore. Le revisioni precedenti a
+  `feed_start_revision` ricevono il compatibile `FALLBACK_FULL=1`.
+- Export, `--manifest-get`, `--file-chunks` e `--file-states-current` usano
+  lookup indicizzati sotto il lock del journal; il renderer TSV resta il
+  fallback di recupero.
+- Il retry di una transazione ripara un bump di revisione mancante; un errore
+  di compattazione dopo il commit viene registrato ma non annulla la mutazione.
+
 ## Distribuzione futura
 
 1. Distribuire il demone Go sul NAS e verificare i 11 comandi read-only.

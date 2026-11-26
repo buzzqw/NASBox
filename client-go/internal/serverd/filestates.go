@@ -82,7 +82,10 @@ func (c *Context) cmdFileStates(current bool) error {
 
 func (c *Context) fileStates(protocol string, want []string, out io.Writer) error {
 	count := len(want)
-	manifest := c.rawManifest()
+	manifest, err := c.lookupManifestMany(want)
+	if err != nil {
+		return err
+	}
 	type result struct {
 		path, kind, digest, size, mtime, causal string
 	}
@@ -92,8 +95,7 @@ func (c *Context) fileStates(protocol string, want []string, out io.Writer) erro
 			return exitCode(1)
 		}
 		full := filepath.Join(c.ShareRoot, path)
-		encoded := encodeField(path)
-		entry, known := manifest[encoded]
+		entry, known := manifest[path]
 		info, statErr := os.Lstat(full)
 		if statErr != nil {
 			if !known {
@@ -112,7 +114,7 @@ func (c *Context) fileStates(protocol string, want []string, out io.Writer) erro
 			continue
 		}
 		size := strconv.FormatInt(info.Size(), 10)
-		mtime := strconv.FormatInt(info.ModTime().Unix()*1_000_000_000, 10)
+		mtime := strconv.FormatInt(info.ModTime().UnixNano(), 10)
 		digest := ""
 		causal := ""
 		if known && digest64.MatchString(entry.Digest) && entry.Size == size && entry.MTimeNS == mtime {

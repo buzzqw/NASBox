@@ -101,11 +101,10 @@ func cmdFileChunks(ctx *Context, args []string) error {
 	if len(args) != 1 || !validRelative(args[0]) {
 		return exitCode(1)
 	}
-	rows, err := ctx.renderManifest()
+	row, ok, err := ctx.lookupManifest(args[0])
 	if err != nil {
 		return err
 	}
-	row, ok := manifestLookup(rows, args[0])
 	if !ok {
 		fmt.Print("FILE_CHUNKS_V1\x00MISS\x00")
 		return nil

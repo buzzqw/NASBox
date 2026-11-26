@@ -512,21 +512,7 @@ func (r *Runner) loadManifest(full bool) (map[string]classify.RemoteState, error
 	r.manifestMu.Lock()
 	defer r.manifestMu.Unlock()
 	if full || r.manifest == nil || r.manifestRevision < 0 {
-		raw, err := r.client.ManifestExport("")
-		if err != nil {
-			return nil, err
-		}
-		manifest, err := remote.ParseManifest(raw)
-		if err != nil {
-			return nil, err
-		}
-		revision := 0
-		if status, err := r.client.JournalStatus(); err == nil {
-			revision, _ = strconv.Atoi(status["MANIFEST_REVISION"])
-		}
-		r.manifest = manifest
-		r.manifestRevision = revision
-		return manifest, nil
+		return r.loadFullManifest()
 	}
 	raw, err := r.client.ManifestExport(strconv.Itoa(r.manifestRevision))
 	if err != nil {
@@ -537,21 +523,42 @@ func (r *Runner) loadManifest(full bool) (map[string]classify.RemoteState, error
 		return nil, err
 	}
 	if delta.FallbackFull {
-		raw, err = r.client.ManifestExport("")
-		if err != nil {
-			return nil, err
-		}
-		manifest, err := remote.ParseManifest(raw)
-		if err != nil {
-			return nil, err
-		}
-		r.manifest = manifest
+		// FALLBACK_FULL already carries the complete replacement. Fetching it
+		// again doubles bandwidth and, with an older server, can pair an old
+		// snapshot with a newer revision.
+		r.manifest = remote.MergeDelta(nil, delta)
 		r.manifestRevision = int(delta.CurrentRevision)
-		return manifest, nil
+		return r.manifest, nil
+	}
+	if delta.BaseRevision != int64(r.manifestRevision) {
+		// A reset, restored repository or stale cursor cannot be merged safely.
+		return r.loadFullManifest()
 	}
 	r.manifest = remote.MergeDelta(r.manifest, delta)
 	r.manifestRevision = int(delta.CurrentRevision)
 	return r.manifest, nil
+}
+
+// loadFullManifest reads the revision before the manifest. If a write lands
+// between the two calls, the cursor only lags behind the snapshot and the next
+// delta replays it; it can never skip a change by pointing ahead of the data.
+// The caller must hold manifestMu.
+func (r *Runner) loadFullManifest() (map[string]classify.RemoteState, error) {
+	revision := 0
+	if status, err := r.client.JournalStatus(); err == nil {
+		revision, _ = strconv.Atoi(status["MANIFEST_REVISION"])
+	}
+	raw, err := r.client.ManifestExport("")
+	if err != nil {
+		return nil, err
+	}
+	manifest, err := remote.ParseManifest(raw)
+	if err != nil {
+		return nil, err
+	}
+	r.manifest = manifest
+	r.manifestRevision = revision
+	return manifest, nil
 }
 
 // maybeAudit starts the scheduled integrity audit after a successful sync.

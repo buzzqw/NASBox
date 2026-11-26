@@ -102,11 +102,12 @@ func fileSize(path string) int64 {
 	return info.Size()
 }
 
-// renderManifest applies the committed part of the journal to manifest.tsv.
-// The bash daemon iterates an awk associative array, so row order is not
+// renderManifestLegacy applies the committed part of the journal to manifest.tsv.
+// It is kept as the compatibility and disaster-recovery fallback for the SQLite
+// index. The bash daemon iterates an awk associative array, so row order is not
 // stable; the Go daemon sorts by encoded path. Clients parse into maps, so
 // the order is semantically irrelevant, but comparison must be order-free.
-func (c *Context) renderManifest() ([]string, error) {
+func (c *Context) renderManifestLegacy() ([]string, error) {
 	p := c.paths()
 	state := map[string]string{}
 	base, err := readLines(p.Manifest)

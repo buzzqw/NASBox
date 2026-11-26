@@ -4,6 +4,24 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+- **Metadata NAS indicizzata da SQLite**: `server/state/metadata.sqlite3` è un
+  indice derivato e ricostruibile di manifest e journal. Export delta, lookup
+  manifest e `file-states-current` non rendono più l'intero repository; journal e
+  TSV restano il formato compatibile e il livello di recupero.
+- **Delta manifest realmente incrementale**: ogni transazione aggiorna la
+  revisione della riga nell'indice. Snapshot e revisione sono coerenti sotto il
+  lock del journal; i client troppo indietro ricevono ancora `FALLBACK_FULL`.
+- **Recovery del cursore**: un retry dopo un crash tra commit del journal e bump
+  della revisione ripara il cursore. La compattazione avvenuta dopo un commit non
+  può più far rollbackare filesystem e metadati.
+- **Database client versionato**: migrazioni additive transazionali, schema
+  compatibile con Python, pragma WAL/busy timeout/foreign key e `Observe` atomica.
+- **Manifest client più sicuro**: revisione letta prima dell'export completo,
+  validazione della base del delta e nessun secondo download quando il server
+  invia già `FALLBACK_FULL`.
+- **File states precisi**: lookup indicizzato che include il journal recente e
+  mtime in nanosecondi, senza rihash inutili sui file invariati.
+
 ## 1.15.2 - 2026-11-26
 
 Client e server Go:

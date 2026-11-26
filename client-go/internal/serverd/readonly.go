@@ -576,36 +576,43 @@ func cmdDevices(ctx *Context) error {
 }
 
 func cmdManifestExport(ctx *Context, args []string) error {
-	rows, err := ctx.renderManifest()
+	delta := len(args) > 0 && args[0] != ""
+	since := int64(0)
+	if delta {
+		var err error
+		since, err = strconv.ParseInt(args[0], 10, 64)
+		if err != nil || since < 0 || since > 999999999999999999 {
+			fmt.Fprintln(os.Stderr, "manifest export delta: since_revision non valido")
+			return exitCode(75)
+		}
+	}
+	view, err := ctx.exportManifest(since, delta)
 	if err != nil {
 		return err
 	}
-	if len(args) == 0 || args[0] == "" {
-		for _, row := range rows {
+	if !delta {
+		fmt.Println("NASBOX_MANIFEST_V1")
+		for _, row := range view.Rows {
 			fmt.Println(row)
 		}
 		return nil
 	}
-	since, err := strconv.ParseInt(args[0], 10, 64)
-	if err != nil || since < 0 || since > 999999999999999999 {
-		fmt.Fprintln(os.Stderr, "manifest export delta: since_revision non valido")
-		return exitCode(75)
-	}
-	current, err := ctx.journalRevision()
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "manifest export delta: manifest.revision non valido")
+	if since > view.Current {
+		fmt.Fprintln(os.Stderr, "manifest export delta: since_revision successiva alla revisione corrente")
 		return exitCode(75)
 	}
 	fmt.Println("NASBOX_MANIFEST_DELTA_V1")
 	fmt.Printf("BASE_REVISION=%d\n", since)
-	fmt.Printf("CURRENT_REVISION=%d\n", current)
-	if since == current {
+	fmt.Printf("CURRENT_REVISION=%d\n", view.Current)
+	if since == view.Current {
 		fmt.Printf("CHANGED=0\nREMOVED=\n")
 		return nil
 	}
-	fmt.Println("FALLBACK_FULL=1")
-	fmt.Printf("CHANGED=%d\n", len(rows)-1)
-	for _, row := range rows[1:] {
+	if view.FallbackFull {
+		fmt.Println("FALLBACK_FULL=1")
+	}
+	fmt.Printf("CHANGED=%d\n", len(view.Rows))
+	for _, row := range view.Rows {
 		fmt.Println(row)
 	}
 	fmt.Println("REMOVED=")
@@ -627,11 +634,10 @@ func cmdManifestGet(ctx *Context, args []string) error {
 			return exitCode(1)
 		}
 	}
-	rows, err := ctx.renderManifest()
+	row, ok, err := ctx.lookupManifest(args[0])
 	if err != nil {
 		return err
 	}
-	row, ok := manifestLookup(rows, args[0])
 	if !ok {
 		fmt.Println("MANIFEST_MISS")
 		return nil

@@ -3,6 +3,7 @@ package serverd
 import (
 	"bufio"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -58,7 +59,18 @@ func (c *Context) appendTransaction(txid, device string, rows []string) error {
 // the journal lock (all mutating verbs do). Never acquire the global lock here.
 func (c *Context) appendTransactionLocked(txid, device string, rows []string) error {
 	p := c.paths()
-	{
+	index, indexErr := openMetadataIndex(p)
+	if indexErr == nil {
+		defer index.Close()
+		indexErr = index.syncLocked()
+	}
+	if indexErr != nil {
+		// The SQLite index is derived. If it cannot be opened or caught up,
+		// preserve the legacy journal path instead of blocking a mutation.
+		if index != nil {
+			_ = index.Close()
+			index = nil
+		}
 		journal, err := os.ReadFile(p.Journal)
 		if err != nil {
 			return err
@@ -66,74 +78,113 @@ func (c *Context) appendTransactionLocked(txid, device string, rows []string) er
 		if journalContainsCommit(journal, txid) {
 			return nil
 		}
-		revisionBytes, err := os.ReadFile(p.Revision)
+	} else {
+		exists, err := index.transactionExists(txid)
 		if err != nil {
 			return err
 		}
-		revision := strings.TrimSpace(string(revisionBytes))
-		if revision == "" {
-			revision = "0"
+		if exists {
+			return nil
 		}
-		lines := []string{"BEGIN\t" + txid + "\t" + journalNow() + "\t" + device}
-		lines = append(lines, rows...)
-		lines = append(lines, "COMMIT\t"+txid)
-		block := strings.Join(lines, "\n") + "\n"
-
-		file, err := os.OpenFile(p.Journal, os.O_WRONLY|os.O_APPEND, 0o600)
-		if err != nil {
-			return err
-		}
-		_, writeErr := file.WriteString(block)
-		if syncErr := file.Sync(); syncErr != nil && writeErr == nil {
-			writeErr = syncErr
-		}
-		file.Close()
-		if writeErr != nil {
-			return writeErr
-		}
-		if err := c.bumpRevision(); err != nil {
-			// Restore the journal bytes; the revision is restored by bumpRevision.
-			_ = os.WriteFile(p.Journal, journal, 0o600)
-			return err
-		}
-		return c.compactIfNeeded()
 	}
-}
-
-func (c *Context) bumpRevision() error {
-	p := c.paths()
-	data, err := os.ReadFile(p.Revision)
+	info, err := os.Stat(p.Journal)
 	if err != nil {
 		return err
 	}
-	current, err := strconv.ParseInt(strings.TrimSpace(string(data)), 10, 64)
-	if err != nil || current < 0 {
-		current = 0
-	}
-	tmp := p.Revision + ".tmp." + strconv.Itoa(os.Getpid())
-	if err := os.WriteFile(tmp, []byte(strconv.FormatInt(current+1, 10)+"\n"), 0o600); err != nil {
+	oldSize := info.Size()
+	lines := []string{"BEGIN\t" + txid + "\t" + journalNow() + "\t" + device}
+	lines = append(lines, rows...)
+	lines = append(lines, "COMMIT\t"+txid)
+	block := strings.Join(lines, "\n") + "\n"
+
+	file, err := os.OpenFile(p.Journal, os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
 		return err
 	}
-	if err := os.Rename(tmp, p.Revision); err != nil {
-		os.Remove(tmp)
+	_, writeErr := file.WriteString(block)
+	if syncErr := file.Sync(); syncErr != nil && writeErr == nil {
+		writeErr = syncErr
+	}
+	file.Close()
+	if writeErr != nil {
+		_ = os.Truncate(p.Journal, oldSize)
+		return writeErr
+	}
+	if err := c.bumpRevision(); err != nil {
+		_ = os.Truncate(p.Journal, oldSize)
 		return err
 	}
-	file, err := os.Open(p.Revision)
-	if err == nil {
-		_ = file.Sync()
-		file.Close()
+	if index != nil {
+		if err := index.syncLocked(); err != nil {
+			// The journal and revision are already committed. Keep the mutation
+			// successful and let the next reader rebuild/catch up the index.
+			fmt.Fprintf(os.Stderr, "metadata sqlite non aggiornato: %v\n", err)
+			index = nil
+		}
 	}
-	dir, err := os.Open(p.Dir)
-	if err == nil {
-		_ = dir.Sync()
-		dir.Close()
+	if err := c.compactIfNeeded(index); err != nil {
+		// Journal and revision are already durable. Compaction is maintenance:
+		// reporting it as a failed mutation would make callers roll back files
+		// while the metadata still records the operation as committed.
+		fmt.Fprintf(os.Stderr, "compattazione journal non riuscita: %v\n", err)
 	}
 	return nil
 }
 
-func (c *Context) compactIfNeeded() error {
+func (c *Context) bumpRevision() error {
+	current, err := revisionFromFile(c.paths().Revision)
+	if err != nil || current < 0 {
+		current = 0
+	}
+	return c.writeRevision(current + 1)
+}
+
+func (c *Context) writeRevision(revision int64) error {
+	return writeRevisionFile(c.paths().Revision, revision)
+}
+
+func writeRevisionFile(path string, revision int64) error {
+	tmp := path + ".tmp." + strconv.Itoa(os.Getpid())
+	if err := os.WriteFile(tmp, []byte(strconv.FormatInt(revision, 10)+"\n"), 0o600); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	// Once rename succeeds the new cursor is visible. Keep the historical
+	// best-effort fsync behavior: returning an error here would make the caller
+	// truncate a journal whose revision has already advanced.
+	_ = syncFile(path)
+	_ = syncDir(filepath.Dir(path))
+	return nil
+}
+
+func syncFile(path string) error {
+	file, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	return file.Sync()
+}
+
+func syncDir(path string) error {
+	dir, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer dir.Close()
+	return dir.Sync()
+}
+
+func (c *Context) compactIfNeeded(index *metadataIndex) error {
 	p := c.paths()
-	limit, _ := strconv.ParseInt(strings.Fields(c.Config["JOURNAL_MAX_BYTES"])[0], 10, 64)
+	limitFields := strings.Fields(c.Config["JOURNAL_MAX_BYTES"])
+	if len(limitFields) == 0 {
+		return nil
+	}
+	limit, _ := strconv.ParseInt(limitFields[0], 10, 64)
 	if limit <= 0 {
 		return nil
 	}
@@ -141,7 +192,13 @@ func (c *Context) compactIfNeeded() error {
 	if err != nil || info.Size() <= limit {
 		return nil
 	}
-	rows, err := c.renderManifest()
+	var rows []string
+	if index != nil {
+		rows, err = index.manifestRows(false, 0, 0, c.Config["TOMBSTONE_TTL_DAYS"])
+		rows = append([]string{"NASBOX_MANIFEST_V1"}, rows...)
+	} else {
+		rows, err = c.renderManifestLegacy()
+	}
 	if err != nil {
 		return err
 	}
@@ -149,12 +206,30 @@ func (c *Context) compactIfNeeded() error {
 	if err := os.WriteFile(tmp, []byte(strings.Join(rows, "\n")+"\n"), 0o600); err != nil {
 		return err
 	}
+	if err := syncFile(tmp); err != nil {
+		os.Remove(tmp)
+		return err
+	}
 	if err := os.Rename(tmp, p.Manifest); err != nil {
 		os.Remove(tmp)
 		return err
 	}
+	if err := syncDir(p.Dir); err != nil {
+		return err
+	}
 	if err := os.WriteFile(p.Journal, []byte("NASBOX_JOURNAL_V1\n"), 0o600); err != nil {
 		return err
+	}
+	if err := syncFile(p.Journal); err != nil {
+		return err
+	}
+	if err := syncDir(p.Dir); err != nil {
+		return err
+	}
+	if index != nil {
+		if err := index.resetCheckpointAfterCompaction(); err != nil {
+			return err
+		}
 	}
 	return os.WriteFile(filepath.Join(p.Dir, "manifest-sweep.stamp"), []byte(journalNow()+"\n"), 0o600)
 }
