@@ -70,6 +70,7 @@ jobs:
     # suo fallimento non blocca la release Linux.
     runs-on: windows-latest
     continue-on-error: true
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-go@v6
