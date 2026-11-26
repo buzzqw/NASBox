@@ -4,6 +4,10 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 1.16.0 - 2026-11-26
+
+Client 1.16.0 e server 3.34.0.
+
 Web UI e tray:
 - **Web UI di consultazione e caricamento** (server): pagina unica, chiara/scura,
   adatta al telefono. Sfoglia le cartelle, cerca per nome, anteprima di immagini,

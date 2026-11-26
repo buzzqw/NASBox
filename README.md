@@ -16,8 +16,8 @@ simpler GUI, web browse/upload, Windows client, on-demand files).
 
 | Component | Current version |
 |---|---|
-| NASBox Go client (official) | **1.15.3** |
-| NASBox Go server (`client-go/cmd/nasbox-server`) | **3.33.0** |
+| NASBox Go client (official) | **1.16.0** |
+| NASBox Go server (`client-go/cmd/nasbox-server`) | **3.34.0** |
 
 ### Official client
 
