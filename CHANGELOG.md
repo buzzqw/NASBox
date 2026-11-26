@@ -4,6 +4,10 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 1.19.0 - 2026-11-26
+
+Client 1.19.0 e server 3.36.0.
+
 Windows (sperimentale, **non ancora provato su un PC Windows**):
 - **Il client ora compila per Windows**: nuovi pacchetti `filelock` (flock su Unix,
   `LockFileEx` su Windows) e `osx` (aprire file/cartelle, processo staccato, spazio
