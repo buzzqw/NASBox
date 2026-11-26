@@ -29,3 +29,18 @@ func TestCumulativeGuardAndConfirm(t *testing.T) {
 		t.Fatalf("bad snapshot: %+v", snapshot)
 	}
 }
+
+func TestIsConfirmedFollowsConfirmationWindow(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	cfg := config.New("")
+	guard := New()
+	if guard.IsConfirmed() {
+		t.Fatal("nessuna conferma all'inizio")
+	}
+	if _, err := guard.Confirm(cfg); err != nil {
+		t.Fatal(err)
+	}
+	if !guard.IsConfirmed() {
+		t.Fatal("conferma attiva dopo Confirm")
+	}
+}

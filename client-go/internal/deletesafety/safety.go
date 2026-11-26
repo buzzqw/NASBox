@@ -163,6 +163,16 @@ func (g *Guard) Confirm(cfg *config.Config) (float64, error) {
 	return g.state.ConfirmedUntil, g.save()
 }
 
+// IsConfirmed reports whether the user explicitly allowed mass deletions and
+// the confirmation window is still open. It lets the other guards (folder
+// ratio, batch limit) honour the same confirmation as the cumulative one.
+func (g *Guard) IsConfirmed() bool {
+	mu.Lock()
+	defer mu.Unlock()
+	g.load()
+	return float64(time.Now().UnixNano())/1e9 < g.state.ConfirmedUntil
+}
+
 type Snapshot struct {
 	Used      int
 	Limit     int

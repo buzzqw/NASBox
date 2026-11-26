@@ -44,7 +44,9 @@ func cmdChunkHas(ctx *Context) error {
 			continue
 		}
 		seen[digest] = true
-		if !store.Has(digest) {
+		if store.Has(digest) {
+			store.Touch(digest) // protegge il chunk riusato dalla GC
+		} else {
 			missing = append(missing, digest)
 		}
 	}

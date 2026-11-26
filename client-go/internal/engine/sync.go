@@ -471,11 +471,12 @@ func syncPass(
 	// renames are not dangerous and keep flowing: a duplicate folder removed
 	// by hand must not freeze the whole sync.
 	deletionsHeld := false
-	if message := guardMessage(cfg, report); message != "" {
+	confirmed := deletesafety.Shared().IsConfirmed()
+	if message := guardMessage(cfg, report, confirmed); message != "" {
 		result.Blocked = message
 		deletionsHeld = true
 	}
-	if message := localDeleteGuard(cfg, len(localDeletes)); message != "" {
+	if message := localDeleteGuard(cfg, len(localDeletes), confirmed); message != "" {
 		result.Blocked = message
 		localDeletes = nil
 	}
@@ -922,7 +923,11 @@ func guardThresholds(cfg *config.Config) (float64, int) {
 	return ratio, minFiles
 }
 
-func guardMessage(cfg *config.Config, report classify.Report) string {
+// guardMessage returns why deletions are held back, or "". An explicit user
+// confirmation (deletesafety.Confirm) lifts the folder and batch-size guards,
+// but never the sentinels: a missing sentinel usually means an unmounted disk,
+// which is not something a "yes, delete" should override.
+func guardMessage(cfg *config.Config, report classify.Report, confirmed bool) string {
 	root := cfg.LocalRoot()
 	for _, value := range strings.Split(cfg.String("delete_sentinels"), ",") {
 		sentinel := strings.TrimSpace(value)
@@ -932,6 +937,9 @@ func guardMessage(cfg *config.Config, report classify.Report) string {
 		if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(sentinel))); err != nil {
 			return i18n.T("guard.blocked_sentinel", map[string]any{"path": sentinel})
 		}
+	}
+	if confirmed {
+		return ""
 	}
 	if len(report.Anomalies) > 0 {
 		item := report.Anomalies[0]
@@ -1089,7 +1097,10 @@ func statOf(info os.FileInfo) fileStat {
 // localDeleteGuard blocks a pass that would remove more local files than the
 // configured batch limit because of NAS deletions (for example a NAS folder
 // deleted by mistake from another PC). Nothing is touched while blocked.
-func localDeleteGuard(cfg *config.Config, count int) string {
+func localDeleteGuard(cfg *config.Config, count int, confirmed bool) string {
+	if confirmed {
+		return ""
+	}
 	limit := cfg.Int("max_delete_files")
 	if limit <= 0 {
 		limit = 1000

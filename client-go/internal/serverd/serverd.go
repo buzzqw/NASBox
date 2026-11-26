@@ -239,6 +239,10 @@ func Dispatch(ctx *Context, verb string, args []string) error {
 		return ctx.cmdFileStates(false)
 	case "--chunk-stats":
 		return cmdChunkStats(ctx)
+	case "--chunk-gc":
+		return cmdChunkGC(ctx, args)
+	case "--chunk-fsck":
+		return cmdChunkFsck(ctx, args)
 	case "--chunk-snapshot-create":
 		return cmdChunkSnapshotCreate(ctx, args)
 	case "--chunk-snapshot-list":
@@ -324,6 +328,8 @@ Uso:
 
 Datapath a chunk (milestone 1, non ancora usato dai client):
   nasbox-server -c FILE --chunk-stats
+  nasbox-server -c FILE --chunk-gc [--dry-run] [--grace-hours N]
+  nasbox-server -c FILE --chunk-fsck [--repair]
   nasbox-server -c FILE --chunk-snapshot-create DEVICE PATH [PATH...]
   nasbox-server -c FILE --chunk-snapshot-list
   nasbox-server -c FILE --chunk-restore ID PATH DEST

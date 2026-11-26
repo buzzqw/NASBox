@@ -4,6 +4,21 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+Fase 0 della roadmap (`roadmap-claude.md`):
+- **La conferma delle cancellazioni di massa sblocca davvero la protezione
+  cartella**: `confirm-delete` (CLI e pulsante della GUI) valeva solo per la
+  guardia cumulativa; ora vale anche per la guardia "cartella" e per il limite di
+  cancellazioni locali (`max_delete_files`). Le sentinelle mancanti restano un
+  blocco duro, perché di solito indicano un disco non montato.
+- **Garbage collection dei chunk** (server): `--chunk-gc [--dry-run]
+  [--grace-hours N]` rimuove chunk e meta-file non raggiungibili da manifest vivo
+  o snapshot, con periodo di grazia di 24 ore; non cancella nulla se uno snapshot
+  è illeggibile. `--chunk-has` aggiorna la data dei chunk riusati, così la GC non
+  li raccoglie tra la domanda e la pubblicazione.
+- **`--chunk-fsck [--repair]`** (server): rilegge ogni chunk e ne verifica lo
+  SHA-256, controlla meta-file e snapshot; con `--repair` rimuove solo ciò che è
+  ricostruibile (mai gli snapshot). Esce con codice 2 se restano problemi.
+
 ## 1.15.3 - 2026-11-26
 
 Client 1.15.3 e server 3.33.0:
