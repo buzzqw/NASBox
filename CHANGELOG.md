@@ -4,6 +4,10 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 1.21.0 - 2026-11-26
+
+Client 1.21.0 e server 3.36.0.
+
 Pulizia:
 - **Rimosso il client Python/PyQt6** (ritirato da tempo) con i suoi strumenti di
   build e di pubblicazione: ~37.000 righe in meno. L'ultima versione resta nel tag
