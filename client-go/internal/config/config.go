@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 )
@@ -263,6 +264,19 @@ func (c *Config) saveLocked() error {
 func (c *Config) LocalRoot() string    { return c.String("local_root") }
 func (c *Config) RemoteScript() string { return c.String("remote_server_script") }
 func (c *Config) RepositoryID() string { return c.String("repository_id") }
+
+// Mode is "normal" (full two-way sync) or "ghost" (consultation only). Ghost
+// mode is opt-in and never changes the default behaviour of an existing client.
+func (c *Config) Mode() string {
+	mode := strings.ToLower(strings.TrimSpace(c.String("mode")))
+	if mode == "" {
+		return "normal"
+	}
+	return mode
+}
+
+// Ghost reports whether automatic sync must stay off on this client.
+func (c *Config) Ghost() bool { return c.Mode() == "ghost" }
 
 // LocalRepositoryID is the key used in the local SQLite state. It matches the
 // Python client's sha256("repository-id\0" + repository_id), so both clients

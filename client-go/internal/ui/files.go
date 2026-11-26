@@ -153,6 +153,9 @@ func (c *clientApp) buildBrowsePane() fyne.CanvasObject {
 	c.downloadPathEntry = widget.NewEntry()
 	c.downloadPathEntry.SetPlaceHolder(tr("ui.file.download_path_hint", nil))
 	c.downloadPathEntry.OnSubmitted = func(string) { c.onDownloadPath() }
+	c.browseGoEntry = widget.NewEntry()
+	c.browseGoEntry.SetPlaceHolder(lt("Vai a cartella (percorso NAS)", "Go to folder (NAS path)"))
+	c.browseGoEntry.OnSubmitted = func(text string) { c.onBrowseGo(text) }
 
 	c.browseDeleteBtn = plainButton(tr("browse.delete_btn", nil), theme.DeleteIcon(),
 		tr("browse.delete_tooltip", nil), widget.DangerImportance, c.onBrowseDelete, c.setHint)
@@ -160,6 +163,9 @@ func (c *clientApp) buildBrowsePane() fyne.CanvasObject {
 		tr("ui.file.rename_hint", nil), widget.LowImportance, c.onBrowseRename, c.setHint)
 	c.browseDownloadBtn = plainButton(tr("ui.action.download", nil), theme.DownloadIcon(),
 		tr("browse.download_tooltip", nil), widget.MediumImportance, c.onBrowseDownload, c.setHint)
+	c.browseUploadBtn = plainButton(lt("Carica", "Upload"), theme.ContentAddIcon(),
+		lt("Carica uno o più file nella cartella NAS aperta", "Upload one or more files into the open NAS folder"),
+		widget.HighImportance, c.onBrowseUpload, c.setHint)
 	c.browseVersionsBtn = plainButton(tr("ui.versions.button", nil), theme.HistoryIcon(),
 		tr("ui.versions.hint", nil), widget.LowImportance, func() {
 			if c.selectedBrowse != "" {
@@ -181,15 +187,25 @@ func (c *clientApp) buildBrowsePane() fyne.CanvasObject {
 	// The text path and the "remote path" box duplicated the breadcrumbs, and
 	// the folder download is now one button; the entry stays as hidden state.
 	navigation := container.NewBorder(nil, nil, c.browseUpBtn,
-		container.NewHBox(minWidth(c.browseSortSelect(), 200), downloadFolderBtn, refreshBtn), c.breadcrumbs)
+		container.NewHBox(minWidth(c.browseSortSelect(), 200), minWidth(c.browseGoEntry, 180),
+			downloadFolderBtn, refreshBtn), c.breadcrumbs)
 	selection := container.NewBorder(nil, nil, nil,
-		container.NewHBox(c.browseVersionsBtn, c.browseRenameBtn, c.browseDeleteBtn, c.browseDownloadBtn),
+		container.NewHBox(c.browseVersionsBtn, c.browseRenameBtn, c.browseDeleteBtn,
+			c.browseDownloadBtn, c.browseUploadBtn),
 		c.browseSelectedLabel)
-	header := container.NewVBox(
+	headerObjects := []fyne.CanvasObject{
 		c.sectionTitle("", tr("ui.file.browse_note", nil)),
 		navigation,
 		selection,
-	)
+	}
+	if c.ghost {
+		note := widget.NewLabel(lt("Modalità consultazione: il NAS non viene sincronizzato in automatico. Scarica e carica solo quello che ti serve.",
+			"Consultation mode: the NAS is never synced automatically. Download and upload only what you need."))
+		note.Wrapping = fyne.TextWrapWord
+		note.Importance = widget.LowImportance
+		headerObjects = append([]fyne.CanvasObject{note}, headerObjects...)
+	}
+	header := container.NewVBox(headerObjects...)
 	c.updateBreadcrumbs()
 	c.updateBrowseSelection()
 	return container.NewBorder(header, nil, nil, nil, c.browseList)

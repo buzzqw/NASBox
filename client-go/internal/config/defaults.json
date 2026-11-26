@@ -48,6 +48,7 @@
   "metrics_refresh_seconds": 30,
   "min_server_version": "3.25.0",
   "mirrors": [],
+  "mode": "normal",
   "nas_lan": "",
   "nas_user": "",
   "nas_wan": "",

@@ -37,7 +37,28 @@ import (
 	"nasbox-go/internal/version"
 )
 
+// ghostFlag is set by -ghost/--ghost anywhere on the command line. It lets a
+// normal installation start in consultation-only mode for one session without
+// editing client.json; setting "mode": "ghost" does the same for autostart.
+var ghostFlag bool
+
+// extractGhostFlag removes the ghost switch before the subcommand is parsed,
+// so both `nasbox -ghost gui` and `nasbox gui -ghost` work.
+func extractGhostFlag(args []string) []string {
+	filtered := make([]string, 0, len(args))
+	for _, arg := range args {
+		switch arg {
+		case "-ghost", "--ghost":
+			ghostFlag = true
+		default:
+			filtered = append(filtered, arg)
+		}
+	}
+	return filtered
+}
+
 func main() {
+	os.Args = extractGhostFlag(os.Args)
 	if len(os.Args) < 2 {
 		usage()
 		os.Exit(2)
@@ -59,8 +80,12 @@ func main() {
 		undoDeletions(args)
 	case "confirm-delete":
 		confirmDelete(args)
-	case "browse-download":
+	case "browse-download", "download":
 		browseDownload(args)
+	case "browse":
+		browse(args)
+	case "upload":
+		upload(args)
 	case "remote-history":
 		remoteHistory(args)
 	case "remote-restore":
@@ -100,7 +125,13 @@ func main() {
 }
 
 func usage() {
-	fmt.Println("uso: nasbox <version|doctor|diagnostics-bundle|preview|sync|undo|confirm-delete|browse-download|remote-history|remote-restore|prune-trash|audit|server-check|bootstrap-check|gui|update-check|update-install|server-update-check|server-update-install|versions|show|status|integrate> [opzioni]")
+	fmt.Println("uso: nasbox [-ghost] <comando> [opzioni]")
+	fmt.Println("comandi: version, doctor, diagnostics-bundle, preview, sync, undo, confirm-delete,")
+	fmt.Println("  browse-download|download, browse, upload, remote-history, remote-restore,")
+	fmt.Println("  prune-trash, audit, server-check, bootstrap-check, gui, update-check,")
+	fmt.Println("  update-install, server-update-check, server-update-install, versions, show,")
+	fmt.Println("  status, integrate")
+	fmt.Println("-ghost avvia solo la consultazione del NAS: nessun sync, download o upload automatico.")
 }
 
 func bootstrapConfig(cfg *config.Config) error {
@@ -645,11 +676,13 @@ func updateInstall(args []string) {
 }
 
 func browseDownload(args []string) {
-	if len(args) < 1 {
-		fmt.Fprintln(os.Stderr, "uso: nasbox browse-download <percorso-remoto>")
+	cfgPath, rest := splitConfigFlag(args)
+	if len(rest) < 1 {
+		fmt.Fprintln(os.Stderr, "uso: nasbox download <percorso-remoto> [--config <file>]")
 		os.Exit(2)
 	}
-	cfg, err := loadConfig(args[1:])
+	relative := rest[0]
+	cfg, err := loadConfigFrom(cfgPath)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
@@ -661,11 +694,106 @@ func browseDownload(args []string) {
 		os.Exit(1)
 	}
 	defer store.Close()
-	if err := transfer.NewForConfig(cfg, client).DownloadPath(args[0]); err != nil {
+	if err := transfer.DownloadRemotePath(client, transfer.NewForConfig(cfg, client), relative); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-	fmt.Println("scaricato:", args[0])
+	fmt.Println("scaricato:", relative)
+}
+
+// splitConfigFlag accepts --config in any position: flag.Parse would stop at
+// the first positional path, silently ignoring a trailing --config.
+func splitConfigFlag(args []string) (string, []string) {
+	path := ""
+	rest := make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		switch {
+		case arg == "--config" || arg == "-config":
+			if i+1 < len(args) {
+				path = args[i+1]
+				i++
+			}
+		case strings.HasPrefix(arg, "--config="):
+			path = strings.TrimPrefix(arg, "--config=")
+		default:
+			rest = append(rest, arg)
+		}
+	}
+	return path, rest
+}
+
+func browse(args []string) {
+	cfgPath, rest := splitConfigFlag(args)
+	path := ""
+	if len(rest) > 0 {
+		path = strings.Trim(rest[0], "/")
+	}
+	cfg, err := loadConfigFrom(cfgPath)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	entries, err := remote.New(cfg).BrowseList(path)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	for _, entry := range entries {
+		kind := "FILE"
+		if entry.Kind == "DIR" {
+			kind = "DIR "
+		}
+		fmt.Printf("%s\t%s\t%d\n", kind, pathJoin(path, entry.Name), entry.Size)
+	}
+}
+
+func pathJoin(dir, name string) string {
+	if dir == "" {
+		return name
+	}
+	return dir + "/" + name
+}
+
+func loadConfigFrom(path string) (*config.Config, error) {
+	if path != "" {
+		return config.LoadFrom(path)
+	}
+	return config.Load()
+}
+
+func upload(args []string) {
+	cfgPath, rest := splitConfigFlag(args)
+	if len(rest) < 1 {
+		fmt.Fprintln(os.Stderr, "uso: nasbox upload <file-locale> [percorso-remoto] [--config <file>]")
+		os.Exit(2)
+	}
+	local := rest[0]
+	remotePath := ""
+	if len(rest) > 1 {
+		remotePath = strings.Trim(rest[1], "/")
+	} else {
+		remotePath = filepath.Base(local)
+	}
+	cfg, err := loadConfigFrom(cfgPath)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	store, err := state.Open(cfg)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	defer store.Close()
+	client := remote.New(cfg)
+	if err := transfer.UploadLocalFiles(cfg, client, transfer.NewForConfig(cfg, client), store.DeviceID(), []transfer.LocalUpload{
+		{Local: local, Remote: remotePath},
+	}); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	fmt.Println("caricato:", remotePath)
 }
 
 func remoteHistory(args []string) {
@@ -828,6 +956,14 @@ func gui(args []string) {
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
+	}
+	if ghostFlag {
+		// -ghost is a per-launch override. Persist it only when the user set
+		// "mode": "ghost" in client.json (e.g. for autostart on a dedicated PC).
+		if err := cfg.Set("mode", "ghost", false); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
 	}
 	if cfg.LocalRoot() != "" {
 		if err := bootstrapConfig(cfg); err != nil {

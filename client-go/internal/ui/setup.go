@@ -301,9 +301,16 @@ func showSetupWizard(fyneApp fyne.App, window fyne.Window, cfg *config.Config, o
 	showStep = func(step int) {
 		switch step {
 		case 1:
-			setStep(1, lt("Dove tieni i file", "Where your files live"),
-				cnote(lt("Scegli la cartella del tuo PC che NASBox terrà allineata con il NAS. Se non esiste la creo io.",
-					"Pick the folder on this PC that NASBox keeps in line with the NAS. I create it if it does not exist.")),
+			titleIT := "Dove tieni i file"
+			titleEN := "Where your files live"
+			noteIT := "Scegli la cartella del tuo PC che NASBox terrà allineata con il NAS. Se non esiste la creo io."
+			noteEN := "Pick the folder on this PC that NASBox keeps in line with the NAS. I create it if it does not exist."
+			if cfg.Ghost() {
+				titleIT, titleEN = "Cartella di download e caricamento", "Download and upload folder"
+				noteIT = "Scegli la cartella dove NASBox mette i file che scarichi e da cui carica quelli che scegli. Nessun altro file del NAS verrà copiato qui."
+				noteEN = "Pick the folder where NASBox puts downloaded files and reads uploads from. No other NAS file is copied here."
+			}
+			setStep(1, lt(titleIT, titleEN), cnote(lt(noteIT, noteEN)),
 				container.NewBorder(nil, nil, nil, browse, localEntry),
 				container.NewHBox(plainButton(lt("Avanti", "Next"), theme.NavigateNextIcon(), lt("Passa al collegamento con il NAS", "Go on to connect to the NAS"),
 					widget.HighImportance, func() {
@@ -334,11 +341,17 @@ func showSetupWizard(fyneApp fyne.App, window fyne.Window, cfg *config.Config, o
 			)
 			search()
 		default:
-			setStep(3, lt("Tutto pronto", "All set"),
-				cnote(lt(fmt.Sprintf("Collegato a %s. I file di %s verranno sincronizzati con il NAS: i nuovi si caricano, quelli degli altri PC si scaricano.",
-					cfg.String("nas_lan"), strings.TrimSpace(localEntry.Text)),
-					fmt.Sprintf("Connected to %s. The files in %s will be synced with the NAS: new ones upload, other PCs' files download.",
-						cfg.String("nas_lan"), strings.TrimSpace(localEntry.Text)))),
+			readyIT := fmt.Sprintf("Collegato a %s. I file di %s verranno sincronizzati con il NAS: i nuovi si caricano, quelli degli altri PC si scaricano.",
+				cfg.String("nas_lan"), strings.TrimSpace(localEntry.Text))
+			readyEN := fmt.Sprintf("Connected to %s. The files in %s will be synced with the NAS: new ones upload, other PCs' files download.",
+				cfg.String("nas_lan"), strings.TrimSpace(localEntry.Text))
+			if cfg.Ghost() {
+				readyIT = fmt.Sprintf("Collegato a %s in modalità consultazione: %s è solo la cartella di download/caricamento. Nessuna sincronizzazione automatica.",
+					cfg.String("nas_lan"), strings.TrimSpace(localEntry.Text))
+				readyEN = fmt.Sprintf("Connected to %s in consultation mode: %s is only the download/upload folder. No automatic sync.",
+					cfg.String("nas_lan"), strings.TrimSpace(localEntry.Text))
+			}
+			setStep(3, lt("Tutto pronto", "All set"), cnote(lt(readyIT, readyEN)),
 				cnote(lt("Puoi cambiare tutto più tardi da Impostazioni.", "You can change everything later in Settings.")),
 				container.NewHBox(
 					plainButton(lt("Indietro", "Back"), theme.NavigateBackIcon(), lt("Torna ai dati del NAS", "Back to the NAS details"),

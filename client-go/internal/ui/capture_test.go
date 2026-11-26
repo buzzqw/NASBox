@@ -445,3 +445,62 @@ func TestCaptureSetupWizard(t *testing.T) {
 	}
 	save("00-setup-2")
 }
+
+// TestCaptureGhostSoftware renders the consultation-only window: it must open
+// on the browser and hide every section that belongs to background syncing.
+func TestCaptureGhostSoftware(t *testing.T) {
+	dir := os.Getenv("NASBOX_UI_CAPTURE")
+	if dir == "" {
+		t.Skip("set NASBOX_UI_CAPTURE=<dir> to render PNG captures")
+	}
+	i18n.Language = "it"
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	cfg := config.New("")
+	cfg.Set("mode", "ghost", false)
+	cfg.Set("local_root", t.TempDir(), false)
+	cfg.Set("go_theme", "light", false)
+	store, err := state.Open(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	client := remote.New(cfg)
+	a := test.NewTempApp(t)
+	window := test.NewWindow(nil)
+	window.Resize(fyne.NewSize(1180, 800))
+	c := &clientApp{
+		cfg: cfg, store: store, client: client, ghost: true,
+		transfers: transfer.New(cfg, client),
+		runner:    engine.NewRunner(cfg, store, client, transfer.New(cfg, client)),
+		fyneApp:   a, window: window,
+		uiTheme: newNAStheme(theme.VariantLight),
+		level:   statusOK,
+	}
+	c.setHint = c.setHintText
+	a.Settings().SetTheme(c.uiTheme)
+	c.bannerGo = func() {}
+	c.browsePath = "Documenti"
+	c.browseEntries = []remote.BrowseEntry{
+		{Name: "Progetti", Kind: "DIR", Size: 0, MTime: time.Now().Add(-time.Hour).Unix()},
+		{Name: "preventivo.txt", Kind: "FILE", Size: 2048, MTime: time.Now().Add(-2 * time.Hour).Unix()},
+	}
+	window.SetContent(c.buildRoot())
+	c.navigate(sectionFiles, 0)
+	if c.active != sectionFiles {
+		t.Fatalf("ghost mode must open on the browser, got %v", c.active)
+	}
+	for _, id := range []sectionID{sectionStatus, sectionActivity, sectionNAS} {
+		if nav := c.navs[id]; nav != nil && nav.Visible() {
+			t.Errorf("sync section %v must be hidden in ghost mode", id)
+		}
+	}
+	file, err := os.Create(filepath.Join(dir, "10-ghost-browse.png"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	if err := png.Encode(file, window.Canvas().Capture()); err != nil {
+		t.Fatal(err)
+	}
+}

@@ -4,6 +4,28 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 1.22.0 - 2026-11-26
+
+Client 1.22.0 e server 3.36.0 (invariato).
+
+- **Modalità consultazione (`-ghost`)**: `nasbox -ghost gui` (oppure
+  `"mode": "ghost"` in `client.json`) avvia un client che **non sincronizza
+  nulla**: non parte il watcher, non parte il change feed, non ci sono passate
+  periodiche né caricamenti automatici. La GUI si apre direttamente su
+  *File › Sfoglia NAS* e nasconde le sezioni legate alla sincronizzazione.
+- **Sfoglia qualsiasi cartella del NAS**: nuovo campo «Vai a cartella» per
+  aprire direttamente un sottoalbero condiviso, senza toccare le cartelle di
+  sync. Funziona anche da riga di comando con `nasbox browse [percorso]`.
+- **Caricamento su richiesta**: pulsante *Carica* nella Sfoglia NAS e comando
+  `nasbox upload <file> [percorso-remoto]`. I file nuovi vengono pubblicati con
+  il consueto journal; quelli già esistenti vengono sostituiti con
+  precondizione e conservano la versione precedente nel cestino del NAS.
+- **Download di cartelle con entrambi i backend**: `nasbox download <percorso>`
+  (alias di `browse-download`) e il pulsante «Scarica cartella» attraversano
+  l'albero lato client, quindi funzionano anche col backend a chunk.
+- La modalità predefinita resta `normal`: un client esistente non cambia
+  comportamento.
+
 ## 1.21.3 - 2026-11-26
 
 Client 1.21.3 e server 3.36.0.

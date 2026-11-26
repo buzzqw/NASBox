@@ -151,7 +151,34 @@ In *Settings → Folders & mirrors* you can:
 
 Excluding a folder **never deletes** what is already there.
 
-## 9. The web interface
+## 9. Consultation mode (ghost)
+
+A PC can be used only to look at what is on the NAS and to transfer individual
+files, without keeping a local copy of the whole tree. Start it with:
+
+```bash
+nasbox -ghost gui
+```
+
+or set `"mode": "ghost"` in `~/.config/sync-daemon/client.json` (useful for
+autostart on a dedicated PC). In ghost mode the sync engine never starts: no
+watcher, no change feed, no periodic pull and no automatic upload. The window
+opens directly on *File → Browse NAS*; the Status, Activity and NAS sections are
+hidden.
+
+- The **Go to folder** box opens any shared folder of the NAS tree; it changes
+  only what this client shows, not the sync configuration.
+- **Download** and **Download folder** copy files into the local folder chosen
+  at setup (with both transfer backends).
+- **Upload** publishes selected local files into the open NAS folder. New paths
+  are journaled as new files; an existing path is replaced with a precondition
+  and its previous version is kept in the NAS trash.
+- From the shell: `nasbox browse [path]`, `nasbox download <path>` (recursive)
+  and `nasbox upload <local-file> [remote-path]`.
+
+The default mode is `normal`: an existing client keeps syncing exactly as before.
+
+## 10. The web interface
 
 The NAS daemon serves a web page so you can use your files from any browser, including
 your phone: browse, search, preview (images, PDF, audio, video, text), download, see
@@ -182,7 +209,7 @@ then restart the daemon (`--restart`) and open `http://your-nas:8080`.
 > *reverse proxy*. **Do not open port 8080 to the Internet** without HTTPS: passwords
 > and links would travel in the clear.
 
-## 10. Connecting from outside your home
+## 11. Connecting from outside your home
 
 Away from home a PC reaches the NAS over SSH. In *Settings → General → NAS connection
 and SSH* you can enter, besides the home address:
@@ -195,7 +222,7 @@ The client picks the right path by itself: the local network when you are home, 
 outside address elsewhere. The simplest and safest way to connect from outside is a
 VPN (for example WireGuard or Tailscale) to your home network.
 
-## 11. Keeping your data safe
+## 12. Keeping your data safe
 
 NASBox is built so you don't lose files by mistake:
 
@@ -211,7 +238,7 @@ NASBox is built so you don't lose files by mistake:
 NASBox synchronizes; it is **not a backup**. If you delete a file everywhere and empty
 the history, no other copy exists. Keep a separate backup of the NAS.
 
-## 12. NAS maintenance and notifications
+## 13. NAS maintenance and notifications
 
 At regular intervals (`CHECK_INTERVAL_MINUTES` in `server.conf`) the daemon:
 
@@ -233,7 +260,7 @@ the check finds damaged data, or if disk and records disagree. Messages contain 
 numbers, never file names. All options, with their defaults, are described in
 `server.conf.example`.
 
-## 13. Updates
+## 14. Updates
 
 - **PC**: the app checks at startup and every few hours, verifies the update and goes
   back to the previous version by itself if the new one fails to start. If you
@@ -242,7 +269,7 @@ numbers, never file names. All options, with their defaults, are described in
 - **NAS**: the daemon can be updated from the app (*Settings → About → Check for
   server update*) after you confirm.
 
-## 14. Troubleshooting
+## 15. Troubleshooting
 
 First thing to try:
 
@@ -265,7 +292,7 @@ latest errors, and tells you what to do.
 If you need help, open an issue on the project page and attach the output of
 `nasbox-go doctor` (it contains no passwords).
 
-## 15. Commands and configuration files
+## 16. Commands and configuration files
 
 ```
 nasbox-go gui                      open the app (single instance)

@@ -74,7 +74,10 @@ type clientApp struct {
 	transfers       *transfer.Transfer
 	transferBackend transfer.Backend
 	runner          *engine.Runner
-	cancel          context.CancelFunc
+	// ghost keeps the runner idle: no watcher, no change feed, no periodic
+	// pull, no automatic upload. Downloads/uploads only happen on demand.
+	ghost  bool
+	cancel context.CancelFunc
 
 	uiTheme       *nasTheme
 	fyneApp       fyne.App
@@ -140,8 +143,10 @@ type clientApp struct {
 	browseDeleteBtn     *tipButton
 	browseRenameBtn     *tipButton
 	browseDownloadBtn   *tipButton
+	browseUploadBtn     *tipButton
 	browseVersionsBtn   *tipButton
 	browseUpBtn         *tipButton
+	browseGoEntry       *widget.Entry
 	downloadNotice      string
 	downloadMu          sync.Mutex
 	downloadBusy        bool
@@ -342,6 +347,7 @@ func startClient(
 	c := &clientApp{
 		cfg: cfg, store: store, client: client, transfers: transfers,
 		transferBackend: backend,
+		ghost:           cfg.Ghost(),
 		cancel:          cancel,
 		runner:          engine.NewRunner(cfg, store, client, backend, loggers...),
 		fyneApp:         fyneApp,
@@ -361,17 +367,26 @@ func startClient(
 
 	c.setHint = c.setHintText
 	window.SetContent(c.buildRoot())
-	c.showSection(sectionStatus)
-	// Useful for support/diagnostics: open directly on a section.
-	switch strings.ToLower(os.Getenv("NASBOX_START_SECTION")) {
-	case "activity":
-		c.showSection(sectionActivity)
-	case "files":
-		c.showSection(sectionFiles)
-	case "nas":
-		c.showSection(sectionNAS)
-	case "settings":
-		c.showSection(sectionSettings)
+	if c.ghost {
+		// A consultation client opens straight on the NAS tree, with the
+		// sync-related areas hidden by applyGhostUI().
+		c.navigate(sectionFiles, 0)
+	} else {
+		c.showSection(sectionStatus)
+	}
+	// Useful for support/diagnostics: open directly on a section. Ghost mode
+	// always starts on the browser, regardless of a stale env override.
+	if !c.ghost {
+		switch strings.ToLower(os.Getenv("NASBOX_START_SECTION")) {
+		case "activity":
+			c.showSection(sectionActivity)
+		case "files":
+			c.showSection(sectionFiles)
+		case "nas":
+			c.showSection(sectionNAS)
+		case "settings":
+			c.showSection(sectionSettings)
+		}
 	}
 	window.SetCloseIntercept(func() {
 		c.windowVisible.Store(false)
@@ -380,10 +395,17 @@ func startClient(
 	c.windowVisible.Store(os.Getenv("NASBOX_SERVICE") != "1")
 	c.installTray()
 
-	c.applyStatus(statusStarting, tr("status.sync_state_starting", nil))
+	if c.ghost {
+		c.applyStatus(statusOK, lt("Modalità consultazione: nessuna sincronizzazione automatica",
+			"Consultation mode: no automatic sync"))
+	} else {
+		c.applyStatus(statusStarting, tr("status.sync_state_starting", nil))
+	}
 	go c.consumeEvents()
 	c.animateTray(func() bool { return c.syncActive.Load() })
-	go func() { _ = c.runner.Run(ctx) }()
+	if !c.ghost {
+		go func() { _ = c.runner.Run(ctx) }()
+	}
 	go func() {
 		values, err := c.client.PrintConfig()
 		if err != nil {
@@ -397,17 +419,19 @@ func startClient(
 			c.updateTrashUsage(values)
 		})
 	}()
-	go c.refreshConflicts()
 	go c.refreshHistory()
 	go c.refreshBrowse()
-	go c.refreshSelective()
+	if !c.ghost {
+		go c.refreshConflicts()
+		go c.refreshSelective()
+		c.refreshMirrorLabel()
+		go c.seedRecent()
+		go c.watchScanProgress(ctx)
+	}
 	go c.reloadLog()
-	c.refreshMirrorLabel()
 	c.refreshStats()
 	go c.refreshMonitor()
 	c.appendLog(tr("main_window.brand_tagline", nil) + " — " + version.AppVersion)
-	go c.seedRecent()
-	go c.watchScanProgress(ctx)
 	c.debugMinSize()
 	go c.tickRelativeTimes(ctx)
 	go c.autoUpdateLoop(ctx)
@@ -502,12 +526,29 @@ func (c *clientApp) buildRoot() fyne.CanvasObject {
 	header := c.buildHeader()
 	c.buildSections()
 	c.setAdvanced(c.cfg.Bool("ui_advanced"), false)
+	if c.ghost {
+		c.applyGhostUI()
+	}
 	c.uiReady = true
 	c.showSection(c.active)
 	c.installShortcuts()
 	main := container.NewBorder(header, nil, nil, nil, container.NewPadded(c.content))
 	c.tipLayer = container.NewWithoutLayout()
 	return container.NewStack(container.NewBorder(nil, nil, sidebar, nil, main), c.tipLayer)
+}
+
+// applyGhostUI removes everything that belongs to background syncing. The
+// consultation client keeps only "File" (browse/download/upload) and
+// "Impostazioni" (connection details and updates).
+func (c *clientApp) applyGhostUI() {
+	for _, id := range []sectionID{sectionStatus, sectionActivity, sectionNAS} {
+		if item, ok := c.navs[id]; ok {
+			item.Hide()
+		}
+	}
+	if c.advancedToggle != nil {
+		c.advancedToggle.Hide()
+	}
 }
 
 func (c *clientApp) installShortcuts() {
@@ -563,6 +604,9 @@ func (c *clientApp) sectionLabel(id sectionID) string {
 
 func (c *clientApp) showSection(id sectionID) {
 	if c.content == nil {
+		return
+	}
+	if c.ghost && id != sectionFiles && id != sectionSettings {
 		return
 	}
 	view, ok := c.views[id]
@@ -1593,12 +1637,18 @@ func (c *clientApp) pollMetrics() {
 // ---------------------------------------------------------------------------
 
 func (c *clientApp) onSync() {
+	if c.ghost {
+		return
+	}
 	c.applyStatus(statusProgress, tr("status.sync_requested", nil))
 	c.appendLog(tr("status.sync_requested", nil))
 	c.runner.SyncNow()
 }
 
 func (c *clientApp) onPause() {
+	if c.ghost {
+		return
+	}
 	paused := c.runner.IsPaused() || c.pausedForNow()
 	if !paused {
 		// Offer the same bounded pauses as the Python client instead of a
@@ -2056,6 +2106,63 @@ func (c *clientApp) onBrowseDownload() {
 	c.startDownload(c.joinBrowsePath(c.selectedBrowse))
 }
 
+// onBrowseGo "mounts" another NAS folder in the browser: it only changes the
+// root of the tree shown here, it never changes the sync configuration.
+func (c *clientApp) onBrowseGo(text string) {
+	path := strings.Trim(strings.TrimSpace(text), "/")
+	if path == "" {
+		c.browseTo("")
+		return
+	}
+	if _, err := c.client.BrowseList(path); err != nil {
+		dialog.ShowError(fmt.Errorf("cartella NAS %s: %w", path, err), c.window)
+		return
+	}
+	c.browseTo(path)
+}
+
+func (c *clientApp) onBrowseUpload() {
+	if c.browseUploadBtn != nil {
+		c.browseUploadBtn.Disable()
+	}
+	enable := func() {
+		if c.browseUploadBtn != nil {
+			c.browseUploadBtn.Enable()
+		}
+	}
+	dlg := dialog.NewFileOpen(func(reader fyne.URIReadCloser, err error) {
+		if err != nil || reader == nil {
+			fyne.Do(enable)
+			return
+		}
+		local := reader.URI().Path()
+		_ = reader.Close()
+		remotePath := c.joinBrowsePath(filepath.Base(local))
+		go func() {
+			device := "ghost"
+			if c.store != nil {
+				device = c.store.DeviceID()
+			}
+			uploadErr := transfer.UploadLocalFiles(c.cfg, c.client, c.syncTransfers(), device,
+				[]transfer.LocalUpload{{Local: local, Remote: remotePath}})
+			fyne.Do(func() {
+				enable()
+				if uploadErr != nil {
+					c.appendLog(lt("Caricamento non riuscito", "Upload failed") + ": " + uploadErr.Error())
+					c.showDownloadNotice(lt("Caricamento non riuscito", "Upload failed") + ": " + uploadErr.Error())
+					dialog.ShowError(uploadErr, c.window)
+					return
+				}
+				done := lt("Caricato sul NAS: ", "Uploaded to the NAS: ") + remotePath
+				c.appendAction(done)
+				c.showDownloadNotice(done)
+				c.refreshBrowse()
+			})
+		}()
+	}, c.window)
+	dlg.Show()
+}
+
 func (c *clientApp) startDownload(relative string) {
 	if relative == "" {
 		return
@@ -2088,7 +2195,9 @@ func (c *clientApp) startDownload(relative string) {
 	c.appendAction(tr("ui.file.download_started", map[string]any{"path": relative}))
 	c.showDownloadNotice(tr("ui.file.download_started", map[string]any{"path": relative}))
 	go func() {
-		if err := c.transfers.DownloadPath(relative); err != nil {
+		// Walk directories in the client: the chunk backend cannot fetch a
+		// folder in one verb, while rsync can. One helper covers both.
+		if err := transfer.DownloadRemotePath(c.client, c.syncTransfers(), relative); err != nil {
 			c.appendLog(tr("browse.download_failed_title", nil) + ": " + err.Error())
 			fyne.Do(func() {
 				c.finishDownload()

@@ -35,6 +35,25 @@ func TestLoadOverlaysFileOnDefaults(t *testing.T) {
 	}
 }
 
+func TestModeDefaultsToNormalAndGhostIsOptIn(t *testing.T) {
+	cfg := New("")
+	if cfg.Mode() != "normal" || cfg.Ghost() {
+		t.Fatalf("default must be normal sync, got %q", cfg.Mode())
+	}
+	if err := cfg.Set("mode", " GHOST ", false); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Mode() != "ghost" || !cfg.Ghost() {
+		t.Fatalf("ghost mode not recognised: %q", cfg.Mode())
+	}
+	if err := cfg.Set("mode", "normal", false); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Ghost() {
+		t.Fatal("normal mode must never report ghost")
+	}
+}
+
 func TestTransferBackendNegotiationDefaults(t *testing.T) {
 	cfg := New("")
 	available, ok := cfg.Get("remote_chunk_transfer_available").(bool)

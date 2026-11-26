@@ -252,7 +252,11 @@ func (c *clientApp) buildSidebarStatus() fyne.CanvasObject {
 	dot := container.NewGridWrap(fyne.NewSize(10, 10), c.statusDot)
 	c.headerStatus = widget.NewLabelWithStyle("", fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
 	c.headerStatus.Truncation = fyne.TextTruncateEllipsis
-	c.lastSyncLabel = widget.NewLabel(tr("ui.status.never_synced", nil))
+	lastSyncText := tr("ui.status.never_synced", nil)
+	if c.ghost {
+		lastSyncText = lt("Modalità consultazione", "Consultation mode")
+	}
+	c.lastSyncLabel = widget.NewLabel(lastSyncText)
 	c.lastSyncLabel.Importance = widget.LowImportance
 	c.lastSyncLabel.SizeName = theme.SizeNameCaptionText
 	c.lastSyncLabel.Truncation = fyne.TextTruncateEllipsis
@@ -292,6 +296,11 @@ func (c *clientApp) buildHeader() fyne.CanvasObject {
 		lt("Apri la cartella NASBox sul tuo PC", "Open the NASBox folder on your PC"),
 		widget.LowImportance, c.openLocalFolder, c.setHint)
 	actions := container.NewHBox(searchButton, folderButton, c.pauseBtn, syncButton)
+	if c.ghost {
+		// Nothing is synced in the background, so these controls would be dead.
+		syncButton.Hide()
+		c.pauseBtn.Hide()
+	}
 	line := canvas.NewRectangle(c.tint(theme.ColorNameSeparator))
 	line.SetMinSize(fyne.NewSize(1, 1))
 	return container.NewVBox(
