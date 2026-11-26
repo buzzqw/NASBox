@@ -1,26 +1,24 @@
 # NASBox — note operative (repo, release, client)
 
-Scritte il 2026-11-15 da un agente, dopo aver verificato ogni comando su questa macchina.
-Se qualcosa non torna, valgono i comandi in fondo.
+Aggiornate il 2026-11-26. Il client ufficiale è **NASBox Go**; il client Python
+è ritirato e il suo canale non va più pubblicato.
 
-## Stato al 2026-11-25 (verificato su dati veri)
+## Stato al 2026-11-26 (verificato su dati veri)
 
-- Client Go **1.13.0**, server **3.32.4**; 122 e 134 aggiornati, GUI riavviata.
+- Client Go **1.14.1**, server **3.32.4**; 122 e 134 aggiornati, GUI riavviata
+  (su 134 la GUI non era partita, è stata riavviata con `DISPLAY=:0`).
+- Canale `go-stable`: 1.14.1 + 1.14.0 (`--keep 2`). Ogni release Go viene
+  pubblicata due volte: artifact sulla release GitHub e binario nel canale.
 - Manifest e disco allineati con `--audit-orphans` (3.738 file adottati) e
-  `--audit-phantoms --forget` (2.554 righe senza file messe a tombstone): ora
+  `--audit-phantoms --forget` (2.554 righe senza file messe a tombstone):
   31.051 righe vive contro 31.050 file, 0 orphan, 0 phantom. Il render non
   esporta mai percorsi interni (`.sync-trash` anche annidata).
 - rsync privato 3.5.1 in `server/bin/` (`tools/install_server_rsync.sh`), usato
   dai client con `--rsync-path`; il rsync di sistema resta 3.1.2. `doctor`
   stampa `NAS 3.5.1 privato, sistema 3.1.2`.
-- Rilasci fatti: `eb8196e` (1.9.0/3.29.0), `61a5582` (1.10.0/3.30.0),
-  `a0cde1c` (server 3.30.1). Canale `go-stable` con 1.10.0 e 1.9.0 (retention 2).
 - Il NAS dichiara le proprie capacità (`--capabilities`): 4 core, 987 MB,
-  dischi rotanti, rsync 3.1.2, ext4, hatching 4 file alla volta. Il client ne
-  deriva tempo reale, risparmio energetico e (lato NAS) il parallelismo.
-- `doctor` lo mostra: `tempo reale: attivo · change feed NAS (attesa 55 s) +
-  eventi locali` e `capacità NAS: 4 core · 987 MB · dischi rotanti · rsync
-  3.1.2 · ext4`.
+  dischi rotanti, rsync 3.1.2, ext4, hashing 4 file alla volta. Il client ne
+  deriva tempo reale, risparmio energetico e parallelismo.
 - Misure sul NAS vero: cancellazione di 300 file da **37,97 s a 10,81 s** (un
   solo append al journal e una sola revisione); rinomina di una cartella da
   30 MB in **una** richiesta con il secondo PC che sposta i file in locale
@@ -32,8 +30,7 @@ Se qualcosa non torna, valgono i comandi in fondo.
   non c'è base: nessun delta possibile senza un archivio a blocchi.
 - Difetti aperti: la protezione cartella non è sbloccabile con
   `confirm-delete`; delta del manifest non ancora per client (indice
-  revisione→offset); differenza di file tracciati tra 122 (119.066) e 134
-  (119.745).
+  revisione→offset); differenza di file tracciati tra i due PC.
 
 ## Dove vive cosa
 
@@ -41,110 +38,93 @@ Se qualcosa non torna, valgono i comandi in fondo.
 |---|---|
 | Repo ufficiale (unica copia di lavoro) | `/volume1/Varie/sync-daemon` — clone di `git@github.com:buzzqw/NASBox.git` |
 | Remoto | GitHub `buzzqw/NASBox`, branch `master` |
-| Server usato dai client | `/volume1/Varie/sync-daemon/server/sync-daemon-server.sh` (demone: PID in `server/state/daemon.pid`) |
-| Release per i client | `/volume1/NASBox/.nasbox-client-update/` → `manifest.json` + `client-<versione>.tar.gz` |
-| Client (nessun repo, solo build) | questo PC e 134/hw2304847: `~/.local/share/nasbox/client`, servizio utente `sync-daemon-client` |
+| Server usato dai client | `/volume1/Varie/sync-daemon/server/sync-daemon-server.sh` |
+| Canale client Go | `/volume1/NASBox/.nasbox-client-update-go/` → `manifest-go.json` + `nasbox-go-<versione>` |
+| Client (nessun repo, solo binario) | `~/.local/bin/nasbox-go` + `~/.config/autostart/nasbox-go.desktop` |
+| Config / stato / log / storico | `~/.config/sync-daemon/client.json`, `~/.local/state/sync-daemon/` |
 
 I client **non** hanno una copia del repo: non cercare il codice su un client.
 
-## Pubblicare una release (tutto da qui)
+## Pubblicare una release Go (obbligatoria ad ogni nuova versione)
+
+Il NAS non ha Go: si compila su un client, poi si pubblica dal NAS.
 
 ```bash
+# 1. su un client con Go 1.27, dal sorgente aggiornato
+cd client-go
+go vet ./... && go test ./...        # include gli end-to-end
+go build -trimpath -ldflags='-s -w' -o /tmp/nasbox-go-X.Y.Z ./cmd/nasbox
+
+# 2. versione + changelog (unica fonte della versione)
+#    client-go/internal/version/version.go -> AppVersion = "X.Y.Z"
+#    CHANGELOG.md -> voce "## X.Y.Z - AAAA-MM-GG"
+
+# 3. commit, tag_con_la_versione_go, push
+git add <file voluti>
+git commit -m "feat(client): ... (X.Y.Z)"
+git tag vX.Y.Z
+git push origin master --tags
+
+# 4. il workflow .github/workflows/package.yml verifica che il tag sia uguale a
+#    packaging/version-go.sh, compila il binario Go e il .deb e li allega alla
+#    release GitHub. Senza il tag non c'è release GitHub.
+
+# 5. copia il binario sul NAS e pubblica nel canale (scrive nella share)
+rsync -a /tmp/nasbox-go-X.Y.Z andres@192.168.1.119:/volume1/Varie/sync-daemon/
+ssh andres@192.168.1.119
 cd /volume1/Varie/sync-daemon
-
-# 1. modifiche + test (pytest NON è installato su questo NAS: i test si lanciano
-#    su un client, oppure `pip install pytest` in un venv)
-
-# 2. versione e changelog
-#    client/sync_client/version.py  ->  APP_VERSION = "x.y.z"
-#    CHANGELOG.md                   ->  voce "## x.y.z - AAAA-MM-GG"
-
-# 3. commit e push
-git add -A
-git commit -m "fix(client): <cosa> (x.y.z)"
-git push origin master
-
-# 4. pubblica per i client (scrive direttamente nella share)
-python3 tools/publish_client.py --notes "<riassunto>" \
-        --dest-dir /volume1/NASBox/.nasbox-client-update
+python3 tools/publish_go_client.py --binary ./nasbox-go-X.Y.Z \
+        --dest-dir /volume1/NASBox/.nasbox-client-update-go \
+        --notes "<riassunto>" --keep 2
+rm -f ./nasbox-go-X.Y.Z
 ```
 
-`--upload` esiste, ma richiede la configurazione di un client (SSH verso il NAS):
-dal NAS usa `--dest-dir`. Il publisher verifica da solo il bundle estratto
-(versione + struttura) prima di pubblicarlo, e sostituisce la release precedente
-(tiene solo l'ultima).
+Il tag deve essere `vX.Y.Z` con la **versione Go**, non quella Python: il
+workflow lo controlla e fallisce se non corrispondono. Senza il passaggio 5 i
+client già installati non vedono nulla: la release GitHub da sola non basta.
+
+Una release solo server aggiorna `VERSION` in `server/sync-daemon-server.sh` e
+la voce del CHANGELOG, poi si distribuisce lo script sul NAS; i client la
+annunciano e la installano solo dopo conferma.
 
 ## Come arrivano gli aggiornamenti ai client
 
-- controllo all'avvio e ogni 6 ore, notifica in tray, voce "⬆️ Aggiorna a x.y.z"
-- l'archivio è verificato con SHA-256 prima dell'estrazione; percorsi assoluti,
-  `..`, symlink e device file vengono rifiutati
-- se la nuova versione non completa l'avvio due volte, il client ripristina da solo
-  la versione precedente (log: `~/.local/state/sync-daemon/client.log`)
+- controllo all'avvio e ogni 6 ore dal canale `go-stable`, senza dialoghi per
+  quelli automatici; il dialogo manuale è *Controlla aggiornamenti*.
+- binario verificato con SHA-256 e dimensione prima dell'installazione;
+  `requires_server` del manifest controllato con la versione del NAS.
+- se il nuovo binario non completa l'avvio due volte, torna a quello precedente
+  (stato in `~/.local/bin/nasbox-go.update-state.json`, log in
+  `~/.local/state/sync-daemon/client.log`).
+- il client in esecuzione va riavviato per usare il binario appena installato.
 
 ## Verifiche rapide
 
 ```bash
-# coerenza manifest/archivio (deve stampare True)
-python3 -c "import json,hashlib;m=json.load(open('/volume1/NASBox/.nasbox-client-update/manifest.json'));print(m['sha256']==hashlib.sha256(open('/volume1/NASBox/.nasbox-client-update/'+m['artifact'],'rb').read()).hexdigest())"
+# coerenza manifest/binario (deve stampare True) e versione del canale
+python3 -c "import json,hashlib;m=json.load(open('/volume1/NASBox/.nasbox-client-update-go/manifest-go.json'));p='/volume1/NASBox/.nasbox-client-update-go/'+m['artifact'];print(m['version'],m['sha256']==hashlib.sha256(open(p,'rb').read()).hexdigest())"
 
-# stato del server
+# stato del server e dei client
 /volume1/Varie/sync-daemon/server/sync-daemon-server.sh --status
-
-# stato di un client (da eseguire sul client)
-systemctl --user status sync-daemon-client.service
+nasbox-go version
+nasbox-go doctor
 ```
 
 ## Trappole già prese (non ripeterle)
 
-- `scp` verso il NAS **non** funziona: il subsystem SFTP è disabilitato
-  ("subsystem request failed on channel 0"). Usa `rsync` o `ssh ... 'cat file' > file`.
-- Il client non va più lanciato dal repo: gira da `~/.local/share/nasbox/client`
-  come servizio utente (`NASBOX_SERVICE=1`, finestra in tray).
-- `sync-daemon` è escluso dalla sincronizzazione: non finisce nella share.
-- Lo sha256 dell'archivio dipende dal Python che lo costruisce (3.8 qui, 3.14 sui
-  client): è riproducibile sulla stessa macchina, non tra macchine diverse.
-  Per questo la release si pubblica **solo da qui**, così manifest e archivio
-  vengono generati insieme e restano coerenti.
-
-## Client Go (canale separato)
-
-Il NAS non ha Go installato: il binario si compila su un client con Go 1.27.
-
-```bash
-# su un client, nel repo (o in una copia sincronizzata del repo)
-cd client-go
-go vet ./...
-go test ./...
-go build -trimpath -ldflags='-s -w' -o /tmp/nasbox-go-<versione> ./cmd/nasbox
-
-# porta il binario sul NAS, poi pubblica dal NAS
-rsync -a /tmp/nasbox-go-<versione> andres@192.168.1.119:/volume1/Varie/sync-daemon/
-ssh andres@192.168.1.119
-cd /volume1/Varie/sync-daemon
-python3 tools/publish_go_client.py --binary ./nasbox-go-<versione> \
-        --dest-dir /volume1/NASBox/.nasbox-client-update-go \
-        --notes "<riassunto>"
-rm -f ./nasbox-go-<versione>
-```
-
-- La versione sta in `client-go/internal/version/version.go`; la matrice di
-  parità con il client Python e le lacune residue in `client-go/PARITY.md`.
-- `go test ./...` include i **test end-to-end** (`cmd/nasbox/e2e_test.go`):
-  binario, rsync e `server/sync-daemon-server.sh` veri su una share
-  temporanea, ssh finto. Vanno lanciati prima di ogni rilascio.
-- Revisione grafica senza display:
-  `NASBOX_UI_CAPTURE=/tmp/shots go test ./internal/ui -run TestCaptureSoftware`.
+- `scp` verso il NAS **non** funziona: il subsystem SFTP è disabilitato. Usa
+  `rsync` o `ssh ... 'cat file' > file`.
+- Non lanciare il client dal repo: gira da `~/.local/bin/nasbox-go` con autostart.
+- Il NAS sincronizza `/volume1/NASBox`: non metterci sorgenti, binari di release
+  o file di stato dell'updater.
+- Compilare con `-trimpath -ldflags='-s -w'`: il binario non stripped è ~41 MB
+  contro ~30 MB.
+- La GUI passa il client Go diretto all'updater: `remote.Client` deve
+  implementare `ServerVersion()`, altrimenti `requires_server` fallisce e il
+  dialogo di conferma sembra non fare nulla.
 - Vincoli del NAS (DS420j): rsync **3.1.2** (vietate le opzioni più recenti,
   es. `--mkpath`, c'è un test); rsync via SSH solo dentro le share
   (`/volume1/...`); `staging-publish` crea solo file nuovi; il lease
   (`--transfer-wait`) si rilascia chiudendo stdin.
-- Dalla 0.21.0 i client Go si aggiornano da soli (avvio + ogni 6 ore); il
-  manifest include la sezione del CHANGELOG della versione.
-- Pacchetti: `client-go/install.sh` (installazione utente, `--migrate` dal
-  Python) e `packaging/build-deb-go.sh <binario>`.
-- Il canale Go è indipendente: `manifest-go.json` e `nasbox-go-<versione>` in
-  `.nasbox-client-update-go/`, mai `manifest.json` del Python.
-- Verifica: `nasbox-go update-check` sul client deve proporre la nuova versione;
-  il client Go in esecuzione va riavviato per applicarla.
-
+- Il client Python e il suo canale `manifest.json` sono ritirati:
+  `tools/publish_client.py` non va più usato per le release.

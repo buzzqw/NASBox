@@ -1,5 +1,8 @@
-name: Package Linux client
+name: Package NASBox
 
+# Il client Go e' quello ufficiale: ogni tag vX.Y.Z produce e allega il suo
+# binario e il pacchetto Debian. I vecchi artifact Python restano disponibili
+# solo su richiesta (workflow_dispatch), non fanno piu parte delle release.
 on:
   push:
     tags:
@@ -10,7 +13,51 @@ permissions:
   contents: read
 
 jobs:
-  build:
+  go:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: client-go/go.mod
+          cache-dependency-path: client-go/go.sum
+      - name: Check release version
+        id: version
+        run: |
+          expected="$(packaging/version-go.sh)"
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            version="${GITHUB_REF_NAME#v}"
+            if [[ "$version" != "$expected" ]]; then
+              echo "tag $version non corrisponde alla versione Go $expected" >&2
+              exit 1
+            fi
+          else
+            version="$expected"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgl1-mesa-dev xorg-dev inotify-tools
+      - name: Vet and test (includes end-to-end)
+        working-directory: client-go
+        run: go vet ./... && go test ./...
+      - name: Build Go client
+        working-directory: client-go
+        run: go build -trimpath -ldflags='-s -w' -o "../dist/nasbox-go-${{ steps.version.outputs.version }}" ./cmd/nasbox
+      - name: Build Debian package
+        run: packaging/build-deb-go.sh "dist/nasbox-go-${{ steps.version.outputs.version }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nasbox-go
+          path: |
+            dist/nasbox-go-*
+            dist/nasbox-go_*.deb
+          if-no-files-found: error
+
+  python-legacy:
+    # Solo ricostruzione manuale del vecchio client: non viene piu pubblicato.
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v5
@@ -18,9 +65,6 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
-      - name: Check release version
-        if: startsWith(github.ref, 'refs/tags/')
-        run: test "${GITHUB_REF_NAME#v}" = "$(packaging/version.sh)"
       - name: Install build dependencies
         run: |
           sudo apt-get update
@@ -38,7 +82,7 @@ jobs:
             --output "$RUNNER_TEMP/appimage-runtime" \
             https://github.com/AppImage/type2-runtime/releases/download/20251108/runtime-x86_64
           echo "2fca8b443c92510f1483a883f60061ad09b46b978b2631c807cd873a47ec260d  $RUNNER_TEMP/appimage-runtime" | sha256sum --check
-      - name: Build release artifacts
+      - name: Build legacy artifacts
         env:
           APPIMAGETOOL: ${{ runner.temp }}/appimagetool
           APPIMAGE_RUNTIME_FILE: ${{ runner.temp }}/appimage-runtime
@@ -48,7 +92,7 @@ jobs:
           packaging/build-client-update.sh
       - uses: actions/upload-artifact@v4
         with:
-          name: nasbox-linux-client
+          name: nasbox-python-legacy
           path: |
             dist/*.AppImage
             dist/*.deb
@@ -58,14 +102,14 @@ jobs:
 
   release:
     if: startsWith(github.ref, 'refs/tags/')
-    needs: build
+    needs: go
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: nasbox-linux-client
+          name: nasbox-go
           path: dist
       - uses: softprops/action-gh-release@v2
         with:

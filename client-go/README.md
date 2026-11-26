@@ -104,8 +104,15 @@ python3 tools/publish_go_client.py \
     --notes "prima build Go"
 ```
 
-Verifica dal client: `nasbox update-check`. La verifica sha256 e della
+Verifica dal client: `nasbox-go update-check`. La verifica sha256 e della
 dimensione avviene prima di rendere utilizzabile l'artifact.
+
+**Ad ogni nuova versione**: aggiornare `internal/version/version.go` e il
+CHANGELOG, taggare `vX.Y.Z` (il workflow `.github/workflows/package.yml`
+allega binario e `.deb` alla release GitHub) **e** pubblicare lo stesso binario
+nel canale `go-stable` con `publish_go_client.py --keep 2`. La release GitHub
+da sola non aggiorna i client installati: serve il canale. Procedura completa
+nel [README principale](../README.md).
 
 ## Display: X11 e Wayland
 
