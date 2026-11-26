@@ -12,7 +12,7 @@ import (
 	"strings"
 )
 
-var version = "3.35.0"
+var version = "3.36.0"
 
 // LoadVersion allows a versioned binary to report its own version through a
 // small sidecar file next to the executable. This is how --server-update-install

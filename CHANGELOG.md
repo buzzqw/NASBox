@@ -4,6 +4,10 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 1.18.0 - 2026-11-26
+
+Client 1.18.0 e server 3.36.0.
+
 Web UI:
 - **Link di condivisione**: dal pulsante «Condividi» su un file si crea un link
   (1, 7, 30 giorni o senza scadenza) scaricabile da chiunque senza password, e
