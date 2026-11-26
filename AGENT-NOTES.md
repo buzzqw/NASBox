@@ -5,32 +5,36 @@ Aggiornate il 2026-11-26. Il client ufficiale è **NASBox Go**; il client Python
 
 ## Stato al 2026-11-26 (verificato su dati veri)
 
-- Client Go **1.14.1**, server **3.32.4**; 122 e 134 aggiornati, GUI riavviata
-  (su 134 la GUI non era partita, è stata riavviata con `DISPLAY=:0`).
-- Canale `go-stable`: 1.14.1 + 1.14.0 (`--keep 2`). Ogni release Go viene
+- Client Go **1.15.3**, server Go **3.33.0**; 122 e 134 aggiornati e GUI
+  riavviata. Entrambi usano il backend `chunks`.
+- Canale `go-stable`: 1.15.3 + 1.15.2 (`--keep 2`). Ogni release Go viene
   pubblicata due volte: artifact sulla release GitHub e binario nel canale.
 - Manifest e disco allineati con `--audit-orphans` (3.738 file adottati) e
   `--audit-phantoms --forget` (2.554 righe senza file messe a tombstone):
   31.051 righe vive contro 31.050 file, 0 orphan, 0 phantom. Il render non
   esporta mai percorsi interni (`.sync-trash` anche annidata).
+- `metadata.sqlite3` (29 MB sul NAS) è l'indice derivato di manifest+journal:
+  export delta reale, lookup manifest/file-states e delta di una revisione in
+  **10 righe / 925 byte**. L'export completo resta identico al renderer
+  precedente (stesso hash ordinato, 87.893 righe).
+- `tx-intent.sqlite3` registra le pubblicazioni chunk `PREPARED/READY/COMMITTED`;
+  la recovery gira sotto lease in `--transfer-wait`. Commit e journal non vengono
+  più troncati dopo un `fsync` riuscito.
+- Backend chunk v3: upload streaming a memoria limitata, `--chunk-has` per la
+  deduplica di rete, compressione zlib solo quando conviene, file vuoti, digest
+  intero, limiti `bandwidth_*`, ripresa download da checkpoint e cancellazione
+  via context. Verificato: copia di un file da 8,5 MB senza nuovi oggetti;
+  download interrotto a 1 MB ripreso e completato con hash corretto.
+- `--restore-batch` è implementato nel demone Go; percorsi e symlink antenati
+  sono validati anche nella web UI.
 - rsync privato 3.5.1 in `server/bin/` (`tools/install_server_rsync.sh`), usato
-  dai client con `--rsync-path`; il rsync di sistema resta 3.1.2. `doctor`
-  stampa `NAS 3.5.1 privato, sistema 3.1.2`.
+  solo dal backend legacy; il rsync di sistema resta 3.1.2.
 - Il NAS dichiara le proprie capacità (`--capabilities`): 4 core, 987 MB,
-  dischi rotanti, rsync 3.1.2, ext4, hashing 4 file alla volta. Il client ne
-  deriva tempo reale, risparmio energetico e parallelismo.
-- Misure sul NAS vero: cancellazione di 300 file da **37,97 s a 10,81 s** (un
-  solo append al journal e una sola revisione); rinomina di una cartella da
-  30 MB in **una** richiesta con il secondo PC che sposta i file in locale
-  (inode invariati, **zero** download); nessuna directory vuota lasciata sul
-  NAS; delta del manifest da **6,9 s a 2,2 s**; tempo reale 122→NAS→134 in
-  **9-12 s** (prima 16-22 s).
-- Delta rsync sulle sostituzioni (già attivo): 200 MB con 1 MB cambiato =
-  14.480 byte inviati, 5,8 s contro 19,6 s a file intero. Sui file **nuovi**
-  non c'è base: nessun delta possibile senza un archivio a blocchi.
+  dischi rotanti, rsync 3.1.2, ext4, hashing 4 file alla volta, chunk v3.
 - Difetti aperti: la protezione cartella non è sbloccabile con
-  `confirm-delete`; delta del manifest non ancora per client (indice
-  revisione→offset); differenza di file tracciati tra i due PC.
+  `confirm-delete`; recovery persistente solo per publish (delete/rename/restore
+  hanno rollback sincrono ma non ancora intent durevoli); differenza di file
+  tracciati tra i due PC; manca GC dei chunk.
 
 ## Dove vive cosa
 
@@ -38,7 +42,7 @@ Aggiornate il 2026-11-26. Il client ufficiale è **NASBox Go**; il client Python
 |---|---|
 | Repo ufficiale (unica copia di lavoro) | `/volume1/Varie/sync-daemon` — clone di `git@github.com:buzzqw/NASBox.git` |
 | Remoto | GitHub `buzzqw/NASBox`, branch `master` |
-| Server usato dai client | `/volume1/Varie/sync-daemon/server/sync-daemon-server.sh` |
+| Server usato dai client | `/volume1/Varie/nasbox-server/nasbox-server` (Go 3.33.0) |
 | Canale client Go | `/volume1/NASBox/.nasbox-client-update-go/` → `manifest-go.json` + `nasbox-go-<versione>` |
 | Client (nessun repo, solo binario) | `~/.local/bin/nasbox-go` + `~/.config/autostart/nasbox-go.desktop` |
 | Config / stato / log / storico | `~/.config/sync-daemon/client.json`, `~/.local/state/sync-daemon/` |
@@ -83,9 +87,11 @@ Il tag deve essere `vX.Y.Z` con la **versione Go**, non quella Python: il
 workflow lo controlla e fallisce se non corrispondono. Senza il passaggio 5 i
 client già installati non vedono nulla: la release GitHub da sola non basta.
 
-Una release solo server aggiorna `VERSION` in `server/sync-daemon-server.sh` e
-la voce del CHANGELOG, poi si distribuisce lo script sul NAS; i client la
-annunciano e la installano solo dopo conferma.
+Una release solo server aggiorna `version` in
+`client-go/internal/serverd/serverd.go`, compila
+`GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build ./cmd/nasbox-server`, sostituisce
+atomicamente `/volume1/Varie/nasbox-server/nasbox-server` (backup `.prev`) e
+riavvia `--run-foreground`.
 
 ## Come arrivano gli aggiornamenti ai client
 
