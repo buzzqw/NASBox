@@ -81,3 +81,20 @@ nasbox-ghost version          # launcher modalita' consultazione
 
 Nota: il canale di update Go si chiama `go-stable` e usa `manifest-go.json`;
 quello Python legacy non va più pubblicato.
+
+## Verifica finale dopo il deploy 1.23.0 / 3.37.0
+
+- `--status` → v3.37.0, demone in esecuzione, ultimo pass registrato.
+- `--capabilities` → `chunk_quota_v1`, `chunk_scrub_v1`, `server_metrics_v1`,
+  `private_rsync`; `RSYNC_VERSION=3.5.1` (sistema 3.1.2).
+- `--print-config` → `CHUNK_MAX_MB=4096`, `CHUNK_SCRUB_HOUR=3`,
+  `CHUNK_SCRUB_WINDOW_HOURS=5`, `CHUNK_SCRUB_NICE=10`.
+- `--metrics` su dati reali → `CHUNK_HAS_HIT_RATE_PERCENT=85.0`,
+  `MANIFEST_DELTA_REQUESTS=212`, contatori `PERF_*` compilati dai client.
+  `MANIFEST_RENDER_CACHE_HITS=0`: i client hanno cursori dentro
+  `feed_start_revision`, quindi usano il delta per riga (la cache serve ai
+  cursori più vecchi ed è stata verificata con test dedicati).
+- Web UI → pagina "Stato" raggiungibile con `/api/metrics`.
+- Client 122 e 134 → 1.23.0, `doctor` con server raggiungibile e lock libero.
+- `last_manifest_revision` persistito nel `client.json` del 122 (legato al
+  repository id): dopo il riavvio non serve più il manifest completo.
