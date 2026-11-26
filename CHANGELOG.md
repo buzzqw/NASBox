@@ -4,6 +4,16 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 1.15.1 - 2026-11-26
+
+Client Go:
+
+- **`rsync` rimosso anche da `show` e dal ripristino delle versioni**: questi
+  percorsi usano ora lo store a chunk (`--history-chunks` lato NAS), quindi
+  il backend `chunks` copre tutti i trasferimenti.
+- `doctor` mostra il backend attivo e indica che rsync non è più usato per i
+  trasferimenti.
+
 ## 1.15.0 - 2026-11-26
 
 Client Go:

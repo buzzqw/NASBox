@@ -133,17 +133,12 @@ func cmdFileChunks(ctx *Context, args []string) error {
 	return nil
 }
 
-// cmdChunkIngest registers a file that already exists on the NAS but has no
-// chunk metadata (out-of-band edit, legacy file or the result of an rsync
-// transfer). It does not touch the journal: the manifest already describes it.
-func cmdChunkIngest(ctx *Context, args []string) error {
-	if len(args) != 1 || !validRelative(args[0]) {
-		return exitCode(1)
-	}
-	full := filepath.Join(ctx.ShareRoot, args[0])
+// ingestFileChunks registers an existing NAS file in the chunk store and
+// writes FILE_CHUNKS framing. It never touches the journal.
+func ingestFileChunks(ctx *Context, full string, out io.Writer) error {
 	info, err := os.Lstat(full)
 	if err != nil || !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
-		fmt.Print("FILE_CHUNKS_V1\x00MISS\x00")
+		fmt.Fprint(out, "FILE_CHUNKS_V1\x00MISS\x00")
 		return nil
 	}
 	store, err := ctx.chunkStore()
@@ -182,13 +177,37 @@ func cmdChunkIngest(ctx *Context, args []string) error {
 	if err := store.SaveFileMeta(digest, digests); err != nil {
 		return err
 	}
-	out := bufio.NewWriter(os.Stdout)
-	defer out.Flush()
-	fmt.Fprintf(out, "FILE_CHUNKS_V1\x00%s\x00%d\x00%d\x00%d\x00", digest, info.Size(), info.ModTime().UnixNano(), len(digests))
+	writer := bufio.NewWriter(out)
+	defer writer.Flush()
+	fmt.Fprintf(writer, "FILE_CHUNKS_V1\x00%s\x00%d\x00%d\x00%d\x00", digest, info.Size(), info.ModTime().UnixNano(), len(digests))
 	for _, chunk := range digests {
-		fmt.Fprintf(out, "%s\x00", chunk)
+		fmt.Fprintf(writer, "%s\x00", chunk)
 	}
 	return nil
+}
+
+// cmdChunkIngest registers a file that already exists on the NAS but has no
+// chunk metadata (out-of-band edit, legacy file). The manifest already
+// describes it, so no journal write is needed.
+func cmdChunkIngest(ctx *Context, args []string) error {
+	if len(args) != 1 || !validRelative(args[0]) {
+		return exitCode(1)
+	}
+	return ingestFileChunks(ctx, filepath.Join(ctx.ShareRoot, args[0]), os.Stdout)
+}
+
+// cmdHistoryChunks serves a version kept in .sync-trash. Trash paths are
+// internal for the manifest but valid here: they are the history store.
+func cmdHistoryChunks(ctx *Context, args []string) error {
+	if len(args) != 1 || args[0] == "" || filepath.IsAbs(args[0]) {
+		return exitCode(1)
+	}
+	for _, component := range strings.Split(args[0], "/") {
+		if component == ".." || component == ".nasbox-staging" || component == ".sync-partial" || component == "@eaDir" {
+			return exitCode(1)
+		}
+	}
+	return ingestFileChunks(ctx, filepath.Join(ctx.ShareRoot, ".sync-trash", args[0]), os.Stdout)
 }
 
 func cmdFilePublish(ctx *Context, args []string) error {

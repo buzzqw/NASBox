@@ -220,15 +220,6 @@ func (t *Chunks) Download(paths []string) error {
 	if err := t.client.ValidateHostKeyPin(context.Background()); err != nil {
 		return err
 	}
-	trash, err := history.TrashDir()
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(trash, 0o700); err != nil {
-		return err
-	}
-	now := time.Now().UTC()
-	stamp := now.Format("2006-01-02") + "--" + strings.Replace(now.Format("15-04-05.000000"), ".", "-", 1) + "Z"
 	for _, relative := range paths {
 		info, err := t.client.FileChunks(relative)
 		if err != nil {
@@ -240,66 +231,122 @@ func (t *Chunks) Download(paths []string) error {
 				return fmt.Errorf("file NAS non disponibile: %s: %w", relative, err)
 			}
 		}
-		local, err := t.localPath(relative)
-		if err != nil {
+		if err := t.assembleLocal(relative, info, true); err != nil {
 			return err
 		}
-		if err := os.MkdirAll(filepath.Dir(local), 0o755); err != nil {
-			return err
-		}
-		if _, err := os.Lstat(local); err == nil {
-			backup := filepath.Join(trash, filepath.FromSlash(relative)+"-"+stamp)
-			if err := os.MkdirAll(filepath.Dir(backup), 0o700); err != nil {
-				return err
-			}
-			if err := copyLocalFile(backup, local); err != nil {
-				return err
-			}
-		}
-		temporary := filepath.Join(filepath.Dir(local), "."+filepath.Base(local)+".nasbox-chunks")
-		file, err := os.OpenFile(temporary, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
-		if err != nil {
-			return err
-		}
-		for _, digest := range info.Chunks {
-			data, err := t.client.ChunkGet(digest)
-			if err != nil {
-				file.Close()
-				os.Remove(temporary)
-				return err
-			}
-			sum := sha256.Sum256(data)
-			if hex.EncodeToString(sum[:]) != digest {
-				file.Close()
-				os.Remove(temporary)
-				return fmt.Errorf("chunk corrotto: %s", digest)
-			}
-			if _, err := file.Write(data); err != nil {
-				file.Close()
-				os.Remove(temporary)
-				return err
-			}
-		}
-		if err := file.Close(); err != nil {
-			os.Remove(temporary)
-			return err
-		}
-		infoFile, err := os.Stat(temporary)
-		if err != nil || infoFile.Size() != info.Size {
-			os.Remove(temporary)
-			return fmt.Errorf("dimensione locale non corrisponde per %s", relative)
-		}
-		stampTime := time.Unix(0, info.MTimeNS)
-		if err := os.Chtimes(temporary, stampTime, stampTime); err != nil {
-			os.Remove(temporary)
-			return err
-		}
-		if err := os.Rename(temporary, local); err != nil {
-			os.Remove(temporary)
-			return err
-		}
-		t.emitFile(false, relative)
 	}
+	return nil
+}
+
+// DownloadPath fetches one remote path without making a local backup: it is
+// used by "nasbox show"/preview, where the caller only wants a local copy.
+func (t *Chunks) DownloadPath(relative string) error {
+	if relative == "" {
+		return fmt.Errorf("percorso remoto vuoto")
+	}
+	if err := t.client.ValidateHostKeyPin(context.Background()); err != nil {
+		return err
+	}
+	info, err := t.client.FileChunks(relative)
+	if err != nil {
+		return err
+	}
+	if !info.Found {
+		info, err = t.client.IngestFileChunks(relative)
+		if err != nil {
+			return err
+		}
+	}
+	return t.assembleLocal(relative, info, false)
+}
+
+// DownloadHistoryVersion restores a .sync-trash version. The caller has
+// already saved the current local file, so no additional backup is needed.
+func (t *Chunks) DownloadHistoryVersion(trashRel, relative string) error {
+	if trashRel == "" || filepath.IsAbs(trashRel) || strings.Contains(trashRel, "..") {
+		return fmt.Errorf("percorso storico NAS non valido")
+	}
+	if err := t.client.ValidateHostKeyPin(context.Background()); err != nil {
+		return err
+	}
+	info, err := t.client.HistoryChunks(trashRel)
+	if err != nil {
+		return err
+	}
+	return t.assembleLocal(relative, info, false)
+}
+
+func (t *Chunks) assembleLocal(relative string, info remote.FileChunks, backup bool) error {
+	local, err := t.localPath(relative)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(local), 0o755); err != nil {
+		return err
+	}
+	if backup {
+		if _, err := os.Lstat(local); err == nil {
+			trash, err := history.TrashDir()
+			if err != nil {
+				return err
+			}
+			if err := os.MkdirAll(trash, 0o700); err != nil {
+				return err
+			}
+			now := time.Now().UTC()
+			stamp := now.Format("2006-01-02") + "--" + strings.Replace(now.Format("15-04-05.000000"), ".", "-", 1) + "Z"
+			target := filepath.Join(trash, filepath.FromSlash(relative)+"-"+stamp)
+			if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
+				return err
+			}
+			if err := copyLocalFile(target, local); err != nil {
+				return err
+			}
+		}
+	}
+	temporary := filepath.Join(filepath.Dir(local), "."+filepath.Base(local)+".nasbox-chunks")
+	file, err := os.OpenFile(temporary, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err
+	}
+	for _, digest := range info.Chunks {
+		data, err := t.client.ChunkGet(digest)
+		if err != nil {
+			file.Close()
+			os.Remove(temporary)
+			return err
+		}
+		sum := sha256.Sum256(data)
+		if hex.EncodeToString(sum[:]) != digest {
+			file.Close()
+			os.Remove(temporary)
+			return fmt.Errorf("chunk corrotto: %s", digest)
+		}
+		if _, err := file.Write(data); err != nil {
+			file.Close()
+			os.Remove(temporary)
+			return err
+		}
+	}
+	if err := file.Close(); err != nil {
+		os.Remove(temporary)
+		return err
+	}
+	stat, err := os.Stat(temporary)
+	if err != nil || stat.Size() != info.Size {
+		os.Remove(temporary)
+		return fmt.Errorf("dimensione locale non corrisponde per %s", relative)
+	}
+	stampTime := time.Unix(0, info.MTimeNS)
+	if err := os.Chtimes(temporary, stampTime, stampTime); err != nil {
+		os.Remove(temporary)
+		return err
+	}
+	if err := os.Rename(temporary, local); err != nil {
+		os.Remove(temporary)
+		return err
+	}
+	t.emitFile(false, relative)
 	return nil
 }
 
@@ -323,6 +370,8 @@ func copyLocalFile(target, source string) error {
 // Backend is the subset of the sync engine used for file transfers.
 type Backend interface {
 	Download(paths []string) error
+	DownloadPath(relative string) error
+	DownloadHistoryVersion(trashRel, relative string) error
 	UploadStaged(paths []string, device string, files []remote.StagedFile) error
 	UploadReplace(files []remote.ReplaceFile, device, repositoryID, runTS string) (remote.ReplaceResult, error)
 	SetContext(ctx context.Context)

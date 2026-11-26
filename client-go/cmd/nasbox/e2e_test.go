@@ -465,7 +465,7 @@ func TestE2ERestoreVersionFromNASHistory(t *testing.T) {
 	if trash == "" {
 		t.Fatalf("lo storico NAS non elenca la versione precedente: %+v", versions)
 	}
-	if err := transfer.New(cfg, client).DownloadHistoryVersion(trash, "contratto.txt"); err != nil {
+	if err := transfer.NewForConfig(cfg, client).DownloadHistoryVersion(trash, "contratto.txt"); err != nil {
 		t.Fatal(err)
 	}
 	if got := readOrEmpty(filepath.Join(a.local, "contratto.txt")); got != "versione 1" {

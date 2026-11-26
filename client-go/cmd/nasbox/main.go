@@ -158,6 +158,7 @@ type doctorReport struct {
 	ServerReachable  bool                `json:"server_reachable"`
 	ServerError      string              `json:"server_error,omitempty"`
 	Lock             doctorLockReport    `json:"lock"`
+	Backend          string              `json:"backend,omitempty"`
 	RsyncLocal       string              `json:"rsync_local,omitempty"`
 	RsyncNAS         string              `json:"rsync_nas,omitempty"`
 	Realtime         string              `json:"realtime,omitempty"`
@@ -277,6 +278,7 @@ func doctor(args []string) int {
 	report.ServerError = probe.Error
 	report.Lock.Remote = probe.RemoteLock
 	report.RsyncNAS = probe.RsyncNAS
+	report.Backend = cfg.String("transfer_backend")
 	report.RsyncLocal = transfer.LocalRsyncVersion()
 	// The probe asks the login shell, which finds the system rsync. Transfers
 	// may use a newer private one that the server advertises: show both, or the
@@ -469,7 +471,8 @@ func writeDoctorReport(report doctorReport, asJSON bool) error {
 	}
 	fmt.Println()
 	fmt.Printf("lock NAS:    %s\n", formatRemoteLock(report.Lock.Remote))
-	fmt.Printf("rsync:       locale %s · NAS %s\n", valueOr(report.RsyncLocal, "?"), valueOr(report.RsyncNAS, "?"))
+	fmt.Printf("backend:     %s\n", valueOr(report.Backend, "rsync"))
+	fmt.Printf("rsync:       locale %s · NAS %s (non usato per i trasferimenti se backend=chunks)\n", valueOr(report.RsyncLocal, "?"), valueOr(report.RsyncNAS, "?"))
 	fmt.Printf("tempo reale: %s\n", valueOr(report.Realtime, "?"))
 	fmt.Printf("capacità NAS: %s\n", valueOr(report.NasHardware, "?"))
 	if report.Error != "" {
@@ -658,7 +661,7 @@ func browseDownload(args []string) {
 		os.Exit(1)
 	}
 	defer store.Close()
-	if err := transfer.New(cfg, client).DownloadPath(args[0]); err != nil {
+	if err := transfer.NewForConfig(cfg, client).DownloadPath(args[0]); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}

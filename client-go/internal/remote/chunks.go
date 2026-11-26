@@ -118,6 +118,36 @@ func (c *Client) IngestFileChunks(path string) (FileChunks, error) {
 	return result, nil
 }
 
+// HistoryChunks returns the chunks of a version stored in .sync-trash.
+func (c *Client) HistoryChunks(trashRel string) (FileChunks, error) {
+	output, err := c.Run([]string{c.script(), "--history-chunks", trashRel}, nil, 2*time.Minute)
+	if err != nil {
+		return FileChunks{}, err
+	}
+	return parseFileChunksOutput(output)
+}
+
+func parseFileChunksOutput(output []byte) (FileChunks, error) {
+	fields := bytes.Split(output, []byte{0})
+	if len(fields) < 2 || string(fields[0]) != "FILE_CHUNKS_V1" {
+		return FileChunks{}, fmt.Errorf("risposta file-chunks non valida")
+	}
+	if string(fields[1]) == "MISS" {
+		return FileChunks{}, fmt.Errorf("versione NAS non disponibile")
+	}
+	if len(fields) < 5 {
+		return FileChunks{}, fmt.Errorf("risposta file-chunks troncata")
+	}
+	result := FileChunks{Digest: string(fields[1]), Found: true, Chunks: []string{}}
+	result.Size, _ = strconv.ParseInt(string(fields[2]), 10, 64)
+	result.MTimeNS, _ = strconv.ParseInt(string(fields[3]), 10, 64)
+	count, _ := strconv.Atoi(string(fields[4]))
+	for i := 0; i < count && 5+i < len(fields); i++ {
+		result.Chunks = append(result.Chunks, string(fields[5+i]))
+	}
+	return result, nil
+}
+
 // FilePublish assembles a file from chunks on the NAS and records it in the
 // journal under the caller's lease.
 func (c *Client) FilePublish(
