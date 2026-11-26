@@ -360,3 +360,27 @@ func TestSimpleModeHidesTechnicalAreasAndLinksRevealThem(t *testing.T) {
 		t.Fatal("nascondendo gli strumenti avanzati si torna alla Home")
 	}
 }
+
+func TestSettingsShowOnlyEssentialTabsInSimpleViewAndLinksFindAdvancedOnes(t *testing.T) {
+	c := newTestClient(t)
+	c.setAdvanced(false, false)
+	if got := len(c.settingsTabs.Items); got != 3 {
+		t.Fatalf("vista semplice: attese 3 schede (Generale, Cartelle, Informazioni), trovate %d", got)
+	}
+	c.setAdvanced(true, false)
+	if got := len(c.settingsTabs.Items); got != 6 {
+		t.Fatalf("vista avanzata: attese 6 schede, trovate %d", got)
+	}
+	c.setAdvanced(false, false)
+	// Un rimando alla scheda Integrità (indice 2 nella lista completa) la mostra.
+	c.navigate(sectionSettings, 2)
+	if !c.advancedOn || c.settingsTabs.Selected() != c.settingsAll[2] {
+		t.Fatal("il rimando deve rivelare e selezionare la scheda Integrità")
+	}
+	// Un rimando a una scheda sempre visibile non cambia la vista.
+	c.setAdvanced(false, false)
+	c.navigate(sectionSettings, 3)
+	if c.advancedOn || c.settingsTabs.Selected() != c.settingsAll[3] {
+		t.Fatal("la scheda Cartelle è sempre visibile")
+	}
+}

@@ -166,3 +166,15 @@ API in `web.go` e `webapp.go`: `/api/browse`, `/api/search`, `/api/versions`,
   di recovery come per un client. Un nome già presente diventa `nome (1).ext`.
 - I nomi con tab, newline o caratteri di controllo sono rifiutati (romperebbero
   journal e manifest TSV).
+
+## Coerenza manifest/disco, manutenzione e notifiche
+
+- `--audit-orphans [--list]`, `--audit-adopt [--dry-run]`,
+  `--audit-phantoms [--forget] [--dry-run]`, `--journal-forget` (percorsi NUL su
+  stdin): scrivono solo il journal, nessun byte si sposta. Un file scritto da meno
+  di 2 minuti non si adotta; i percorsi interni (`.sync-trash` a qualsiasi
+  profondità, `.nasbox-staging`, temporanei di rsync, `@eaDir`) sono ignorati.
+- `--run-once` esegue anche: GC dei chunk, fsck settimanale, backup giornaliero
+  dello stato (`state/backup/<data>/`) e un controllo del disallineamento. Le
+  chiavi sono in `server/server.conf.example`.
+- `NOTIFY_URL`: webhook compatibile con ntfy. Mai nomi di file nei messaggi.

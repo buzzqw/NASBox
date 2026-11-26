@@ -239,6 +239,14 @@ func Dispatch(ctx *Context, verb string, args []string) error {
 		return ctx.cmdFileStates(false)
 	case "--chunk-stats":
 		return cmdChunkStats(ctx)
+	case "--audit-orphans":
+		return cmdAuditOrphans(ctx, args)
+	case "--audit-adopt":
+		return cmdAuditAdopt(ctx, args)
+	case "--audit-phantoms":
+		return cmdAuditPhantoms(ctx, args)
+	case "--journal-forget":
+		return cmdJournalForget(ctx)
 	case "--chunk-gc":
 		return cmdChunkGC(ctx, args)
 	case "--chunk-fsck":
@@ -327,6 +335,10 @@ Uso:
   nasbox-server -c FILE --restore-batch
 
 Datapath a chunk (milestone 1, non ancora usato dai client):
+  nasbox-server -c FILE --audit-orphans [--list]
+  nasbox-server -c FILE --audit-adopt [--dry-run]
+  nasbox-server -c FILE --audit-phantoms [--forget] [--dry-run]
+  nasbox-server -c FILE --journal-forget      (percorsi NUL-separati su stdin)
   nasbox-server -c FILE --chunk-stats
   nasbox-server -c FILE --chunk-gc [--dry-run] [--grace-hours N]
   nasbox-server -c FILE --chunk-fsck [--repair]

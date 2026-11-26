@@ -359,11 +359,14 @@ func (c *clientApp) setAdvanced(on, persist bool) {
 			c.advancedToggle.SetIcon(theme.MenuDropDownIcon())
 		}
 	}
-	if c.navBox != nil {
-		c.navBox.Refresh() // a container does not re-layout children shown later
-	}
-	if c.homeBox != nil {
-		c.homeBox.Refresh()
+	c.applySettingsTabs()
+	if c.uiReady {
+		if c.navBox != nil {
+			c.navBox.Refresh() // a container does not re-layout children shown later
+		}
+		if c.homeBox != nil {
+			c.homeBox.Refresh()
+		}
 	}
 	if !on && (c.active == sectionActivity || c.active == sectionNAS) {
 		c.showSection(sectionStatus)
@@ -371,3 +374,50 @@ func (c *clientApp) setAdvanced(on, persist bool) {
 }
 
 func isAdvancedSection(id sectionID) bool { return id == sectionActivity || id == sectionNAS }
+
+// simpleSettingsTabs are the positions (in the full list) shown in the simple
+// view: General, Folders and mirrors, About. Safety, Integrity and Advanced
+// belong to the advanced tools.
+var simpleSettingsTabs = map[int]bool{0: true, 3: true, 5: true}
+
+func (c *clientApp) settingsTabVisible(index int) bool {
+	return c.advancedOn || simpleSettingsTabs[index]
+}
+
+func (c *clientApp) applySettingsTabs() {
+	if c.settingsTabs == nil || len(c.settingsAll) == 0 {
+		return
+	}
+	items := make([]*container.TabItem, 0, len(c.settingsAll))
+	for index, item := range c.settingsAll {
+		if c.settingsTabVisible(index) {
+			items = append(items, item)
+		}
+	}
+	selected := c.settingsTabs.Selected()
+	if !c.uiReady || c.active != sectionSettings {
+		// Not on screen: just change the list. It is drawn when the section is
+		// shown (showSection refreshes the content), so redrawing every settings
+		// pane now would only cost time.
+		c.settingsTabs.Items = items
+		if !containsTab(items, selected) && len(items) > 0 {
+			c.settingsTabs.SelectIndex(0)
+		}
+		return
+	}
+	c.settingsTabs.SetItems(items)
+	for index, item := range items {
+		if item == selected {
+			c.settingsTabs.SelectIndex(index)
+		}
+	}
+}
+
+func containsTab(items []*container.TabItem, wanted *container.TabItem) bool {
+	for _, item := range items {
+		if item == wanted {
+			return true
+		}
+	}
+	return false
+}

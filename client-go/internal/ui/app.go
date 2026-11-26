@@ -241,6 +241,8 @@ type clientApp struct {
 	advancedHome     []fyne.CanvasObject
 	advancedToggle   *widget.Button
 	advancedOn       bool
+	uiReady          bool
+	settingsAll      []*container.TabItem
 	navBox           *fyne.Container
 	homeTransfer     *transferView
 	tabTransfer      *transferView
@@ -486,6 +488,7 @@ func (c *clientApp) buildRoot() fyne.CanvasObject {
 	header := c.buildHeader()
 	c.buildSections()
 	c.setAdvanced(c.cfg.Bool("ui_advanced"), false)
+	c.uiReady = true
 	c.showSection(c.active)
 	c.installShortcuts()
 	main := container.NewBorder(header, nil, nil, nil, container.NewPadded(c.content))
@@ -571,7 +574,24 @@ func (c *clientApp) showSection(id sectionID) {
 
 // navigate switches area and, when requested, a secondary tab inside it.
 func (c *clientApp) navigate(id sectionID, tab int) {
+	var wanted *container.TabItem
+	if id == sectionSettings && tab >= 0 && tab < len(c.settingsAll) {
+		// The index refers to the full list; in the simple view some tabs are
+		// not shown, so find the tab itself (and reveal the advanced ones).
+		wanted = c.settingsAll[tab]
+		if !c.advancedOn && !c.settingsTabVisible(tab) {
+			c.setAdvanced(true, false)
+		}
+	}
 	c.showSection(id)
+	if wanted != nil && c.settingsTabs != nil {
+		for index, item := range c.settingsTabs.Items {
+			if item == wanted {
+				c.settingsTabs.SelectIndex(index)
+			}
+		}
+		return
+	}
 	var tabs *container.AppTabs
 	switch id {
 	case sectionActivity:
@@ -935,6 +955,7 @@ func (c *clientApp) settingsView() fyne.CanvasObject {
 		container.NewTabItem(tr("ui.settings.advanced_tab", nil), container.NewVScroll(inset(c.settingsAdvanced()))),
 		container.NewTabItem(tr("ui.group.about", nil), container.NewVScroll(inset(container.NewVBox(c.buildHealthPane(), about)))),
 	)
+	c.settingsAll = append([]*container.TabItem(nil), c.settingsTabs.Items...)
 	if index, err := strconv.Atoi(os.Getenv("NASBOX_SETTINGS_TAB")); err == nil &&
 		index >= 0 && index < len(c.settingsTabs.Items) {
 		c.settingsTabs.SelectIndex(index)

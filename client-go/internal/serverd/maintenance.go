@@ -125,6 +125,10 @@ func cmdRunOnce(ctx *Context) error {
 		}
 	}
 	ctx.maintainStateFiles()
+	ctx.maintainChunks()
+	ctx.backupState()
+	ctx.maintainAudit()
+	ctx.maintainNotifications()
 	now := strconv.FormatInt(time.Now().Unix(), 10)
 	if err := os.WriteFile(p.LastRun, []byte(now+"\n"), 0o600); err != nil {
 		return err

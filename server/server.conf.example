@@ -71,3 +71,18 @@ STATE_TEMP_MAX_AGE_HOURS=24 # remove stale temporary files after N hours (0 = ke
 # WEB_MAX_UPLOAD_MB=4096          # dimensione massima per richiesta
 # WEB_TLS_CERT=/percorso/cert.pem
 # WEB_TLS_KEY=/percorso/chiave.pem
+
+# --- Manutenzione del demone Go (passo di --run-once) ---
+# CHUNK_GC=true               GC dei chunk non più referenziati (false = spenta)
+# CHUNK_GC_GRACE_HOURS=24     periodo di grazia prima di rimuovere un chunk
+# CHUNK_FSCK_DAYS=7           ogni quanti giorni rileggere e verificare tutti i chunk (0 = mai)
+# STATE_BACKUP_KEEP=7         copie giornaliere di journal e manifest in state/backup (0 = nessuna)
+# AUDIT_AUTO=report           report (solo segnala) | adopt (adotta i file orfani) | off
+#                             Le righe "fantasma" non si dimenticano mai da sole.
+
+# --- Notifiche (compatibili con ntfy: POST di testo con header Title) ---
+# I messaggi contengono solo conteggi, mai nomi di file; uno per tipo ogni NOTIFY_MIN_HOURS.
+# Avvisi: disco oltre la soglia, problemi di integrità dei chunk, manifest/disco non coerenti.
+# NOTIFY_URL=https://ntfy.sh/un-argomento-lungo-e-segreto
+# NOTIFY_DISK_PERCENT=90
+# NOTIFY_MIN_HOURS=24

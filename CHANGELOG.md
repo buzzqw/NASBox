@@ -4,6 +4,28 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+Interfaccia:
+- **Impostazioni in vista semplice**: solo Generale, Cartelle e mirror,
+  Informazioni. Sicurezza, Integrità e Avanzate compaiono con «Strumenti
+  avanzati». I rimandi interni alle schede nascoste le rivelano da soli.
+
+Demone (server):
+- **Verifiche di coerenza anche nel demone Go**: `--audit-orphans [--list]`,
+  `--audit-adopt [--dry-run]`, `--audit-phantoms [--forget] [--dry-run]` e
+  `--journal-forget` non esistevano più dopo il passaggio dallo script bash.
+  Gli orfani adottati hanno l'mtime in nanosecondi esatti (il bash lo salvava in
+  secondi e `--file-states` li rileggeva a ogni controllo); l'hashing è parallelo
+  secondo i core del NAS; un file cambiato mentre lo si leggeva non viene adottato.
+- **Manutenzione notturna più completa** (`--run-once`): GC dei chunk, verifica
+  d'integrità settimanale (`CHUNK_FSCK_DAYS`), backup giornaliero di journal e
+  manifest in `state/backup` (`STATE_BACKUP_KEEP`) e controllo del disallineamento
+  manifest/disco (`AUDIT_AUTO=report|adopt|off`). Le righe fantasma non si
+  dimenticano mai da sole. Gli esiti vanno in `events.jsonl`.
+- **Notifiche** (`NOTIFY_URL`, compatibile con ntfy): disco oltre la soglia,
+  problemi dei chunk, manifest e disco non coerenti. Solo conteggi, mai nomi di
+  file; un messaggio per tipo ogni `NOTIFY_MIN_HOURS`.
+- Lo script bash accetta le nuove chiavi di `server.conf`.
+
 ## 1.16.0 - 2026-11-26
 
 Client 1.16.0 e server 3.34.0.
