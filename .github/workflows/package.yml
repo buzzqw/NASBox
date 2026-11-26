@@ -1,8 +1,7 @@
 name: Package NASBox
 
-# Il client Go e' quello ufficiale: ogni tag vX.Y.Z produce e allega il suo
-# binario e il pacchetto Debian. I vecchi artifact Python restano disponibili
-# solo su richiesta (workflow_dispatch), non fanno piu parte delle release.
+# Every tag vX.Y.Z builds and attaches the desktop client, the Debian package,
+# the NAS daemon (arm64 and amd64) and, as an experimental extra, a Windows build.
 on:
   push:
     tags:
@@ -98,51 +97,6 @@ jobs:
         with:
           name: nasbox-go-windows
           path: dist/nasbox-go-*-windows-*.exe
-          if-no-files-found: error
-
-  python-legacy:
-    # Solo ricostruzione manuale del vecchio client: non viene piu pubblicato.
-    if: github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-22.04
-    steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v6
-        with:
-          python-version: "3.11"
-          cache: pip
-      - name: Install build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libegl1
-          python -m pip install --upgrade pip
-          python -m pip install -r requirements.txt -r packaging/requirements-build.txt
-      - name: Download appimagetool
-        run: |
-          curl --fail --location --retry 3 \
-            --output "$RUNNER_TEMP/appimagetool" \
-            https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-x86_64.AppImage
-          echo "ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0  $RUNNER_TEMP/appimagetool" | sha256sum --check
-          chmod +x "$RUNNER_TEMP/appimagetool"
-          curl --fail --location --retry 3 \
-            --output "$RUNNER_TEMP/appimage-runtime" \
-            https://github.com/AppImage/type2-runtime/releases/download/20251108/runtime-x86_64
-          echo "2fca8b443c92510f1483a883f60061ad09b46b978b2631c807cd873a47ec260d  $RUNNER_TEMP/appimage-runtime" | sha256sum --check
-      - name: Build legacy artifacts
-        env:
-          APPIMAGETOOL: ${{ runner.temp }}/appimagetool
-          APPIMAGE_RUNTIME_FILE: ${{ runner.temp }}/appimage-runtime
-        run: |
-          packaging/build-appimage.sh
-          packaging/build-deb.sh
-          packaging/build-client-update.sh
-      - uses: actions/upload-artifact@v4
-        with:
-          name: nasbox-python-legacy
-          path: |
-            dist/*.AppImage
-            dist/*.deb
-            dist/nasbox-client-update-*.tar.gz
-            dist/nasbox-client-update-*.tar.gz.sha256
           if-no-files-found: error
 
   release:

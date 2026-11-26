@@ -1,4 +1,2 @@
-# Development / CI dependencies (test suite only).
--r requirements.txt
+# Test dependencies for the NAS shell-script daemon (server/tests).
 pytest>=8.0
-pytest-qt>=4.4

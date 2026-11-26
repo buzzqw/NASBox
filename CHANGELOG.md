@@ -4,6 +4,17 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+Pulizia:
+- **Rimosso il client Python/PyQt6** (ritirato da tempo) con i suoi strumenti di
+  build e di pubblicazione: ~37.000 righe in meno. L'ultima versione resta nel tag
+  Git `python-legacy-final`. `client-go/install.sh --migrate` resta per chi passa al
+  client Go; configurazione e stato mantengono lo stesso formato.
+- **CI più chiara**: il workflow `Tests` esegue ora anche vet e test Go a ogni push
+  (prima solo sui tag) e i test del demone a script; il workflow `Package` non ha
+  più il job Python.
+- `CONTRIBUTING.md` riscritto in inglese; `server/install.sh` non rimanda più a un
+  installer che non esiste.
+
 ## 1.20.1 - 2026-11-26
 
 Client 1.20.1 e server 3.36.0.

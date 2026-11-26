@@ -81,7 +81,7 @@ msg() {
             stop_label) echo "Ferma il demone:     %s --stop" ;;
             prune_label) echo "Pruning manuale:     %s --run-once" ;;
             dryrun_label) echo "Anteprima (no-op):   %s --run-once --dry-run" ;;
-            next_step_header) echo "Ora, su ogni PC: client/install.sh -- ti chiederà l'host di questo NAS e" ;;
+            next_step_header) echo "Ora, su ogni PC: installa il client NASBox (vedi MANUAL.md) -- ti chiederà l'host di questo NAS e" ;;
             next_step_body) echo "questa stessa cartella (%s) per collegarsi." ;;
             *) echo "$key" ;;
         esac
@@ -135,7 +135,7 @@ msg() {
             stop_label) echo "Stop the daemon:     %s --stop" ;;
             prune_label) echo "Manual pruning:      %s --run-once" ;;
             dryrun_label) echo "Preview (no-op):     %s --run-once --dry-run" ;;
-            next_step_header) echo "Now, on every PC: client/install.sh -- it will ask for this NAS's host and" ;;
+            next_step_header) echo "Now, on every PC: install the NASBox client (see MANUAL.md) -- it will ask for this NAS's host and" ;;
             next_step_body) echo "this same folder (%s) to connect." ;;
             *) echo "$key" ;;
         esac

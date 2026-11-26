@@ -1,25 +1,21 @@
-# Contribuire a NASBox
+# Contributing to NASBox
 
-## Prima di aprire una modifica
+## Before you open a change
 
-- Il client ufficiale è **NASBox Go** (`client-go/`). Il client Python/PyQt6 è
-  legacy e ritirato: non accettare nuove funzionalità lì.
-- Non includere configurazioni personali, host reali, chiavi SSH, log o file
-  sotto `server/state/`.
-- Mantieni il server compatibile con bash disponibile su Synology, QNAP e Linux
-  generico, e ricorda che il rsync di sistema del NAS può essere 3.1.2.
+- The official client is **NASBox Go** (`client-go/`). The old Python/PyQt6 client
+  has been removed; its last version is kept at the Git tag `python-legacy-final`.
+- Do not include personal configuration, real hostnames or addresses, SSH keys, logs
+  or anything under `server/state/`.
+- Keep the shell-script daemon compatible with the bash available on Synology, QNAP
+  and generic Linux, and remember that the NAS system `rsync` can be 3.1.2.
 
-## Verifiche richieste
+## Checks
 
 ```bash
-cd client-go && go vet ./... && go test ./...   # include i test end-to-end
+cd client-go && go vet ./... && go test ./...      # includes the end-to-end tests
 bash -n server/install.sh server/sync-daemon-server.sh server/uninstall.sh
+python -m pytest -q                                 # shell-script daemon tests
 ```
 
-Per una release, aggiorna `client-go/internal/version/version.go` e il
-`CHANGELOG.md`: il tag GitHub (`vX.Y.Z`) deve corrispondere alla versione Go e
-la stessa versione va pubblicata nel canale `go-stable`. La procedura completa
-è in [README.md](README.md) e in [AGENT-NOTES.md](AGENT-NOTES.md).
-
-Descrivi nella pull request il problema risolto, l'impatto su client e NAS e
-come hai verificato la modifica.
+Describe in the pull request the problem solved, the impact on the client and on the
+NAS, and how you verified the change.
