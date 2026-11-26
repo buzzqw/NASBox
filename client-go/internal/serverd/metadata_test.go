@@ -142,6 +142,28 @@ func TestRetryRepairsRevisionAfterJournalCommit(t *testing.T) {
 	}
 }
 
+func TestIndexedRevisionAheadOfCursorIsRepairedWithoutRebuild(t *testing.T) {
+	ctx, _ := newTestContext(t)
+	writeMetadataFixture(t, ctx, "NASBOX_MANIFEST_V1\n", "NASBOX_JOURNAL_V1\n", 0)
+	digest := strings.Repeat("a", 64)
+	if err := ctx.appendTransaction("tx1", "dev", []string{
+		journalRowPUT("a.txt", digest, "1", "100", "dev", "100", ""),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// Simulate a crash after the index commit but before the cursor repair.
+	if err := os.WriteFile(ctx.paths().Revision, []byte("0\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	view, err := ctx.exportManifest(0, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if view.Current != 1 || view.FallbackFull || len(view.Rows) != 1 {
+		t.Fatalf("cursore non riparato senza perdere il delta: %+v", view)
+	}
+}
+
 func TestCompactionPreservesDeltaHistory(t *testing.T) {
 	ctx, _ := newTestContext(t)
 	ctx.Config["JOURNAL_MAX_BYTES"] = "1"

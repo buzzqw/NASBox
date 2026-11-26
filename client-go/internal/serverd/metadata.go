@@ -230,7 +230,13 @@ func (i *metadataIndex) syncLocked() error {
 		return err
 	}
 	checkpoint, hasCheckpoint := i.loadCheckpoint()
-	if !hasIndexed || !hasCheckpoint || current < indexed || !checkpointMatches(i.paths.Journal, info.Size(), checkpoint) {
+	checkpointValid := hasCheckpoint && checkpointMatches(i.paths.Journal, info.Size(), checkpoint)
+	if hasIndexed && current < indexed && checkpointValid {
+		// The SQLite catch-up committed before the cursor repair. The journal
+		// checkpoint still matches, so only manifest.revision needs healing.
+		return i.writeRevision(indexed)
+	}
+	if !hasIndexed || !checkpointValid || current < indexed {
 		return i.rebuildLocked(current)
 	}
 	if info.Size() == checkpoint.Offset {
