@@ -4,6 +4,13 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+- **Test della GUI stabili su CI**: il caricamento in background dell'albero delle
+  cartelle (sync selettiva) gareggiava con i ridisegni dei test; nei test non
+  parte più (nell'app è invariato). Il rilascio 1.18.0 era fallito su GitHub per
+  questo motivo: il demone 3.36.0 e il canale erano già aggiornati, la release
+  GitHub arriva con 1.18.1.
+- `tools/release_all.sh` ferma la consegna se il workflow GitHub fallisce.
+
 ## 1.18.0 - 2026-11-26
 
 Client 1.18.0 e server 3.36.0.

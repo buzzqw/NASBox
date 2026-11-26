@@ -19,6 +19,7 @@ import (
 // the network. All refresh calls happen in Run(), not while building.
 func newTestClient(t *testing.T) *clientApp {
 	t.Helper()
+	disableBackgroundLoads = true
 	a := test.NewApp()
 	t.Cleanup(a.Quit)
 	t.Setenv("XDG_STATE_HOME", t.TempDir())

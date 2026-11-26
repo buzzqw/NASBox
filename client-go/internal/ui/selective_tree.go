@@ -73,10 +73,22 @@ func (s *selectiveTree) childIDs(uid string) []string {
 	}
 	s.mu.Unlock()
 	if !ok && !loading {
+		if disableBackgroundLoads {
+			// Tests only: the Fyne test driver runs fyne.Do on the calling
+			// goroutine, so this loader would race with the test's own redraws.
+			s.mu.Lock()
+			s.loading[uid] = false
+			s.mu.Unlock()
+			return children
+		}
 		go s.load(uid)
 	}
 	return children
 }
+
+// disableBackgroundLoads is set by the test client. In the application it is
+// always false: the loader runs in the background and updates the UI via fyne.Do.
+var disableBackgroundLoads bool
 
 func (s *selectiveTree) load(uid string) {
 	// This runs in its own goroutine and ends with a UI update; if the window

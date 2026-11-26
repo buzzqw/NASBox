@@ -88,14 +88,26 @@ nas "cd $NAS_REPO && python3 tools/publish_go_client.py --binary ./nasbox-go-${C
 nas "python3 -c \"import json,hashlib;m=json.load(open('$CHANNEL_DIR/manifest-go.json'));p='$CHANNEL_DIR/'+m['artifact'];ok=m['sha256']==hashlib.sha256(open(p,'rb').read()).hexdigest();print('canale',m['version'],'coerente' if ok else 'INCOERENTE');raise SystemExit(0 if ok else 1)\""
 
 step "7/8 GitHub (workflow e release)"
-sleep 8
 RUN_ID=""
-for _ in 1 2 3 4 5 6; do
+for _ in $(seq 1 12); do
   RUN_ID="$(gh run list -R "$GH_REPO" --workflow 'Package NASBox' --branch "v${CLIENT_VERSION}" -L 1 --json databaseId -q '.[0].databaseId' 2>/dev/null || true)"
   [[ -n "$RUN_ID" ]] && break; sleep 5
 done
-[[ -n "$RUN_ID" ]] && timeout 900 gh run watch "$RUN_ID" -R "$GH_REPO" --exit-status >/dev/null && echo "workflow Package: ok"
-gh release view "v${CLIENT_VERSION}" -R "$GH_REPO" --json assets -q '[.assets[].name]|join(", ")'
+[[ -n "$RUN_ID" ]] || { echo "workflow Package NASBox non trovato per v${CLIENT_VERSION}" >&2; exit 1; }
+if timeout 1200 gh run watch "$RUN_ID" -R "$GH_REPO" --exit-status >/dev/null 2>&1; then
+  echo "workflow Package: ok"
+else
+  echo "WORKFLOW FALLITO (run $RUN_ID): demone e canale sono già aggiornati, ma manca la release GitHub" >&2
+  gh run view "$RUN_ID" -R "$GH_REPO" --log-failed 2>&1 | tail -25 >&2
+  exit 1
+fi
+ASSETS=""
+for _ in $(seq 1 12); do
+  ASSETS="$(gh release view "v${CLIENT_VERSION}" -R "$GH_REPO" --json assets -q '[.assets[].name]|join(", ")' 2>/dev/null || true)"
+  [[ -n "$ASSETS" ]] && break; sleep 5
+done
+[[ -n "$ASSETS" ]] || { echo "release v${CLIENT_VERSION} senza asset" >&2; exit 1; }
+echo "release: $ASSETS"
 
 step "8/8 stato finale"
 nas "cd $NAS_REPO && git status -sb | head -2"
