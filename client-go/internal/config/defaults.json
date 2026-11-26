@@ -61,7 +61,7 @@
   "remote_journal_ready": false,
   "remote_prefix": "/volume1/NASBox",
   "remote_repository_ready": false,
-  "transfer_backend": "rsync",
+  "transfer_backend": "chunks",
   "remote_server_script": "",
   "repository_id": "",
   "retention_days_local": 30,

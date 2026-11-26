@@ -146,7 +146,7 @@ func (n *e2eNAS) client(name string, overrides ...map[string]any) *e2eClient {
 	values := map[string]any{
 		"local_root": c.local, "remote_prefix": n.share,
 		"nas_lan": "nas.e2e", "nas_user": "e2e", "ssh_multiplexing": false,
-		"remote_server_script": n.script, "delete_enabled": true,
+		"remote_server_script": n.script, "transfer_backend": "rsync", "delete_enabled": true,
 		"conflict_policy": "newest", "sync_mode": "bidirectional",
 		"delete_dir_guard_min_files": 1000,
 	}

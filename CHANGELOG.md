@@ -4,6 +4,18 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 1.15.0 - 2026-11-26
+
+Client Go:
+
+- **Trasferimenti senza rsync**: il backend predefinito è il protocollo a chunk
+  del demone Go (`transfer_backend=chunks`). Vengono inviati solo i chunk che
+  il NAS non ha già, con dedup tra file e versioni; `rsync` resta disponibile
+  impostando `transfer_backend=rsync`.
+- Il client richiede il demone NAS Go con i verbi a chunk; lo script bash
+  non è più sufficiente per i trasferimenti.
+- Aggiornato il change feed lato server (`--wait-for-revision`).
+
 ## 1.14.1 - 2026-11-26
 
 Client Go:
