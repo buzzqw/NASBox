@@ -189,6 +189,14 @@ func Dispatch(ctx *Context, verb string, args []string) error {
 		return ctx.cmdFileStates(true)
 	case "--file-states":
 		return ctx.cmdFileStates(false)
+	case "--chunk-stats":
+		return cmdChunkStats(ctx)
+	case "--chunk-snapshot-create":
+		return cmdChunkSnapshotCreate(ctx, args)
+	case "--chunk-snapshot-list":
+		return cmdChunkSnapshotList(ctx)
+	case "--chunk-restore":
+		return cmdChunkRestore(ctx, args)
 	default:
 		return fmt.Errorf("verbo %q non ancora implementato nella milestone 0", verb)
 	}
@@ -212,6 +220,12 @@ Uso:
   nasbox-server -c FILE --manifest-get PATH
   nasbox-server -c FILE --file-states
   nasbox-server -c FILE --history-list
+
+Datapath a chunk (milestone 1, non ancora usato dai client):
+  nasbox-server -c FILE --chunk-stats
+  nasbox-server -c FILE --chunk-snapshot-create DEVICE PATH [PATH...]
+  nasbox-server -c FILE --chunk-snapshot-list
+  nasbox-server -c FILE --chunk-restore ID PATH DEST
 `, version)
 	return nil
 }
