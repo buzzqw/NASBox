@@ -4,6 +4,10 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 1.17.0 - 2026-11-26
+
+Client 1.17.0 e server 3.35.0.
+
 Interfaccia:
 - **Impostazioni in vista semplice**: solo Generale, Cartelle e mirror,
   Informazioni. Sicurezza, Integrità e Avanzate compaiono con «Strumenti
