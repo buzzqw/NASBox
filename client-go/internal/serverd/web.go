@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -12,54 +13,9 @@ import (
 	"time"
 )
 
-const webPage = `<!doctype html>
-<html lang="it"><head><meta charset="utf-8">
-<title>NASBox server</title>
-<style>
-body{font-family:system-ui,sans-serif;background:#12161c;color:#e8edf3;margin:0;padding:2rem}
-h1{font-size:1.4rem}a{color:#6db3ff}code{background:#222a34;padding:.1rem .35rem;border-radius:4px}
-.card{background:#1b212a;border:1px solid #2b3542;border-radius:10px;padding:1rem;margin:.8rem 0;max-width:60rem}
-table{border-collapse:collapse;width:100%}td,th{text-align:left;padding:.25rem .6rem;border-bottom:1px solid #2b3542}
-</style></head><body>
-<h1>NASBox — demone Go</h1>
-<div class="card"><h2>Stato</h2><table id="status"></table></div>
-<div class="card"><h2>API</h2>
-<p><a href="/api/status">/api/status</a> · <a href="/api/metrics">/api/metrics</a> ·
-<a href="/api/browse?path=">/api/browse</a> · <a href="/api/history">/api/history</a> ·
-<a href="/api/chunks">/api/chunks</a></p>
-<p>Per scaricare un file: <code>/api/download?path=cartella/file.txt</code>.
-Per una versione: <code>/api/download?path=.sync-trash/cartella/file.txt-2026-11-26--10-00-00-000000Z</code>.</p>
-</div>
-<div class="card"><h2>Note</h2><p>Questa UI è servita dallo stesso binario del demone.
-Di default ascolta solo su <code>127.0.0.1</code>: passa un indirizzo diverso
-con <code>--web 0.0.0.0:8080</code> solo su una rete fidata.</p></div>
-<script>
-async function load(){const r=await fetch('/api/status');const d=await r.json();
-const t=document.getElementById('status');for(const k of Object.keys(d).sort()){
-const tr=document.createElement('tr');tr.innerHTML='<th>'+k+'</th><td>'+d[k]+'</td>';t.appendChild(tr);}}
-load();
-</script></body></html>`
-
 func writeJSON(w http.ResponseWriter, value any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	_ = json.NewEncoder(w).Encode(value)
-}
-
-func (c *Context) withBasicAuth(next http.Handler) http.Handler {
-	user := value(c.Config, "WEB_USER", "")
-	password := c.Config["WEB_PASSWORD"]
-	if password == "" {
-		return next
-	}
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		u, p, ok := r.BasicAuth()
-		if !ok || u != user || p != password {
-			w.Header().Set("WWW-Authenticate", `Basic realm="NASBox"`)
-			http.Error(w, "autenticazione richiesta", http.StatusUnauthorized)
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
 }
 
 func keyValues(lines []string) map[string]string {
@@ -109,8 +65,21 @@ func (ctx *Context) webHandler() http.Handler {
 			return
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Content-Security-Policy",
+			"default-src 'self'; img-src 'self' data:; media-src 'self'; frame-src 'self'; "+
+				"style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; base-uri 'none'; form-action 'none'")
+		w.Header().Set("Cache-Control", "no-store")
 		fmt.Fprint(w, webPage)
 	})
+	mux.HandleFunc("/api/info", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, map[string]any{
+			"version": version, "writable": ctx.webWritable(),
+			"max_upload_bytes": ctx.webMaxUploadBytes(),
+		})
+	})
+	mux.HandleFunc("/api/upload", ctx.handleWebUpload)
+	mux.HandleFunc("/api/search", ctx.handleWebSearch)
+	mux.HandleFunc("/api/versions", ctx.handleWebVersions)
 	mux.HandleFunc("/api/status", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, ctx.statusValues())
 	})
@@ -222,8 +191,7 @@ func (ctx *Context) webHandler() http.Handler {
 			http.Error(w, "file non trovato", http.StatusNotFound)
 			return
 		}
-		w.Header().Set("Content-Type", "application/octet-stream")
-		w.Header().Set("Content-Length", strconv.FormatInt(info.Size(), 10))
+		setDownloadHeaders(w, filepath.Base(full), r.URL.Query().Get("inline") == "1")
 		http.ServeFile(w, r, full)
 	})
 	mux.HandleFunc("/api/chunks", func(w http.ResponseWriter, _ *http.Request) {
@@ -246,15 +214,38 @@ func (ctx *Context) webHandler() http.Handler {
 			"objects": objects, "bytes": bytes, "snapshots": len(snapshots), "chunk_size": ctx.ChunkSize(),
 		})
 	})
-	return ctx.withBasicAuth(mux)
+	return ctx.withWebAuth(mux)
+}
+
+func isLoopbackAddress(address string) bool {
+	host, _, err := net.SplitHostPort(address)
+	if err != nil {
+		return false
+	}
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 func cmdWeb(ctx *Context, args []string) error {
-	address := "127.0.0.1:8080"
+	address := value(ctx.Config, "WEB_LISTEN", "127.0.0.1:8080")
 	if len(args) > 0 && args[0] != "" {
 		address = args[0]
 	}
-	server := &http.Server{Addr: address, Handler: ctx.webHandler(), ReadHeaderTimeout: 5 * time.Second}
+	if !isLoopbackAddress(address) && !ctx.webWritable() {
+		return fmt.Errorf("la UI web non può ascoltare su %s senza password: imposta WEB_USER e WEB_PASSWORD in server.conf", address)
+	}
+	server := &http.Server{
+		Addr: address, Handler: ctx.webHandler(),
+		ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 2 * time.Minute,
+	}
+	cert, key := ctx.Config["WEB_TLS_CERT"], ctx.Config["WEB_TLS_KEY"]
+	if cert != "" && key != "" {
+		fmt.Printf("NASBox web UI in ascolto su https://%s\n", address)
+		return server.ListenAndServeTLS(cert, key)
+	}
 	fmt.Printf("NASBox web UI in ascolto su http://%s\n", address)
 	return server.ListenAndServe()
 }

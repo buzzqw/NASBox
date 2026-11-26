@@ -3,6 +3,7 @@ package ui
 import (
 	"fmt"
 	"os/exec"
+	"strings"
 	"time"
 
 	"fyne.io/fyne/v2"
@@ -10,17 +11,36 @@ import (
 	"nasbox-go/internal/version"
 )
 
-// installTray builds the system tray menu. Its first line always states what
-// NASBox is doing; the rest are the actions people use daily.
+// The tray menu is deliberately flat. Many desktops (XFCE's status notifier
+// plugin, waybar and others) draw dbusmenu submenus empty, so "Pause" and
+// "Recent files" looked blank; top-level items work everywhere. The menu is
+// rebuilt only when its content changes, and at most every trayMinInterval:
+// every rebuild re-registers all items with the system tray.
+const trayMinInterval = 2 * time.Second
+
 func (c *clientApp) installTray() {
-	c.trayStatus = fyne.NewMenuItem(tr("status.starting", nil), nil)
-	c.trayStatus.Disabled = true
-	c.trayRecent = fyne.NewMenuItem(tr("ui.tray.recent", nil), nil)
-	c.trayConflicts = fyne.NewMenuItem("", func() { c.showWindow(); c.navigate(sectionFiles, 1) })
-	c.trayPause = fyne.NewMenuItem(tr("ui.tray.pause_menu", nil), nil)
-	c.trayPause.ChildMenu = c.pauseMenu()
-	c.trayMenu = fyne.NewMenu(version.AppName,
-		c.trayStatus,
+	c.trayMenu = fyne.NewMenu(version.AppName)
+	c.trayMenu.Items = c.buildTrayItems()
+	c.traySig = c.traySignature()
+	c.trayBuilt = time.Now()
+	if trayApp, ok := c.fyneApp.(interface{ SetSystemTrayMenu(*fyne.Menu) }); ok {
+		trayApp.SetSystemTrayMenu(c.trayMenu)
+	}
+}
+
+func disabledItem(label string) *fyne.MenuItem {
+	item := fyne.NewMenuItem(label, nil)
+	item.Disabled = true
+	return item
+}
+
+func (c *clientApp) isPausedNow() bool { return c.runner.IsPaused() || c.pausedForNow() }
+
+// buildTrayItems lists the whole menu: state, daily actions, recent files,
+// pause, bandwidth limit, conflicts and the app entries.
+func (c *clientApp) buildTrayItems() []*fyne.MenuItem {
+	items := []*fyne.MenuItem{
+		disabledItem(c.trayStatusText()),
 		fyne.NewMenuItemSeparator(),
 		fyne.NewMenuItem(tr("ui.tray.show", nil), c.showWindow),
 		fyne.NewMenuItem(tr("tray.open_folder", nil), func() {
@@ -29,22 +49,89 @@ func (c *clientApp) installTray() {
 			}
 		}),
 		fyne.NewMenuItem(lt("Cerca un file…", "Search a file…"), func() { c.showWindow(); c.focusSearch() }),
-		c.trayRecent,
 		fyne.NewMenuItemSeparator(),
-		fyne.NewMenuItem(tr("ui.tray.sync", nil), c.onSync),
-		c.trayPause,
-		c.trayConflicts,
+		disabledItem(tr("ui.tray.recent", nil)),
+	}
+	shown := 0
+	for _, item := range c.recent {
+		if shown >= trayRecentMax {
+			break
+		}
+		name, _ := splitPath(item.Path)
+		target := item.Path
+		items = append(items, fyne.NewMenuItem("   "+recentArrow(item.Kind)+" "+name, func() {
+			c.openContainingFolder(target)
+		}))
+		shown++
+	}
+	if shown == 0 {
+		items = append(items, disabledItem("   "+tr("ui.home.recent_empty_short", nil)))
+	}
+	items = append(items, fyne.NewMenuItemSeparator(), fyne.NewMenuItem(tr("ui.tray.sync", nil), c.onSync))
+
+	if c.isPausedNow() {
+		items = append(items, fyne.NewMenuItem("▶ "+tr("status.resume_btn", nil), c.onPause))
+	} else {
+		items = append(items, disabledItem(tr("ui.tray.pause_menu", nil)+":"))
+		for _, preset := range pausePresets() {
+			if preset.seconds != 15*60 && preset.seconds != 60*60 && preset.seconds != 4*60*60 {
+				continue
+			}
+			seconds, label := preset.seconds, preset.label
+			items = append(items, fyne.NewMenuItem("   ⏸ "+label, func() { c.pauseFor(seconds, label) }))
+		}
+		items = append(items,
+			fyne.NewMenuItem("   ⏸ "+tr("ui.tray.pause_tomorrow", nil), func() {
+				now := time.Now()
+				tomorrow := time.Date(now.Year(), now.Month(), now.Day()+1, 8, 0, 0, 0, now.Location())
+				c.pauseFor(int64(tomorrow.Sub(now).Seconds()), tr("ui.tray.pause_tomorrow", nil))
+			}),
+			fyne.NewMenuItem("   ⏸ "+lt("Finché non riprendo", "Until I resume"), c.onPause),
+		)
+	}
+
+	current, uniform := c.currentBandwidth()
+	header := lt("Velocità massima", "Maximum speed") + ": " + c.bandwidthSummary()
+	items = append(items, fyne.NewMenuItemSeparator(), disabledItem(header))
+	for _, preset := range trayBandwidthPresets() {
+		kbps := preset.kbps
+		item := fyne.NewMenuItem("   "+preset.label, func() { c.setBandwidth(kbps) })
+		item.Checked = uniform && current == kbps
+		items = append(items, item)
+	}
+
+	conflicts := fyne.NewMenuItem(tr("ui.tray.no_conflicts", nil), nil)
+	if count := len(c.confGroups); count > 0 {
+		conflicts = fyne.NewMenuItem(tr("ui.tray.conflicts", map[string]any{"count": count}),
+			func() { c.showWindow(); c.navigate(sectionFiles, 1) })
+	} else {
+		conflicts.Disabled = true
+	}
+	return append(items,
 		fyne.NewMenuItemSeparator(),
-		fyne.NewMenuItem(tr("ui.nav.activity", nil), func() { c.showWindow(); c.navigate(sectionActivity, 1) }),
+		conflicts,
 		fyne.NewMenuItem(tr("main_window.tab_settings", nil), func() { c.showWindow(); c.navigate(sectionSettings, 0) }),
 		fyne.NewMenuItem(tr("ui.action.check_update", nil), c.onCheckUpdate),
 		fyne.NewMenuItemSeparator(),
 		fyne.NewMenuItem(tr("ui.tray.quit", nil), func() { c.cancel(); c.fyneApp.Quit() }),
 	)
-	c.refreshTray()
-	if trayApp, ok := c.fyneApp.(interface{ SetSystemTrayMenu(*fyne.Menu) }); ok {
-		trayApp.SetSystemTrayMenu(c.trayMenu)
+}
+
+const trayRecentMax = 5
+
+// traySignature summarises everything the menu shows; equal signatures mean
+// the system tray does not need to be touched.
+func (c *clientApp) traySignature() string {
+	var b strings.Builder
+	b.WriteString(c.trayStatusText())
+	fmt.Fprintf(&b, "|%t|%d|%s", c.isPausedNow(), len(c.confGroups), c.bandwidthSummary())
+	for index, item := range c.recent {
+		if index >= trayRecentMax {
+			break
+		}
+		b.WriteString("|" + item.Kind + item.Path)
 	}
+	return b.String()
 }
 
 func (c *clientApp) showWindow() {
@@ -56,33 +143,6 @@ func (c *clientApp) showWindow() {
 	if !c.windowVisible.Swap(true) {
 		go c.pollMetrics() // fresh numbers when the window reopens
 	}
-}
-
-// pauseMenu offers bounded pauses (like the dialog) plus resume.
-func (c *clientApp) pauseMenu() *fyne.Menu {
-	items := []*fyne.MenuItem{}
-	for _, preset := range pausePresets() {
-		if preset.seconds == 0 {
-			continue
-		}
-		seconds := preset.seconds
-		label := preset.label
-		items = append(items, fyne.NewMenuItem(label, func() { c.pauseFor(seconds, label) }))
-	}
-	items = append(items,
-		fyne.NewMenuItem(tr("ui.tray.pause_tomorrow", nil), func() {
-			now := time.Now()
-			tomorrow := time.Date(now.Year(), now.Month(), now.Day()+1, 8, 0, 0, 0, now.Location())
-			c.pauseFor(int64(tomorrow.Sub(now).Seconds()), tr("ui.tray.pause_tomorrow", nil))
-		}),
-		fyne.NewMenuItemSeparator(),
-		fyne.NewMenuItem(tr("status.resume_btn", nil), func() {
-			if c.runner.IsPaused() || c.pausedForNow() {
-				c.onPause()
-			}
-		}),
-	)
-	return fyne.NewMenu(tr("ui.tray.pause_menu", nil), items...)
 }
 
 // pauseFor applies a timed pause (shared by the tray and the pause dialog).
@@ -105,37 +165,31 @@ func (c *clientApp) pauseFor(seconds int64, label string) {
 	c.appendAction(tr("status.pause_btn", nil) + " · " + label)
 }
 
-// refreshTray updates the dynamic parts of the menu. Safe to call often.
+// refreshTray rebuilds the menu when its content changed. Safe to call often:
+// unchanged content costs nothing and rapid changes are coalesced.
 func (c *clientApp) refreshTray() {
 	if c.trayMenu == nil {
 		return
 	}
-	status := c.trayStatusText()
-	c.trayStatus.Label = status
-	recent := []*fyne.MenuItem{}
-	for index, item := range c.recent {
-		if index >= 8 {
-			break
+	signature := c.traySignature()
+	if signature == c.traySig {
+		return
+	}
+	if wait := trayMinInterval - time.Since(c.trayBuilt); wait > 0 {
+		if !c.trayPending {
+			c.trayPending = true
+			time.AfterFunc(wait, func() {
+				fyne.Do(func() {
+					c.trayPending = false
+					c.refreshTray()
+				})
+			})
 		}
-		name, _ := splitPath(item.Path)
-		target := item.Path
-		recent = append(recent, fyne.NewMenuItem(recentArrow(item.Kind)+" "+name, func() {
-			c.openContainingFolder(target)
-		}))
+		return
 	}
-	if len(recent) == 0 {
-		empty := fyne.NewMenuItem(tr("ui.home.recent_empty_short", nil), nil)
-		empty.Disabled = true
-		recent = append(recent, empty)
-	}
-	c.trayRecent.ChildMenu = fyne.NewMenu(tr("ui.tray.recent", nil), recent...)
-	if count := len(c.confGroups); count > 0 {
-		c.trayConflicts.Label = tr("ui.tray.conflicts", map[string]any{"count": count})
-		c.trayConflicts.Disabled = false
-	} else {
-		c.trayConflicts.Label = tr("ui.tray.no_conflicts", nil)
-		c.trayConflicts.Disabled = true
-	}
+	c.trayMenu.Items = c.buildTrayItems()
+	c.traySig = signature
+	c.trayBuilt = time.Now()
 	c.trayMenu.Refresh()
 }
 

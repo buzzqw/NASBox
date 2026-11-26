@@ -150,3 +150,19 @@ gli snapshot sono l'unica parte non ricostruibile.
 - `--chunk-fsck [--repair]`: rilegge ogni chunk e ne verifica lo SHA-256,
   controlla meta-file e snapshot; con `--repair` rimuove solo ciò che si
   ricostruisce (mai gli snapshot). Esce con codice 2 se restano problemi.
+
+## Web UI di consultazione e caricamento
+
+`--web [INDIRIZZO]` (o `WEB_LISTEN` nel demone). Pagina unica in `webui.go`,
+API in `web.go` e `webapp.go`: `/api/browse`, `/api/search`, `/api/versions`,
+`/api/download` (con `inline=1` solo per immagini, PDF, audio, video e testo),
+`/api/upload` (POST multipart), `/api/info`.
+
+- Senza `WEB_PASSWORD`: sola lettura, solo loopback. Con password: Basic auth,
+  blocco per indirizzo dopo 5 errori in 10 minuti, header `X-NASBox-Web: 1` e
+  Origin uguale all'host sulle scritture.
+- L'upload scrive i byte nel chunk store, prende il lease globale come device
+  `web` e chiama `publishChunkRecords(..., "create")`: journal, manifest e intent
+  di recovery come per un client. Un nome già presente diventa `nome (1).ext`.
+- I nomi con tab, newline o caratteri di controllo sono rifiutati (romperebbero
+  journal e manifest TSV).

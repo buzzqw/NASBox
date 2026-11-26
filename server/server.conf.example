@@ -57,3 +57,17 @@ STATE_TEMP_MAX_AGE_HOURS=24 # remove stale temporary files after N hours (0 = ke
 # instead of the fixed 8 that used to thrash a small CPU and a single disk.
 # Set it only to force a value (1..64).
 # FILE_STATES_PARALLELISM=
+
+# --- Web UI (consultazione e caricamento da browser) ---
+# Il demone la avvia da solo se WEB_LISTEN è impostato; "--web [indirizzo]" la
+# avvia a mano. Senza WEB_PASSWORD è di sola lettura e ascolta solo su loopback:
+# per ascoltare sulla LAN o fuori casa la password è obbligatoria, e per l'uso
+# fuori casa servono HTTPS (WEB_TLS_*) o, meglio, un reverse proxy / VPN.
+# I caricamenti passano dal journal come quelli dei PC e non sovrascrivono mai
+# un file esistente ("nota (1).txt").
+# WEB_LISTEN=0.0.0.0:8080
+# WEB_USER=andrea
+# WEB_PASSWORD=scegli-una-password-lunga
+# WEB_MAX_UPLOAD_MB=4096          # dimensione massima per richiesta
+# WEB_TLS_CERT=/percorso/cert.pem
+# WEB_TLS_KEY=/percorso/chiave.pem

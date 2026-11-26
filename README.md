@@ -51,6 +51,12 @@ compatibility fallback for older installations.
   monitor, devices, storage and counters live behind "Advanced tools" in the
   sidebar. Also live transfers (file, speed, ETA), "Check system" diagnostics,
   timed tray pauses and selective sync of NAS folders.
+- **Web UI** (served by the NAS daemon, `WEB_LISTEN`): browse, search, preview,
+  download and upload from any browser, including versions of a file. Uploads
+  go through the same transactional publish as the PCs, so every device receives
+  them. Read-only without a password; writes need `WEB_PASSWORD`.
+- Tray menu with recent files, timed pauses and a one-click bandwidth limit
+  (also on the Home screen).
 - Server maintenance: `--chunk-gc` (garbage collection of unreferenced chunks,
   24 h grace) and `--chunk-fsck [--repair]` (SHA-256 verification of the chunk
   store).

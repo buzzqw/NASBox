@@ -266,14 +266,15 @@ type clientApp struct {
 	recentFlushing bool
 	serverVersion  string
 
-	trayMenu      *fyne.Menu
-	trayStatus    *fyne.MenuItem
-	trayRecent    *fyne.MenuItem
-	trayConflicts *fyne.MenuItem
-	trayPause     *fyne.MenuItem
-	notifyMu      sync.Mutex
-	lastNotify    map[string]time.Time
-	syncNotify    *syncNotifier
+	trayMenu          *fyne.Menu
+	traySig           string
+	trayBuilt         time.Time
+	trayPending       bool
+	bandwidthSelect   *widget.Select
+	bandwidthUpdating bool
+	notifyMu          sync.Mutex
+	lastNotify        map[string]time.Time
+	syncNotify        *syncNotifier
 
 	emblemMu    sync.Mutex
 	markedFiles map[string]bool

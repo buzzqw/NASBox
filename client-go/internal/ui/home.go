@@ -80,6 +80,7 @@ func (c *clientApp) statusView() fyne.CanvasObject {
 		c.buildTransferCard(),
 		stats,
 		columns,
+		c.bandwidthRow(),
 		toolsTitle,
 		more,
 	)

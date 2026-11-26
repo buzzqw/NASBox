@@ -4,6 +4,27 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+Web UI e tray:
+- **Web UI di consultazione e caricamento** (server): pagina unica, chiara/scura,
+  adatta al telefono. Sfoglia le cartelle, cerca per nome, anteprima di immagini,
+  PDF, audio, video e testo, scarica file e versioni precedenti, carica file con
+  trascinamento. Un caricamento passa dal publish transazionale sotto lo stesso
+  lease dei PC (device `web`): finisce nel journal e nel manifest, quindi arriva
+  agli altri PC, e non sovrascrive mai un file esistente (`nota (1).txt`).
+  Sicurezza: senza `WEB_PASSWORD` è di sola lettura e `--web` rifiuta di ascoltare
+  fuori da loopback; le scritture richiedono password, header `X-NASBox-Web` e
+  Origin coerente (anti-CSRF); blocco dopo 5 password errate; HTML/SVG dell'utente
+  non sono mai mostrati inline; TLS con `WEB_TLS_CERT`/`WEB_TLS_KEY`. Chiavi in
+  `server/server.conf.example`.
+- **Tray**: «File recenti» e «Pausa» erano vuoti su XFCE (e altri desktop) perché
+  usavano sottomenu. Il menu ora è piatto, mostra gli ultimi 5 file, le pause
+  (15 min, 1 ora, 4 ore, fino a domani, finché non riprendo) e «Riprendi». Si
+  ricostruisce solo quando cambia qualcosa, al massimo ogni 2 secondi.
+- **Limite di banda** a portata di mano: voce «Velocità massima» nella tray (con
+  spunta sul limite attivo) e nella Home (Illimitata, 256 KB/s … 10 MB/s, valore
+  libero). Vale per caricamenti e scaricamenti ed è immediato; i tre campi
+  separati restano nelle impostazioni avanzate.
+
 Interfaccia più semplice (feedback: «la GUI è complessa, un utente si perde»):
 - **Vista semplice di default**: barra laterale con Stato, File, Impostazioni.
   Attività (coda, log) e NAS (monitor, dispositivi, storage) stanno sotto
