@@ -257,6 +257,8 @@ func Dispatch(ctx *Context, verb string, args []string) error {
 		return cmdHistoryChunks(ctx, args)
 	case "--file-publish":
 		return cmdFilePublish(ctx, args)
+	case "--file-publish-batch":
+		return cmdFilePublishBatch(ctx, args)
 	case "--init-repository":
 		return cmdInitRepository(ctx)
 	case "--journal-append":

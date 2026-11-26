@@ -127,7 +127,8 @@ func (t *Chunks) UploadStaged(_ []string, device string, files []remote.StagedFi
 	}
 	txID := "chunk-stage-" + time.Now().UTC().Format("20060102-150405-000000")
 	runTS := remote.RunTimestamp()
-	for index, file := range files {
+	batch := make([]remote.ChunkPublishFile, 0, len(files))
+	for _, file := range files {
 		digest, size, mtime, chunks, err := t.upload(file.Path)
 		if err != nil {
 			return fmt.Errorf("chunk upload %s: %w", file.Path, err)
@@ -135,10 +136,15 @@ func (t *Chunks) UploadStaged(_ []string, device string, files []remote.StagedFi
 		if file.Digest != "" && digest != file.Digest {
 			return fmt.Errorf("file locale cambiato durante il caricamento: %s", file.Path)
 		}
-		fileTxID := fmt.Sprintf("%s-%d", txID, index)
-		if err := t.client.FilePublish(file.Path, digest, size, mtime, file.Causal, chunks, device, fileTxID, runTS); err != nil {
-			return err
-		}
+		batch = append(batch, remote.ChunkPublishFile{
+			Path: file.Path, Digest: digest, Causal: file.Causal,
+			Size: size, MTimeNS: mtime, Chunks: chunks,
+		})
+	}
+	if err := t.client.FilePublishBatch(device, txID, runTS, batch, true); err != nil {
+		return err
+	}
+	for _, file := range batch {
 		t.emitFile(true, file.Path)
 	}
 	return nil
@@ -180,7 +186,8 @@ func (t *Chunks) UploadReplace(files []remote.ReplaceFile, device, repositoryID,
 		return result, err
 	}
 	txID := "chunk-replace-" + runTS
-	for index, file := range ready {
+	batch := make([]remote.ChunkPublishFile, 0, len(ready))
+	for _, file := range ready {
 		digest, size, mtime, chunks, err := t.upload(file.Path)
 		if err != nil {
 			return result, fmt.Errorf("chunk upload %s: %w", file.Path, err)
@@ -189,10 +196,18 @@ func (t *Chunks) UploadReplace(files []remote.ReplaceFile, device, repositoryID,
 			result.Stale = append(result.Stale, file.Path)
 			continue
 		}
-		if err := t.client.FilePublishOwned(file.Path, digest, size, mtime, file.Causal, chunks, device, fmt.Sprintf("%s-%d", txID, index), runTS); err != nil {
+		batch = append(batch, remote.ChunkPublishFile{
+			Path: file.Path, Digest: digest, Causal: file.Causal,
+			Size: size, MTimeNS: mtime, Chunks: chunks,
+		})
+	}
+	if len(batch) > 0 {
+		if err := t.client.FilePublishBatch(device, txID, runTS, batch, false); err != nil {
 			return result, err
 		}
-		t.emitFile(true, file.Path)
+		for _, file := range batch {
+			t.emitFile(true, file.Path)
+		}
 	}
 	if len(ready) > 0 {
 		after, err := nas.FileStatesCurrent(pathsWant)

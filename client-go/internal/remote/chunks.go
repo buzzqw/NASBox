@@ -148,6 +148,52 @@ func parseFileChunksOutput(output []byte) (FileChunks, error) {
 	return result, nil
 }
 
+// ChunkPublishFile is one entry of a batched journaled publish.
+type ChunkPublishFile struct {
+	Path, Digest, Causal string
+	Size, MTimeNS        int64
+	Chunks               []string
+}
+
+// FilePublishBatch publishes many files in a single journal transaction.
+func (c *Client) FilePublishBatch(device, txid, runTS string, files []ChunkPublishFile, useLease bool) error {
+	if len(files) == 0 {
+		return nil
+	}
+	var payload bytes.Buffer
+	payload.WriteString("FILE_PUBLISH_BATCH_V1\x00")
+	payload.WriteString(strconv.Itoa(len(files)) + "\x00")
+	for _, file := range files {
+		for _, field := range []string{
+			file.Path, file.Digest, strconv.FormatInt(file.Size, 10),
+			strconv.FormatInt(file.MTimeNS, 10), file.Causal, strconv.Itoa(len(file.Chunks)),
+		} {
+			payload.WriteString(field + "\x00")
+		}
+		for _, digest := range file.Chunks {
+			payload.WriteString(digest + "\x00")
+		}
+	}
+	args := []string{c.script(), "--file-publish-batch", device, txid, runTS}
+	var (
+		output []byte
+		err    error
+	)
+	if useLease {
+		output, err = c.RunLocked(args, payload.Bytes(), device, 10*time.Minute)
+	} else {
+		output, err = c.Run(args, payload.Bytes(), 10*time.Minute)
+	}
+	if err != nil {
+		return err
+	}
+	fields := bytes.Split(output, []byte{0})
+	if len(fields) < 3 || string(fields[0]) != "FILE_PUBLISH_BATCH_V1" || string(fields[1]) != "OK" {
+		return fmt.Errorf("pubblicazione batch fallita: %s", strings.TrimSpace(string(output)))
+	}
+	return nil
+}
+
 // FilePublish assembles a file from chunks on the NAS and records it in the
 // journal under the caller's lease.
 func (c *Client) FilePublish(

@@ -4,6 +4,17 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 1.15.2 - 2026-11-26
+
+Client e server Go:
+
+- **Publishing in batch**: più file vengono pubblicati in una sola transazione
+  journal (`FILE_PUBLISH_BATCH_V1`), con rollback di tutti gli spostamenti in
+  caso di errore. Molto meno journal e una sola revisione per batch.
+- **Web UI utilizzabile**: storico versioni, download di file e versioni via
+  `/api/download`, autenticazione Basic opzionale (`WEB_USER`/`WEB_PASSWORD`)
+  e avvio automatico nel demone con `WEB_LISTEN`.
+
 ## 1.15.1 - 2026-11-26
 
 Client Go:

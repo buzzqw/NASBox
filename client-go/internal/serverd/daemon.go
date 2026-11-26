@@ -52,6 +52,14 @@ func cmdDaemonForeground(ctx *Context) error {
 	}
 	defer os.Remove(ctx.pidPath())
 
+	if listen := value(ctx.Config, "WEB_LISTEN", ""); listen != "" {
+		go func() {
+			if err := cmdWeb(ctx, []string{listen}); err != nil {
+				fmt.Fprintln(os.Stderr, "web UI:", err)
+			}
+		}()
+	}
+
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
 	defer signal.Stop(signals)

@@ -24,7 +24,10 @@ table{border-collapse:collapse;width:100%}td,th{text-align:left;padding:.25rem .
 <div class="card"><h2>Stato</h2><table id="status"></table></div>
 <div class="card"><h2>API</h2>
 <p><a href="/api/status">/api/status</a> · <a href="/api/metrics">/api/metrics</a> ·
-<a href="/api/browse?path=">/api/browse</a> · <a href="/api/chunks">/api/chunks</a></p>
+<a href="/api/browse?path=">/api/browse</a> · <a href="/api/history">/api/history</a> ·
+<a href="/api/chunks">/api/chunks</a></p>
+<p>Per scaricare un file: <code>/api/download?path=cartella/file.txt</code>.
+Per una versione: <code>/api/download?path=.sync-trash/cartella/file.txt-2026-11-26--10-00-00-000000Z</code>.</p>
 </div>
 <div class="card"><h2>Note</h2><p>Questa UI è servita dallo stesso binario del demone.
 Di default ascolta solo su <code>127.0.0.1</code>: passa un indirizzo diverso
@@ -39,6 +42,23 @@ load();
 func writeJSON(w http.ResponseWriter, value any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	_ = json.NewEncoder(w).Encode(value)
+}
+
+func (c *Context) withBasicAuth(next http.Handler) http.Handler {
+	user := value(c.Config, "WEB_USER", "")
+	password := c.Config["WEB_PASSWORD"]
+	if password == "" {
+		return next
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		u, p, ok := r.BasicAuth()
+		if !ok || u != user || p != password {
+			w.Header().Set("WWW-Authenticate", `Basic realm="NASBox"`)
+			http.Error(w, "autenticazione richiesta", http.StatusUnauthorized)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func keyValues(lines []string) map[string]string {
@@ -142,6 +162,62 @@ func cmdWeb(ctx *Context, args []string) error {
 		}
 		writeJSON(w, items)
 	})
+	mux.HandleFunc("/api/history", func(w http.ResponseWriter, _ *http.Request) {
+		trash := filepath.Join(ctx.ShareRoot, ".sync-trash")
+		type row struct {
+			Original, Suffix, Path string
+			Size                   int64
+		}
+		rows := []row{}
+		_ = filepath.Walk(trash, func(path string, info os.FileInfo, err error) error {
+			if err != nil || info == nil || !info.Mode().IsRegular() {
+				return nil
+			}
+			match := historySuffix.FindStringSubmatch(info.Name())
+			if match == nil {
+				return nil
+			}
+			relative, err := filepath.Rel(trash, path)
+			if err != nil {
+				return nil
+			}
+			suffix := match[1] + match[2]
+			rows = append(rows, row{
+				Original: strings.TrimSuffix(filepath.ToSlash(relative), "-"+suffix),
+				Suffix:   suffix, Path: filepath.ToSlash(relative), Size: info.Size(),
+			})
+			return nil
+		})
+		writeJSON(w, rows)
+	})
+	mux.HandleFunc("/api/download", func(w http.ResponseWriter, r *http.Request) {
+		relative := r.URL.Query().Get("path")
+		if relative == "" || filepath.IsAbs(relative) {
+			http.Error(w, "percorso non valido", http.StatusBadRequest)
+			return
+		}
+		fromTrash := strings.HasPrefix(relative, ".sync-trash/")
+		for _, component := range strings.Split(relative, "/") {
+			if component == ".." || component == ".nasbox-staging" || component == ".sync-partial" || component == "@eaDir" {
+				http.Error(w, "percorso non valido", http.StatusBadRequest)
+				return
+			}
+		}
+		base := ctx.ShareRoot
+		if fromTrash {
+			base = filepath.Join(base, ".sync-trash")
+			relative = strings.TrimPrefix(relative, ".sync-trash/")
+		}
+		full := filepath.Join(base, filepath.FromSlash(relative))
+		info, err := os.Lstat(full)
+		if err != nil || !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
+			http.Error(w, "file non trovato", http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/octet-stream")
+		w.Header().Set("Content-Length", strconv.FormatInt(info.Size(), 10))
+		http.ServeFile(w, r, full)
+	})
 	mux.HandleFunc("/api/chunks", func(w http.ResponseWriter, _ *http.Request) {
 		store, err := ctx.chunkStore()
 		if err != nil {
@@ -162,7 +238,7 @@ func cmdWeb(ctx *Context, args []string) error {
 			"objects": objects, "bytes": bytes, "snapshots": len(snapshots), "chunk_size": ctx.ChunkSize(),
 		})
 	})
-	server := &http.Server{Addr: address, Handler: mux, ReadHeaderTimeout: 5 * time.Second}
+	server := &http.Server{Addr: address, Handler: ctx.withBasicAuth(mux), ReadHeaderTimeout: 5 * time.Second}
 	fmt.Printf("NASBox web UI in ascolto su http://%s\n", address)
 	return server.ListenAndServe()
 }
