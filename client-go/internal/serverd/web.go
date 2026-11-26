@@ -74,10 +74,11 @@ func (ctx *Context) webHandler() http.Handler {
 	mux.HandleFunc("/api/info", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, map[string]any{
 			"version": version, "writable": ctx.webWritable(),
-			"max_upload_bytes": ctx.webMaxUploadBytes(),
+			"max_upload_bytes": ctx.webMaxUploadBytes(), "can_share": ctx.webWritable(),
 		})
 	})
 	mux.HandleFunc("/api/upload", ctx.handleWebUpload)
+	mux.HandleFunc("/api/share", ctx.handleWebShare)
 	mux.HandleFunc("/api/search", ctx.handleWebSearch)
 	mux.HandleFunc("/api/versions", ctx.handleWebVersions)
 	mux.HandleFunc("/api/status", func(w http.ResponseWriter, _ *http.Request) {

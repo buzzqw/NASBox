@@ -121,7 +121,13 @@ func (c *Context) withWebAuth(next http.Handler) http.Handler {
 	user := value(c.Config, "WEB_USER", "")
 	password := c.webPassword()
 	guard := &webGuard{}
+	shareGuard := &webGuard{}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// I link pubblici non richiedono la password: il token è la credenziale.
+		if strings.HasPrefix(r.URL.Path, "/s/") {
+			c.serveSharedFile(w, r, shareGuard)
+			return
+		}
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		w.Header().Set("X-Frame-Options", "SAMEORIGIN")

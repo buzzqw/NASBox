@@ -4,6 +4,16 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+Web UI:
+- **Link di condivisione**: dal pulsante «Condividi» su un file si crea un link
+  (1, 7, 30 giorni o senza scadenza) scaricabile da chiunque senza password, e
+  «Link condivisi» li elenca, li copia e li revoca. Token casuale a 192 bit in
+  `state/share-links.json` (0600); il file è servito sempre come allegato, mai
+  inline; 404 per token sconosciuti e 429 dopo 5 tentativi falliti; un file
+  sostituito da un symlink non viene mai servito. Solo file reali (non cartelle,
+  non percorsi interni). Creare, elencare e revocare richiedono `WEB_PASSWORD`.
+  `WEB_PUBLIC_URL` imposta l'indirizzo scritto nei link (proxy o nome DNS).
+
 ## 1.17.0 - 2026-11-26
 
 Client 1.17.0 e server 3.35.0.

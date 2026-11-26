@@ -178,3 +178,10 @@ API in `web.go` e `webapp.go`: `/api/browse`, `/api/search`, `/api/versions`,
   dello stato (`state/backup/<data>/`) e un controllo del disallineamento. Le
   chiavi sono in `server/server.conf.example`.
 - `NOTIFY_URL`: webhook compatibile con ntfy. Mai nomi di file nei messaggi.
+
+## Link di condivisione
+
+`POST /api/share?path=&days=1|7|30|0`, `GET /api/share`, `DELETE /api/share?token=`
+(con password e header `X-NASBox-Web`) e `GET /s/<token>` (pubblico). Vedi
+`webshare.go`. Il link è un token casuale: senza password non si crea né si
+elenca nulla; le richieste a `/s/` con token sbagliato sono limitate per indirizzo.

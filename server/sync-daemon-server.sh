@@ -355,7 +355,7 @@ load_config() {
                 FILE_STATES_PARALLELISM="${value%%#*}"
                 FILE_STATES_PARALLELISM="${FILE_STATES_PARALLELISM//[[:space:]]/}"
                 ;;
-            WEB_LISTEN|WEB_USER|WEB_PASSWORD|WEB_MAX_UPLOAD_MB|WEB_TLS_CERT|WEB_TLS_KEY| \
+            WEB_LISTEN|WEB_USER|WEB_PASSWORD|WEB_MAX_UPLOAD_MB|WEB_TLS_CERT|WEB_TLS_KEY|WEB_PUBLIC_URL| \
             CHUNK_GC|CHUNK_GC_GRACE_HOURS|CHUNK_FSCK_DAYS|STATE_BACKUP_KEEP|AUDIT_AUTO| \
             NOTIFY_URL|NOTIFY_DISK_PERCENT|NOTIFY_MIN_HOURS)
                 : # usate solo dal demone Go: accettate per condividere server.conf

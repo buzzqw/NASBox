@@ -71,6 +71,7 @@ STATE_TEMP_MAX_AGE_HOURS=24 # remove stale temporary files after N hours (0 = ke
 # WEB_MAX_UPLOAD_MB=4096          # dimensione massima per richiesta
 # WEB_TLS_CERT=/percorso/cert.pem
 # WEB_TLS_KEY=/percorso/chiave.pem
+# WEB_PUBLIC_URL=https://nas.example.org   # indirizzo da mettere nei link di condivisione (proxy/nome)
 
 # --- Manutenzione del demone Go (passo di --run-once) ---
 # CHUNK_GC=true               GC dei chunk non più referenziati (false = spenta)

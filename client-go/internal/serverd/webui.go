@@ -41,6 +41,7 @@ dialog img,dialog video,dialog iframe{max-width:100%;max-height:70vh;display:blo
 </style></head><body>
 <header><h1>NASBox</h1>
 <input id="q" type="search" placeholder="Cerca per nome…" aria-label="Cerca">
+<button id="linksBtn" style="display:none">Link condivisi</button>
 <label id="upLabel" class="btn primary" style="display:none">Carica<input id="pick" type="file" multiple hidden></label></header>
 <main><div id="crumbs"></div><div class="card" id="list"></div>
 <p class="note" id="foot"></p></main>
@@ -50,7 +51,7 @@ dialog img,dialog video,dialog iframe{max-width:100%;max-height:70vh;display:blo
 <dialog id="dlg"><div style="display:flex;justify-content:space-between;gap:1rem"><strong id="dt"></strong><button id="dc">Chiudi</button></div><div id="db"></div></dialog>
 <script>
 (function(){
-var cwd="",writable=false,maxUp=0,mode="dir";
+var cwd="",writable=false,canShare=false,maxUp=0,mode="dir";
 var $=function(id){return document.getElementById(id)};
 function el(tag,text,cls){var e=document.createElement(tag);if(text!=null)e.textContent=text;if(cls)e.className=cls;return e}
 function fmtSize(n){n=+n;if(n<1024)return n+" B";var u=["KB","MB","GB","TB"],i=-1;do{n/=1024;i++}while(n>=1024&&i<3);return n.toFixed(n<10?1:0)+" "+u[i]}
@@ -73,7 +74,8 @@ function render(items,searching){var l=$("list");l.textContent="";
   r.appendChild(el("div",dir?"":fmtSize(it.size),"meta"));r.appendChild(el("div",fmtDate(it.mtime),"meta"));
   var a=el("div",null,"acts");
   if(!dir){var d=el("button","Scarica");d.onclick=function(){location.href="/api/download?path="+enc(full)};a.appendChild(d);
-   var v=el("button","Versioni");v.onclick=function(){versions(full)};a.appendChild(v)}
+   var v=el("button","Versioni");v.onclick=function(){versions(full)};a.appendChild(v);
+   if(canShare){var sh=el("button","Condividi");sh.onclick=function(){shareDialog(full,it.name||full)};a.appendChild(sh)}}
   r.appendChild(a);l.appendChild(r)})}
 function sortItems(a){return a.slice().sort(function(x,y){if(x.kind!==y.kind)return x.kind==="DIR"?-1:1;return x.name.toLowerCase()<y.name.toLowerCase()?-1:1})}
 function go(path){mode="dir";cwd=path;$("q").value="";crumbs();
@@ -87,6 +89,25 @@ function versions(path){api("/api/versions?path="+enc(path)).then(function(v){va
  v.forEach(function(x){var r=el("div",null,"row");r.style.gridTemplateColumns="1fr 6rem auto";r.appendChild(el("div",x.suffix.replace("--"," ").replace(/-(\d\d)-(\d\d)-(\d\d)/,":$1:$2:$3")));r.appendChild(el("div",fmtSize(x.size),"meta"));
   var d=el("button","Scarica");d.onclick=function(){location.href="/api/download?path="+enc(x.path)};r.appendChild(d);b.appendChild(r)});
  b.appendChild(el("p","Per ripristinare una versione usa l'app NASBox sul PC.","note"));$("dlg").showModal()}).catch(function(e){toast(e.message)})}
+function postJSON(url,method){return api(url,{method:method,headers:{"X-NASBox-Web":"1"}})}
+function expiryText(t){return t?"scade il "+new Date(t*1000).toLocaleDateString():"non scade"}
+function shareDialog(path,name){var b=$("db");b.textContent="";$("dt").textContent="Condividi "+name;
+ b.appendChild(el("p","Chiunque abbia il link potrà scaricare questo file. Scegli per quanto tempo:","note"));
+ var row=el("div");row.style.cssText="display:flex;gap:.5rem;flex-wrap:wrap";b.appendChild(row);
+ [["1 giorno","1"],["7 giorni","7"],["30 giorni","30"],["Senza scadenza","0"]].forEach(function(o){var x=el("button",o[0]);
+  x.onclick=function(){postJSON("/api/share?path="+enc(path)+"&days="+o[1],"POST").then(function(r){shown(r)}).catch(function(e){toast(e.message)})};row.appendChild(x)});
+ $("dlg").showModal();
+ function shown(r){b.textContent="";b.appendChild(el("p","Link creato ("+expiryText(r.expires)+"):","note"));
+  var inp=el("input");inp.value=r.url;inp.readOnly=true;inp.style.cssText="width:100%;padding:.5rem;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg)";b.appendChild(inp);inp.select();
+  var cp=el("button","Copia il link","primary");cp.style.marginTop=".6rem";cp.onclick=function(){inp.select();if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(r.url).then(function(){toast("Link copiato")},function(){document.execCommand("copy");toast("Link copiato")})}else{document.execCommand("copy");toast("Link copiato")}};b.appendChild(cp)}}
+function linksDialog(){api("/api/share").then(function(list){var b=$("db");b.textContent="";$("dt").textContent="Link condivisi";
+ if(!list.length)b.appendChild(el("p","Nessun link attivo.","note"));
+ list.forEach(function(l){var r=el("div",null,"row");r.style.gridTemplateColumns="1fr auto auto";
+  var n=el("div",l.path+" · "+expiryText(l.expires)+" · "+l.downloads+" download","name");n.title=l.url;r.appendChild(n);
+  var c=el("button","Copia");c.onclick=function(){if(navigator.clipboard)navigator.clipboard.writeText(l.url).then(function(){toast("Link copiato")})};r.appendChild(c);
+  var d=el("button","Revoca");d.onclick=function(){postJSON("/api/share?token="+enc(l.token),"DELETE").then(function(){linksDialog()}).catch(function(e){toast(e.message)})};r.appendChild(d);b.appendChild(r)});
+ $("dlg").showModal()}).catch(function(e){toast(e.message)})}
+$("linksBtn").onclick=linksDialog;
 var st;$("q").oninput=function(){clearTimeout(st);var q=this.value.trim();if(q.length<2){if(mode==="search")go(cwd);return}
  st=setTimeout(function(){mode="search";api("/api/search?q="+enc(q)).then(function(r){render(r.hits,true);$("foot").textContent=r.hits.length+" risultati"+(r.truncated?" (ricerca troncata, affina i termini)":"")}).catch(function(e){toast(e.message)})},300)};
 function upload(files){if(!writable){toast("Caricamento non abilitato sul server.");return}
@@ -104,6 +125,6 @@ window.addEventListener("dragleave",function(){depth=Math.max(0,depth-1);if(!dep
 window.addEventListener("dragover",function(e){e.preventDefault()});
 window.addEventListener("drop",function(e){e.preventDefault();depth=0;$("drop").style.display="none";if(e.dataTransfer&&e.dataTransfer.files.length)upload(e.dataTransfer.files)});
 $("dc").onclick=function(){$("dlg").close();$("db").textContent=""};$("dlg").addEventListener("close",function(){$("db").textContent=""});
-api("/api/info").then(function(i){writable=!!i.writable;maxUp=i.max_upload_bytes||0;if(writable)$("upLabel").style.display="";else $("foot").textContent="Sola lettura (imposta WEB_PASSWORD per caricare file).";go("")}).catch(function(e){toast(e.message);go("")});
+api("/api/info").then(function(i){writable=!!i.writable;canShare=!!i.can_share;maxUp=i.max_upload_bytes||0;if(canShare)$("linksBtn").style.display="";if(writable)$("upLabel").style.display="";else $("foot").textContent="Sola lettura (imposta WEB_PASSWORD per caricare file).";go("")}).catch(function(e){toast(e.message);go("")});
 })();
 </script></body></html>`
