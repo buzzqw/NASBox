@@ -4,6 +4,10 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 1.20.1 - 2026-11-26
+
+Client 1.20.1 e server 3.36.0.
+
 Documentazione:
 - **README e manuale riscritti, in inglese**: il README è una guida per chi usa
   NASBox (cosa fa, avvio rapido, uso quotidiano, sicurezza) e `MANUAL.md` sostituisce
