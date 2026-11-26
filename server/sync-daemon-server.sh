@@ -355,6 +355,9 @@ load_config() {
                 FILE_STATES_PARALLELISM="${value%%#*}"
                 FILE_STATES_PARALLELISM="${FILE_STATES_PARALLELISM//[[:space:]]/}"
                 ;;
+            WEB_LISTEN|WEB_USER|WEB_PASSWORD|WEB_MAX_UPLOAD_MB|WEB_TLS_CERT|WEB_TLS_KEY)
+                : # usate solo dal demone Go (UI web): accettate per condividere server.conf
+                ;;
             *) log ERROR "Chiave non supportata in $CONFIG_FILE: $key"; exit 1 ;;
         esac
     done < "$CONFIG_FILE"
