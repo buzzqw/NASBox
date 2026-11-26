@@ -99,6 +99,30 @@ func Open(opts Options) (*Context, error) {
 
 func (c *Context) Close() {}
 
+// ensureJournalFiles mirrors the bash daemon's prelude: every verb except
+// --metrics/--devices/--wait-for-revision creates the three state files.
+func (c *Context) ensureJournalFiles() error {
+	p := c.paths()
+	if err := os.MkdirAll(p.Dir, 0o700); err != nil {
+		return err
+	}
+	files := map[string]string{
+		p.Journal:  "NASBOX_JOURNAL_V1\n",
+		p.Manifest: "NASBOX_MANIFEST_V1\n",
+		p.Revision: "0\n",
+	}
+	for path, content := range files {
+		if _, err := os.Stat(path); os.IsNotExist(err) {
+			if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+				return err
+			}
+		} else if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func value(cfg map[string]string, key, fallback string) string {
 	if v, ok := cfg[key]; ok && v != "" {
 		return v
@@ -152,6 +176,13 @@ func stripInlineComment(value string) string {
 // Dispatch routes a verb to its implementation.
 func Dispatch(ctx *Context, verb string, args []string) error {
 	switch verb {
+	case "--metrics", "--devices", "--help", "-h", "--version", "--wait-for-revision":
+	default:
+		if err := ctx.ensureJournalFiles(); err != nil {
+			return err
+		}
+	}
+	switch verb {
 	case "--help", "-h":
 		return Usage()
 	case "--version":
@@ -197,6 +228,22 @@ func Dispatch(ctx *Context, verb string, args []string) error {
 		return cmdChunkSnapshotList(ctx)
 	case "--chunk-restore":
 		return cmdChunkRestore(ctx, args)
+	case "--init-repository":
+		return cmdInitRepository(ctx)
+	case "--journal-append":
+		return cmdJournalAppend(ctx)
+	case "--staging-publish":
+		return cmdStagingPublish(ctx)
+	case "--transfer-wait":
+		return cmdTransferWait(ctx)
+	case "--checked-delete":
+		return cmdCheckedDelete(ctx)
+	case "--browse-rename":
+		return cmdBrowseRename(ctx)
+	case "--browse-delete":
+		return cmdBrowseDelete(ctx)
+	case "--run-once":
+		return cmdRunOnce(ctx)
 	default:
 		return fmt.Errorf("verbo %q non ancora implementato nella milestone 0", verb)
 	}

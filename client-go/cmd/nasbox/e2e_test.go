@@ -84,16 +84,34 @@ func newE2ENAS(t *testing.T) *e2eNAS {
 			t.Fatal(err)
 		}
 	}
-	content, err := os.ReadFile(source)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(n.script, content, 0o755); err != nil {
-		t.Fatal(err)
-	}
 	conf := "SHARE_ROOT=" + n.share + "\nRETENTION_DAYS=30\n"
-	if err := os.WriteFile(filepath.Join(filepath.Dir(n.script), "server.conf"), []byte(conf), 0o644); err != nil {
+	confPath := filepath.Join(filepath.Dir(n.script), "server.conf")
+	if err := os.WriteFile(confPath, []byte(conf), 0o644); err != nil {
 		t.Fatal(err)
+	}
+	if alternate := os.Getenv("NASBOX_E2E_SERVER"); alternate != "" {
+		// Wrapper: the Go daemon needs -c FILE, while the client (and fakeSSH)
+		// invoke the script path with the verb only.
+		bin := filepath.Join(filepath.Dir(n.script), "nasbox-server-bin")
+		content, err := os.ReadFile(alternate)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(bin, content, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		wrapper := "#!/bin/sh\nexec " + bin + " -c " + confPath + " \"$@\"\n"
+		if err := os.WriteFile(n.script, []byte(wrapper), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	} else {
+		content, err := os.ReadFile(source)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(n.script, content, 0o755); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if err := os.WriteFile(filepath.Join(n.bin, "ssh"), []byte(fakeSSH), 0o755); err != nil {
 		t.Fatal(err)
