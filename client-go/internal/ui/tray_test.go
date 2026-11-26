@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"fyne.io/fyne/v2"
+
+	"nasbox-go/internal/conflicts"
 )
 
 func trayLabels(items []*fyne.MenuItem) []string {
@@ -37,13 +39,16 @@ func findAction(items []*fyne.MenuItem, fragment string) *fyne.MenuItem {
 	return nil
 }
 
-func TestTrayMenuIsFlatAndShowsRecentPauseAndBandwidth(t *testing.T) {
+func TestTrayMenuIsFlatCompactAndDeduplicated(t *testing.T) {
 	c := newTestClient(t)
+	now := time.Now()
 	c.recent = []recentItem{
-		{Path: "Documenti/preventivo.txt", Kind: "up", At: time.Now()},
-		{Path: "Foto/mare.jpg", Kind: "down", At: time.Now()},
+		{Path: "Documenti/preventivo.txt", Kind: "up", At: now},
+		{Path: "Documenti/preventivo.txt", Kind: "up", At: now}, // stesso file due volte
+		{Path: "Foto/mare.jpg", Kind: "down", At: now},
+		{Path: "Musica/a.mp3", Kind: "up", At: now},
+		{Path: "Musica/b.mp3", Kind: "up", At: now},
 	}
-	c.setBandwidth(1024)
 	items := c.buildTrayItems()
 
 	for _, item := range items {
@@ -51,34 +56,81 @@ func TestTrayMenuIsFlatAndShowsRecentPauseAndBandwidth(t *testing.T) {
 			t.Fatalf("il menu della tray deve essere piatto (sottomenu vuoti su XFCE): %q", item.Label)
 		}
 	}
-	for _, want := range []string{"preventivo.txt", "mare.jpg", "15 minuti", "1 ora", "4 ore", "512 KB/s", "5 MB/s"} {
-		if findItem(items, want) == nil {
-			t.Fatalf("voce %q assente dalla tray: %v", want, trayLabels(items))
+	if n := len(trayLabels(items)); n > 17 {
+		t.Fatalf("menu troppo lungo: %d voci %v", n, trayLabels(items))
+	}
+	count := 0
+	for _, item := range items {
+		if strings.Contains(item.Label, "preventivo.txt") {
+			count++
 		}
 	}
-	if checked := findAction(items, "1 MB/s"); checked == nil || !checked.Checked {
-		t.Fatal("il limite attivo (1 MB/s) deve essere spuntato")
+	if count != 1 {
+		t.Fatalf("un file compare una sola volta, trovato %d", count)
 	}
-	if other := findAction(items, "512 KB/s"); other == nil || other.Checked {
-		t.Fatal("gli altri limiti non devono essere spuntati")
+	for _, want := range []string{"mare.jpg", "a.mp3", "1 ora", "domani", "Altre pause", "Altri limiti"} {
+		if findItem(items, want) == nil {
+			t.Fatalf("voce %q assente: %v", want, trayLabels(items))
+		}
 	}
-	if findItem(items, "Nessun file recente") != nil {
-		t.Fatal("con file recenti non va mostrato il segnaposto")
+	if findItem(items, "b.mp3") != nil {
+		t.Fatal("al massimo 3 file recenti")
+	}
+	for _, unwanted := range []string{"Nessun conflitto", "aggiornamenti", "Cerca un file"} {
+		if findItem(items, unwanted) != nil {
+			t.Fatalf("la voce %q non serve nel menu compatto", unwanted)
+		}
 	}
 }
 
-func TestTrayRecentPlaceholderAndResumeWhenPaused(t *testing.T) {
+func TestTrayBandwidthSwitchTogglesAndRemembersLastLimit(t *testing.T) {
+	c := newTestClient(t)
+	toggle := findAction(c.buildTrayItems(), "Limita velocità a 1 MB/s")
+	if toggle == nil || toggle.Checked {
+		t.Fatal("senza limite l'interruttore propone 1 MB/s ed è spento")
+	}
+	toggle.Action()
+	if got := c.cfg.Int(keyBandwidthTotal); got != 1024 {
+		t.Fatalf("limite applicato = %d", got)
+	}
+	limited := findAction(c.buildTrayItems(), "Velocità limitata")
+	if limited == nil || !limited.Checked {
+		t.Fatal("con un limite attivo la voce è spuntata")
+	}
+	limited.Action()
+	if c.cfg.Int(keyBandwidthTotal) != 0 {
+		t.Fatal("un secondo clic toglie il limite")
+	}
+	c.setBandwidth(5120) // scelta fatta altrove (Home o dialogo)
+	c.setBandwidth(0)
+	if findAction(c.buildTrayItems(), "Limita velocità a 5 MB/s") == nil {
+		t.Fatal("l'interruttore deve ricordare l'ultimo limite scelto")
+	}
+}
+
+func TestTrayShowsConflictsOnlyWhenThereAreSome(t *testing.T) {
+	c := newTestClient(t)
+	if findItem(c.buildTrayItems(), "onflitt") != nil {
+		t.Fatal("senza conflitti la voce non compare")
+	}
+	c.confGroups = []conflicts.Group{{Original: "a.txt"}}
+	if findItem(c.buildTrayItems(), "onflitt") == nil {
+		t.Fatal("con un conflitto la voce compare")
+	}
+}
+
+func TestTrayRecentPlaceholderlessAndResumeWhenPaused(t *testing.T) {
 	c := newTestClient(t)
 	c.recent = nil
-	if findItem(c.buildTrayItems(), "Nessun file recente") == nil {
-		t.Fatal("senza file recenti serve il segnaposto")
+	if findItem(c.buildTrayItems(), "recenti") != nil {
+		t.Fatal("senza file recenti l'intera sezione sparisce")
 	}
 	c.runner.SetPaused(true)
 	items := c.buildTrayItems()
 	if findItem(items, "Riprendi") == nil && findItem(items, "Resume") == nil {
 		t.Fatalf("in pausa la tray deve offrire di riprendere: %v", trayLabels(items))
 	}
-	if findItem(items, "15 minuti") != nil {
+	if findItem(items, "1 ora") != nil {
 		t.Fatal("in pausa non si offrono nuove pause")
 	}
 }

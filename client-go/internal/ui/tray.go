@@ -36,8 +36,10 @@ func disabledItem(label string) *fyne.MenuItem {
 
 func (c *clientApp) isPausedNow() bool { return c.runner.IsPaused() || c.pausedForNow() }
 
-// buildTrayItems lists the whole menu: state, daily actions, recent files,
-// pause, bandwidth limit, conflicts and the app entries.
+// buildTrayItems lists the menu. It is kept short on purpose (a tray menu is
+// glanced at, not studied): state, window and folder, the last few files, sync,
+// the two most useful pauses, one bandwidth switch, conflicts only when there
+// are some, settings and quit. Rarer choices open a dialog in the main window.
 func (c *clientApp) buildTrayItems() []*fyne.MenuItem {
 	items := []*fyne.MenuItem{
 		disabledItem(c.trayStatusText()),
@@ -48,76 +50,85 @@ func (c *clientApp) buildTrayItems() []*fyne.MenuItem {
 				_ = osx.Open(root)
 			}
 		}),
-		fyne.NewMenuItem(lt("Cerca un file…", "Search a file…"), func() { c.showWindow(); c.focusSearch() }),
-		fyne.NewMenuItemSeparator(),
-		disabledItem(tr("ui.tray.recent", nil)),
 	}
-	shown := 0
-	for _, item := range c.recent {
-		if shown >= trayRecentMax {
-			break
+	if recent := c.trayRecentItems(); len(recent) > 0 {
+		items = append(items, fyne.NewMenuItemSeparator(), disabledItem(tr("ui.tray.recent", nil)))
+		for _, item := range recent {
+			name, _ := splitPath(item.Path)
+			target := item.Path
+			items = append(items, fyne.NewMenuItem("   "+recentArrow(item.Kind)+" "+name, func() {
+				c.openContainingFolder(target)
+			}))
 		}
-		name, _ := splitPath(item.Path)
-		target := item.Path
-		items = append(items, fyne.NewMenuItem("   "+recentArrow(item.Kind)+" "+name, func() {
-			c.openContainingFolder(target)
-		}))
-		shown++
-	}
-	if shown == 0 {
-		items = append(items, disabledItem("   "+tr("ui.home.recent_empty_short", nil)))
 	}
 	items = append(items, fyne.NewMenuItemSeparator(), fyne.NewMenuItem(tr("ui.tray.sync", nil), c.onSync))
 
 	if c.isPausedNow() {
 		items = append(items, fyne.NewMenuItem("▶ "+tr("status.resume_btn", nil), c.onPause))
 	} else {
-		items = append(items, disabledItem(tr("ui.tray.pause_menu", nil)+":"))
-		for _, preset := range pausePresets() {
-			if preset.seconds != 15*60 && preset.seconds != 60*60 && preset.seconds != 4*60*60 {
-				continue
-			}
-			seconds, label := preset.seconds, preset.label
-			items = append(items, fyne.NewMenuItem("   ⏸ "+label, func() { c.pauseFor(seconds, label) }))
-		}
+		hourLabel := lt("1 ora", "1 hour")
 		items = append(items,
-			fyne.NewMenuItem("   ⏸ "+tr("ui.tray.pause_tomorrow", nil), func() {
+			fyne.NewMenuItem("⏸ "+lt("Pausa ", "Pause ")+hourLabel, func() { c.pauseFor(3600, hourLabel) }),
+			fyne.NewMenuItem("⏸ "+tr("ui.tray.pause_tomorrow", nil), func() {
 				now := time.Now()
 				tomorrow := time.Date(now.Year(), now.Month(), now.Day()+1, 8, 0, 0, 0, now.Location())
 				c.pauseFor(int64(tomorrow.Sub(now).Seconds()), tr("ui.tray.pause_tomorrow", nil))
 			}),
-			fyne.NewMenuItem("   ⏸ "+lt("Finché non riprendo", "Until I resume"), c.onPause),
+			fyne.NewMenuItem(lt("Altre pause…", "More pauses…"), func() { c.showWindow(); c.showPauseDialog() }),
 		)
 	}
 
+	// One switch for the speed limit: ticked = limited. "More limits…" opens the
+	// full list in the window.
 	current, uniform := c.currentBandwidth()
-	header := lt("Velocità massima", "Maximum speed") + ": " + c.bandwidthSummary()
-	items = append(items, fyne.NewMenuItemSeparator(), disabledItem(header))
-	for _, preset := range trayBandwidthPresets() {
-		kbps := preset.kbps
-		item := fyne.NewMenuItem("   "+preset.label, func() { c.setBandwidth(kbps) })
-		item.Checked = uniform && current == kbps
-		items = append(items, item)
+	quick := c.quickBandwidth()
+	limited := !uniform || current > 0
+	label := lt("Limita velocità a ", "Limit speed to ") + formatKbps(quick)
+	if limited {
+		label = lt("Velocità limitata: ", "Speed limited: ") + c.bandwidthSummary()
 	}
+	toggle := fyne.NewMenuItem(label, func() {
+		if limited {
+			c.setBandwidth(0)
+		} else {
+			c.setBandwidth(quick)
+		}
+	})
+	toggle.Checked = limited
+	items = append(items, fyne.NewMenuItemSeparator(), toggle,
+		fyne.NewMenuItem(lt("Altri limiti…", "More limits…"), func() { c.showWindow(); c.showBandwidthDialog() }))
 
-	conflicts := fyne.NewMenuItem(tr("ui.tray.no_conflicts", nil), nil)
 	if count := len(c.confGroups); count > 0 {
-		conflicts = fyne.NewMenuItem(tr("ui.tray.conflicts", map[string]any{"count": count}),
-			func() { c.showWindow(); c.navigate(sectionFiles, 1) })
-	} else {
-		conflicts.Disabled = true
+		items = append(items, fyne.NewMenuItemSeparator(),
+			fyne.NewMenuItem("⚠ "+tr("ui.tray.conflicts", map[string]any{"count": count}),
+				func() { c.showWindow(); c.navigate(sectionFiles, 1) }))
 	}
 	return append(items,
 		fyne.NewMenuItemSeparator(),
-		conflicts,
 		fyne.NewMenuItem(tr("main_window.tab_settings", nil), func() { c.showWindow(); c.navigate(sectionSettings, 0) }),
-		fyne.NewMenuItem(tr("ui.action.check_update", nil), c.onCheckUpdate),
-		fyne.NewMenuItemSeparator(),
 		fyne.NewMenuItem(tr("ui.tray.quit", nil), func() { c.cancel(); c.fyneApp.Quit() }),
 	)
 }
 
-const trayRecentMax = 5
+// trayRecentItems returns the last few files, one entry per path (the same file
+// can appear several times in the activity list).
+func (c *clientApp) trayRecentItems() []recentItem {
+	seen := map[string]bool{}
+	out := make([]recentItem, 0, trayRecentMax)
+	for _, item := range c.recent {
+		if seen[item.Path] {
+			continue
+		}
+		seen[item.Path] = true
+		out = append(out, item)
+		if len(out) >= trayRecentMax {
+			break
+		}
+	}
+	return out
+}
+
+const trayRecentMax = 3
 
 // traySignature summarises everything the menu shows; equal signatures mean
 // the system tray does not need to be touched.
@@ -125,12 +136,10 @@ func (c *clientApp) traySignature() string {
 	var b strings.Builder
 	b.WriteString(c.trayStatusText())
 	fmt.Fprintf(&b, "|%t|%d|%s", c.isPausedNow(), len(c.confGroups), c.bandwidthSummary())
-	for index, item := range c.recent {
-		if index >= trayRecentMax {
-			break
-		}
+	for _, item := range c.trayRecentItems() {
 		b.WriteString("|" + item.Kind + item.Path)
 	}
+	fmt.Fprintf(&b, "|%d", c.quickBandwidth())
 	return b.String()
 }
 

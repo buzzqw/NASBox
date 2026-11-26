@@ -19,7 +19,17 @@ const (
 	keyBandwidthTotal    = "bandwidth_kbps"
 	keyBandwidthUpload   = "bandwidth_upload_kbps"
 	keyBandwidthDownload = "bandwidth_download_kbps"
+	keyBandwidthQuick    = "bandwidth_quick_kbps"
 )
+
+// quickBandwidth is the limit the tray switch applies: the last one chosen,
+// 1 MB/s the first time.
+func (c *clientApp) quickBandwidth() int {
+	if kbps := c.cfg.Int(keyBandwidthQuick); kbps > 0 {
+		return kbps
+	}
+	return 1024
+}
 
 type bandwidthPreset struct {
 	label string
@@ -35,16 +45,6 @@ func bandwidthPresets() []bandwidthPreset {
 		{"2 MB/s", 2048},
 		{"5 MB/s", 5120},
 		{"10 MB/s", 10240},
-	}
-}
-
-// trayBandwidthPresets is the short list for the tray menu.
-func trayBandwidthPresets() []bandwidthPreset {
-	return []bandwidthPreset{
-		{lt("Illimitata", "Unlimited"), 0},
-		{"512 KB/s", 512},
-		{"1 MB/s", 1024},
-		{"5 MB/s", 5120},
 	}
 }
 
@@ -88,6 +88,9 @@ func (c *clientApp) bandwidthSummary() string {
 func (c *clientApp) setBandwidth(kbps int) {
 	if kbps < 0 {
 		kbps = 0
+	}
+	if kbps > 0 {
+		_ = c.cfg.Set(keyBandwidthQuick, kbps, false) // what the tray switch applies next time
 	}
 	_ = c.cfg.Set(keyBandwidthTotal, kbps, false)
 	_ = c.cfg.Set(keyBandwidthUpload, kbps, false)
@@ -181,4 +184,43 @@ func (c *clientApp) askBandwidth() {
 			c.setBandwidth(value)
 		}, c.window)
 	form.Show()
+}
+
+// showBandwidthDialog lists every preset (and a custom value) in one dialog.
+func (c *clientApp) showBandwidthDialog() {
+	presets := bandwidthPresets()
+	labels := make([]string, 0, len(presets)+1)
+	for _, preset := range presets {
+		labels = append(labels, preset.label)
+	}
+	other := lt("Altro valore…", "Other value…")
+	labels = append(labels, other)
+	choice := widget.NewSelect(labels, nil)
+	if kbps, uniform := c.currentBandwidth(); uniform {
+		for _, preset := range presets {
+			if preset.kbps == kbps {
+				choice.SetSelected(preset.label)
+			}
+		}
+	}
+	content := container.NewVBox(
+		widget.NewLabel(lt("Velocità massima per caricamenti e scaricamenti:", "Maximum speed for uploads and downloads:")),
+		choice,
+	)
+	dialog.ShowCustomConfirm(lt("Velocità massima", "Maximum speed"), lt("Imposta", "Set"), lt("Annulla", "Cancel"),
+		content, func(ok bool) {
+			if !ok {
+				return
+			}
+			if choice.Selected == other {
+				c.askBandwidth()
+				return
+			}
+			for _, preset := range presets {
+				if preset.label == choice.Selected {
+					c.setBandwidth(preset.kbps)
+					return
+				}
+			}
+		}, c.window)
 }

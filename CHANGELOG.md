@@ -4,6 +4,12 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+- **Tray più compatta** (da ~27 a ~15 voci): ultimi 3 file senza duplicati, pausa
+  «1 ora» e «fino a domani» (le altre durate in «Altre pause…»), un solo
+  interruttore per il limite di velocità (spuntato = limitato; ricorda l'ultimo
+  limite scelto) più «Altri limiti…», «Conflitti» solo quando ce ne sono, e
+  tolte «Cerca un file…» e «Controlla aggiornamenti» (restano nella finestra).
+
 ## 1.19.1 - 2026-11-26
 
 Client 1.19.1 e server 3.36.0.
