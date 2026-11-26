@@ -67,12 +67,13 @@ const (
 )
 
 type clientApp struct {
-	cfg       *config.Config
-	store     *state.Store
-	client    *remote.Client
-	transfers *transfer.Transfer
-	runner    *engine.Runner
-	cancel    context.CancelFunc
+	cfg             *config.Config
+	store           *state.Store
+	client          *remote.Client
+	transfers       *transfer.Transfer
+	transferBackend transfer.Backend
+	runner          *engine.Runner
+	cancel          context.CancelFunc
 
 	uiTheme       *nasTheme
 	fyneApp       fyne.App
@@ -315,15 +316,17 @@ func startClient(
 ) *clientApp {
 	client := remote.New(cfg)
 	transfers := transfer.New(cfg, client)
+	backend := transfer.NewForConfig(cfg, client)
 	ctx, cancel := context.WithCancel(context.Background())
 	c := &clientApp{
 		cfg: cfg, store: store, client: client, transfers: transfers,
-		cancel:  cancel,
-		runner:  engine.NewRunner(cfg, store, client, transfers, loggers...),
-		fyneApp: fyneApp,
-		window:  window,
-		uiTheme: newNAStheme(variantFrom(cfg.String("go_theme"))),
-		level:   statusStarting,
+		transferBackend: backend,
+		cancel:          cancel,
+		runner:          engine.NewRunner(cfg, store, client, backend, loggers...),
+		fyneApp:         fyneApp,
+		window:          window,
+		uiTheme:         newNAStheme(variantFrom(cfg.String("go_theme"))),
+		level:           statusStarting,
 	}
 	c.syncNotify = newSyncNotifier(c.sendSyncNotification)
 	if len(loggers) > 0 {
@@ -396,6 +399,13 @@ func startClient(
 }
 
 // tickRelativeTimes keeps "2 min fa" style labels current.
+func (c *clientApp) syncTransfers() transfer.Backend {
+	if c.transferBackend != nil {
+		return c.transferBackend
+	}
+	return c.transfers
+}
+
 func (c *clientApp) tickRelativeTimes(ctx context.Context) {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()

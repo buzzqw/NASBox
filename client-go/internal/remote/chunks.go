@@ -94,14 +94,70 @@ func (c *Client) FileChunks(path string) (FileChunks, error) {
 	return result, nil
 }
 
+// IngestFileChunks registers an existing NAS file in the chunk store. It is
+// used when --file-chunks has no metadata yet (out-of-band edit or legacy file).
+func (c *Client) IngestFileChunks(path string) (FileChunks, error) {
+	output, err := c.Run([]string{c.script(), "--chunk-ingest", path}, nil, 2*time.Minute)
+	if err != nil {
+		return FileChunks{}, err
+	}
+	fields := bytes.Split(output, []byte{0})
+	if len(fields) < 2 || string(fields[0]) != "FILE_CHUNKS_V1" {
+		return FileChunks{}, fmt.Errorf("risposta chunk-ingest non valida")
+	}
+	if string(fields[1]) == "MISS" {
+		return FileChunks{}, fmt.Errorf("file NAS non disponibile: %s", path)
+	}
+	result := FileChunks{Digest: string(fields[1]), Found: true, Chunks: []string{}}
+	result.Size, _ = strconv.ParseInt(string(fields[2]), 10, 64)
+	result.MTimeNS, _ = strconv.ParseInt(string(fields[3]), 10, 64)
+	count, _ := strconv.Atoi(string(fields[4]))
+	for i := 0; i < count && 5+i < len(fields); i++ {
+		result.Chunks = append(result.Chunks, string(fields[5+i]))
+	}
+	return result, nil
+}
+
 // FilePublish assembles a file from chunks on the NAS and records it in the
 // journal under the caller's lease.
 func (c *Client) FilePublish(
 	path, digest string, size, mtimeNS int64, causal string, chunks []string,
 	device, txid, runTS string,
 ) error {
+	payload, err := c.filePublishPayload(path, digest, size, mtimeNS, causal, chunks)
+	if err != nil {
+		return err
+	}
+	output, err := c.RunLocked([]string{c.script(), "--file-publish", device, txid, runTS}, payload, device, 10*time.Minute)
+	if err != nil {
+		return err
+	}
+	return parseFilePublishOutput(output)
+}
+
+// FilePublishOwned is the same operation when the caller already holds the
+// NAS lease (UploadReplace acquires it for the whole batch). Using RunLocked
+// here would deadlock on the same flock.
+func (c *Client) FilePublishOwned(
+	path, digest string, size, mtimeNS int64, causal string, chunks []string,
+	device, txid, runTS string,
+) error {
+	payload, err := c.filePublishPayload(path, digest, size, mtimeNS, causal, chunks)
+	if err != nil {
+		return err
+	}
+	output, err := c.Run([]string{c.script(), "--file-publish", device, txid, runTS}, payload, 10*time.Minute)
+	if err != nil {
+		return err
+	}
+	return parseFilePublishOutput(output)
+}
+
+func (c *Client) filePublishPayload(
+	path, digest string, size, mtimeNS int64, causal string, chunks []string,
+) ([]byte, error) {
 	if len(chunks) == 0 {
-		return fmt.Errorf("nessun chunk da pubblicare")
+		return nil, fmt.Errorf("nessun chunk da pubblicare")
 	}
 	var payload bytes.Buffer
 	for _, field := range []string{
@@ -113,10 +169,10 @@ func (c *Client) FilePublish(
 	for _, chunk := range chunks {
 		payload.WriteString(chunk + "\x00")
 	}
-	output, err := c.RunLocked([]string{c.script(), "--file-publish", device, txid, runTS}, payload.Bytes(), device, 10*time.Minute)
-	if err != nil {
-		return err
-	}
+	return payload.Bytes(), nil
+}
+
+func parseFilePublishOutput(output []byte) error {
 	fields := bytes.Split(output, []byte{0})
 	if len(fields) < 2 || string(fields[0]) != "FILE_PUBLISH_V1" || string(fields[1]) != "OK" {
 		return fmt.Errorf("pubblicazione chunk fallita: %s", strings.TrimSpace(string(output)))

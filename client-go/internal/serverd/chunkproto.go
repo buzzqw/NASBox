@@ -133,6 +133,64 @@ func cmdFileChunks(ctx *Context, args []string) error {
 	return nil
 }
 
+// cmdChunkIngest registers a file that already exists on the NAS but has no
+// chunk metadata (out-of-band edit, legacy file or the result of an rsync
+// transfer). It does not touch the journal: the manifest already describes it.
+func cmdChunkIngest(ctx *Context, args []string) error {
+	if len(args) != 1 || !validRelative(args[0]) {
+		return exitCode(1)
+	}
+	full := filepath.Join(ctx.ShareRoot, args[0])
+	info, err := os.Lstat(full)
+	if err != nil || !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
+		fmt.Print("FILE_CHUNKS_V1\x00MISS\x00")
+		return nil
+	}
+	store, err := ctx.chunkStore()
+	if err != nil {
+		return err
+	}
+	chunkSize := ctx.ChunkSize()
+	file, err := os.Open(full)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	whole := sha256.New()
+	digests := []string{}
+	buffer := make([]byte, chunkSize)
+	for {
+		n, readErr := io.ReadFull(file, buffer)
+		if n > 0 {
+			block := buffer[:n]
+			sum := sha256.Sum256(block)
+			digest := hex.EncodeToString(sum[:])
+			if _, err := store.Put(block); err != nil {
+				return err
+			}
+			digests = append(digests, digest)
+			_, _ = whole.Write(block)
+		}
+		if readErr == io.EOF || readErr == io.ErrUnexpectedEOF {
+			break
+		}
+		if readErr != nil {
+			return err
+		}
+	}
+	digest := hex.EncodeToString(whole.Sum(nil))
+	if err := store.SaveFileMeta(digest, digests); err != nil {
+		return err
+	}
+	out := bufio.NewWriter(os.Stdout)
+	defer out.Flush()
+	fmt.Fprintf(out, "FILE_CHUNKS_V1\x00%s\x00%d\x00%d\x00%d\x00", digest, info.Size(), info.ModTime().UnixNano(), len(digests))
+	for _, chunk := range digests {
+		fmt.Fprintf(out, "%s\x00", chunk)
+	}
+	return nil
+}
+
 func cmdFilePublish(ctx *Context, args []string) error {
 	if len(args) != 3 {
 		return exitCode(1)
@@ -206,21 +264,21 @@ func cmdFilePublish(ctx *Context, args []string) error {
 		if err := store.Assemble(chunks, target); err != nil {
 			return err
 		}
-		requestedSeconds, _ := strconv.ParseInt(mtime, 10, 64)
-		stamp := time.Unix(requestedSeconds/1_000_000_000, 0)
+		requestedNS, _ := strconv.ParseInt(mtime, 10, 64)
+		stamp := time.Unix(0, requestedNS)
 		if err := os.Chtimes(target, stamp, stamp); err != nil {
 			return err
 		}
 		info, err := os.Lstat(target)
 		mtimeNS, _ := strconv.ParseInt(mtime, 10, 64)
 		if err != nil || strconv.FormatInt(info.Size(), 10) != sizeRaw ||
-			strconv.FormatInt(info.ModTime().Unix(), 10) != strconv.FormatInt(mtimeNS/1_000_000_000, 10) {
+			info.ModTime().UnixNano() != mtimeNS {
 			if _, statErr := os.Lstat(backup); statErr == nil {
 				_ = os.Rename(backup, target)
 			}
 			return exitCode(1)
 		}
-		mtime = fileMTimeNS(info)
+		mtime = strconv.FormatInt(info.ModTime().UnixNano(), 10)
 		actualDigest, err := sha256File(target)
 		if err != nil || actualDigest != digest {
 			if _, statErr := os.Lstat(backup); statErr == nil {

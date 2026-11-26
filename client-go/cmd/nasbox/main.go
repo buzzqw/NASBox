@@ -878,7 +878,7 @@ func syncOnce(args []string) {
 	}
 	defer store.Close()
 	client := remote.New(cfg)
-	transfers := transfer.New(cfg, client)
+	transfers := transfer.NewForConfig(cfg, client)
 	// Print every transferred file, as the GUI's activity list does; this
 	// also exercises the same rsync progress stream from the command line.
 	transfers.SetObservers(nil, func(event transfer.FileEvent) {

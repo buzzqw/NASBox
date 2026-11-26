@@ -89,8 +89,24 @@ upload, publish con journal, listing e download verificato. Con il demone Go:
 **9 PASS, 1 SKIP** (self-update bash). Con lo script bash il test viene saltato,
 perché i verbi a chunk non esistono nel vecchio server.
 
-## Ultimo passo
+## Milestone 6 — backend di trasferimento a chunk (completata)
 
-Sostituire `internal/transfer` con questo protocollo nei sync normali e
-disattivare rsync/script bash in produzione. Il primitivo è pronto e
-collaudato; il collegamento al motore di sync è il cambio finale.
+- `internal/transfer/chunks.go`: `Chunks` implementa lo stesso backend di
+  `Transfer` (download, staging upload, replace sotto lease, observer).
+- `transfer.NewForConfig` seleziona `chunks` con
+  `transfer_backend=chunks`; il default resta `rsync`, così i client puntati
+  al vecchio demone bash continuano a funzionare.
+- I file fuori banda vengono ingeriti con `--chunk-ingest`, quindi anche una
+  modifica fatta direttamente sul NAS è scaricabile via chunk.
+- `NASBOX_E2E_SERVER=<demone Go> NASBOX_E2E_CHUNKS=1 go test ./cmd/nasbox -run E2E`:
+  **9 PASS, 1 SKIP** — tutti gli E2E reali del client girano con rsync
+  sostituito dal protocollo a chunk.
+- Nota: ogni file pubblicato usa una transazione journal propria; il batch
+  single-transaction di `staging-publish` resta più efficiente e sarà il
+  prossimo miglioramento.
+
+## Distribuzione futura
+
+1. Distribuire il demone Go sul NAS e verificare i 11 comandi read-only.
+2. Impostare `transfer_backend=chunks` nei client.
+3. Disattivare rsync e lo script bash.

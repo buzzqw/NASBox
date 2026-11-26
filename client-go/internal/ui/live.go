@@ -238,7 +238,7 @@ func (c *clientApp) installTransferObservers() {
 	if c.transfers == nil {
 		return
 	}
-	c.transfers.SetObservers(c.onTransferProgress, func(event transfer.FileEvent) {
+	c.syncTransfers().SetObservers(c.onTransferProgress, func(event transfer.FileEvent) {
 		kind := "down"
 		if event.Upload {
 			kind = "up"

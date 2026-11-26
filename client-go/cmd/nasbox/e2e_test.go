@@ -155,6 +155,9 @@ func (n *e2eNAS) client(name string, overrides ...map[string]any) *e2eClient {
 			values[key] = value
 		}
 	}
+	if os.Getenv("NASBOX_E2E_CHUNKS") != "" {
+		values["transfer_backend"] = "chunks"
+	}
 	content, _ := json.MarshalIndent(values, "", "  ")
 	if err := os.WriteFile(c.config, content, 0o600); err != nil {
 		n.t.Fatal(err)

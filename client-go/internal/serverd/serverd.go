@@ -251,6 +251,8 @@ func Dispatch(ctx *Context, verb string, args []string) error {
 		return cmdChunkGet(ctx, args)
 	case "--file-chunks":
 		return cmdFileChunks(ctx, args)
+	case "--chunk-ingest":
+		return cmdChunkIngest(ctx, args)
 	case "--file-publish":
 		return cmdFilePublish(ctx, args)
 	case "--init-repository":

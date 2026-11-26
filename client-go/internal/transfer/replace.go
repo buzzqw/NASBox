@@ -127,6 +127,13 @@ func (t *Transfer) adoptOutOfBand(
 	nas replaceRemote, files []remote.ReplaceFile, before map[string]remote.FileState,
 	result *remote.ReplaceResult, device, repositoryID, runTS string,
 ) error {
+	return adoptOutOfBand(nas, files, before, result, device, repositoryID, runTS)
+}
+
+func adoptOutOfBand(
+	nas replaceRemote, files []remote.ReplaceFile, before map[string]remote.FileState,
+	result *remote.ReplaceResult, device, repositoryID, runTS string,
+) error {
 	stale := make(map[string]bool, len(result.Stale))
 	for _, path := range result.Stale {
 		stale[path] = true
