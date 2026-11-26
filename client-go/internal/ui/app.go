@@ -259,6 +259,15 @@ type clientApp struct {
 	homeTrashLabel   *widget.Label
 
 	progressMu       sync.Mutex
+	statusMu         sync.Mutex
+	statusKnown      bool
+	lastStatusLevel  statusLevel
+	lastStatusReason string
+	okMu             sync.Mutex
+	okTimer          *time.Timer
+	okHoldOverride   time.Duration
+	progressSince    time.Time
+	trayIconState    string
 	progress         transfer.Progress
 	progressShown    time.Time
 	progressTrailing bool
@@ -967,8 +976,47 @@ func (c *clientApp) settingsView() fyne.CanvasObject {
 // Status semantics
 // ---------------------------------------------------------------------------
 
+// applyStatus is the entry point for runner events. An identical (level, reason)
+// repeated back to back changes nothing on screen, so it is dropped: redrawing
+// the banner for the same state is what made the window blink.
 func (c *clientApp) applyStatus(level statusLevel, reason string) {
+	c.statusMu.Lock()
+	same := c.statusKnown && c.lastStatusLevel == level && c.lastStatusReason == reason
+	c.statusKnown, c.lastStatusLevel, c.lastStatusReason = true, level, reason
+	c.statusMu.Unlock()
+	if same {
+		return
+	}
 	fyne.Do(func() { c.applyStatusUI(level, reason) })
+}
+
+// okHold is how long "all synced" waits before it is shown. One change often
+// causes two passes a moment apart (the upload, then the one triggered by the
+// NAS revision it produced); without the hold the banner flipped in-progress →
+// synced → in-progress → synced for a single file.
+const okHold = 1200 * time.Millisecond
+
+func (c *clientApp) holdOK(apply func()) {
+	c.okMu.Lock()
+	defer c.okMu.Unlock()
+	if c.okTimer != nil {
+		c.okTimer.Stop()
+	}
+	hold := okHold
+	if c.okHoldOverride > 0 {
+		hold = c.okHoldOverride
+	}
+	c.okTimer = time.AfterFunc(hold, apply)
+}
+
+// cancelOK drops a pending "all synced" because new work has started.
+func (c *clientApp) cancelOK() {
+	c.okMu.Lock()
+	defer c.okMu.Unlock()
+	if c.okTimer != nil {
+		c.okTimer.Stop()
+		c.okTimer = nil
+	}
 }
 
 func iconStateForLevel(level statusLevel) string {
@@ -1259,15 +1307,20 @@ func (c *clientApp) consumeEvents() {
 			if reason == "" {
 				reason = tr("assurance.all_synced", nil)
 			}
-			c.applyStatus(statusOK, reason)
 			c.appendActivity(reason)
 			c.appendTransfer(reason)
 			c.appendLog(reason)
-			fyne.Do(c.refreshHeld)
-			c.refreshConflicts()
-			c.refreshHistory()
-			c.refreshStats()
+			// The status and the heavy refreshes wait for the hold; if another
+			// pass starts meanwhile they never run for this one.
+			c.holdOK(func() {
+				c.applyStatus(statusOK, reason)
+				fyne.Do(c.refreshHeld)
+				c.refreshConflicts()
+				c.refreshHistory()
+				c.refreshStats()
+			})
 		case "status":
+			c.cancelOK()
 			c.applyStatus(statusProgress, tr("status.sync_requested", nil))
 			message := tr("status.sync_state_active", map[string]any{
 				"direction": tr("ui.direction.sync", nil),
@@ -1275,9 +1328,11 @@ func (c *clientApp) consumeEvents() {
 			c.appendTransfer(message)
 			c.appendLog(message)
 		case "busy":
+			c.cancelOK()
 			c.applyStatus(statusProgress, tr("ui.status.nas_busy", nil))
 			c.appendLog(event.Message)
 		case "blocked":
+			c.cancelOK()
 			message := event.Message
 			if held := len(engine.PendingDeletes.Paths()); held > 0 {
 				message = lt(
@@ -1296,6 +1351,7 @@ func (c *clientApp) consumeEvents() {
 			}
 			c.syncNotify.add(event.Counts)
 		case "error":
+			c.cancelOK()
 			level := statusAttention
 			if looksOffline(event.Message) {
 				level = statusOffline

@@ -336,11 +336,15 @@ func (v *transferView) apply(progress transfer.Progress) {
 	v.meta.SetText(progressMeta(progress))
 }
 
+// transferCardDelay is how long a transfer must run before its card appears.
+const transferCardDelay = 600 * time.Millisecond
+
 func (c *clientApp) renderProgress(progress transfer.Progress) {
 	if c.homeTransfer == nil {
 		return
 	}
 	if progress.Finished {
+		c.progressSince = time.Time{}
 		if progress.Err == nil {
 			c.lastSyncAt = time.Now()
 		}
@@ -366,7 +370,15 @@ func (c *clientApp) renderProgress(progress transfer.Progress) {
 		c.tabTransfer.apply(progress)
 		c.setTabTransferActive(true)
 	}
-	c.setTransferCardVisible(true)
+	// A one-file upload finishes in a fraction of a second: showing the card for
+	// it shifts the whole page down and back up. Only a transfer that lasts is
+	// worth the space.
+	if c.progressSince.IsZero() {
+		c.progressSince = time.Now()
+	}
+	if time.Since(c.progressSince) >= transferCardDelay {
+		c.setTransferCardVisible(true)
+	}
 	if c.lastSyncLabel != nil {
 		c.lastSyncLabel.SetText(progressSummary(progress))
 	}

@@ -43,6 +43,10 @@ func trayIcon(state string) fyne.Resource {
 
 // setTrayIcon updates both the window and the system tray icon.
 func (c *clientApp) setTrayIcon(state string) {
+	if state == c.trayIconState {
+		return // same icon: re-setting it makes some trays flicker
+	}
+	c.trayIconState = state
 	resource := trayIcon(state)
 	c.fyneApp.SetIcon(resource)
 	if tray, ok := c.fyneApp.(interface{ SetSystemTrayIcon(fyne.Resource) }); ok {
