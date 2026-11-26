@@ -285,6 +285,8 @@ func Dispatch(ctx *Context, verb string, args []string) error {
 		return cmdServerUpdateCheck(ctx)
 	case "--server-update-install":
 		return cmdServerUpdateInstall(ctx, args)
+	case "--wait-for-revision":
+		return cmdWaitForRevision(ctx, args)
 	default:
 		return fmt.Errorf("verbo %q non ancora implementato nella milestone 0", verb)
 	}
