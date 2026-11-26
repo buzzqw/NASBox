@@ -4,6 +4,10 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 1.21.1 - 2026-11-26
+
+Client 1.21.1 e server 3.36.0.
+
 - Rimossa una copia obsoleta dello script del demone (`sync-daemon-server-3.8.2.sh`).
 - La build Windows (sperimentale) in CI ha un limite di 20 minuti: se il runner è
   lento non blocca più la release.
