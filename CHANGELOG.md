@@ -4,6 +4,19 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 1.14.0 - 2026-11-26
+
+Client Go:
+
+- **Notifiche di sincronizzazione raggruppate.** Con il tempo reale attivo una
+  passata può concludersi ogni pochi secondi e ogni completamento apriva un
+  popup quasi identico, fino a riempire il desktop. Ora i completamenti vengono
+  accumulati e inviati come unico riepilogo dopo 45 secondi di quiete (al più
+  ogni 10 minuti durante un'attività ininterrotta), con il numero di
+  sincronizzazioni e i totali di caricamenti, download, eliminazioni e
+  conflitti del gruppo. Le voci nella cronologia attività restano una per
+  passata.
+
 ## 3.32.4 - 2026-11-25
 
 Server:

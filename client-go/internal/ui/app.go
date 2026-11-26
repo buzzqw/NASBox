@@ -268,6 +268,7 @@ type clientApp struct {
 	trayPause     *fyne.MenuItem
 	notifyMu      sync.Mutex
 	lastNotify    map[string]time.Time
+	syncNotify    *syncNotifier
 
 	emblemMu    sync.Mutex
 	markedFiles map[string]bool
@@ -324,6 +325,7 @@ func startClient(
 		uiTheme: newNAStheme(variantFrom(cfg.String("go_theme"))),
 		level:   statusStarting,
 	}
+	c.syncNotify = newSyncNotifier(c.sendSyncNotification)
 	if len(loggers) > 0 {
 		c.logger = loggers[0]
 	}
@@ -1238,14 +1240,12 @@ func (c *clientApp) consumeEvents() {
 			fyne.Do(c.refreshHeld)
 		case "notify":
 			c.appendActivity(event.Message)
-			fyne.Do(func() {
-				if app := fyne.CurrentApp(); app != nil {
-					app.SendNotification(&fyne.Notification{
-						Title:   tr("tray.sync_completed_title", nil),
-						Content: event.Message,
-					})
-				}
-			})
+			// Several syncs can finish within seconds (realtime watcher, chunked
+			// deletions). Group their desktop notifications into one digest.
+			if c.syncNotify == nil {
+				c.syncNotify = newSyncNotifier(c.sendSyncNotification)
+			}
+			c.syncNotify.add(event.Counts)
 		case "error":
 			level := statusAttention
 			if looksOffline(event.Message) {

@@ -25,9 +25,19 @@ import (
 	"nasbox-go/internal/watch"
 )
 
+// SyncCounts are the transfers of one pass, carried with notify events so the
+// UI can group several completions into a single desktop notification.
+type SyncCounts struct {
+	Uploads   int
+	Downloads int
+	Deletes   int
+	Conflicts int
+}
+
 type Event struct {
-	Kind    string // status | sync | blocked | error
+	Kind    string // status | sync | blocked | error | notify
 	Message string
+	Counts  SyncCounts // set on notify events, zero otherwise
 }
 
 // Runner is the always-on sync loop: watcher, debounce, backoff and pauses.
@@ -240,8 +250,12 @@ func (r *Runner) manifestCursor() int {
 }
 
 func (r *Runner) emit(kind, message string) {
+	r.emitCounts(kind, message, SyncCounts{})
+}
+
+func (r *Runner) emitCounts(kind, message string, counts SyncCounts) {
 	select {
-	case r.events <- Event{Kind: kind, Message: message}:
+	case r.events <- Event{Kind: kind, Message: message, Counts: counts}:
 	default:
 	}
 	if r.logger != nil {
@@ -436,13 +450,17 @@ func (r *Runner) Run(ctx context.Context) error {
 		if r.logger != nil && len(result.Timings) > 0 {
 			_ = r.logger.Event("PERF", "-", "sync: "+strings.Join(result.Timings, ", "))
 		}
+		counts := SyncCounts{
+			Uploads: result.Uploaded, Downloads: result.Downloads,
+			Deletes: result.Deleted, Conflicts: result.Conflicts,
+		}
 		if result.Blocked != "" {
 			// Only the deletions are held back; whatever else was transferred in
 			// this pass is reported first, then the decision the user must take.
 			if result.Uploaded+result.Downloads > 0 {
-				r.emit("notify", i18n.T("assurance.activity", map[string]any{
+				r.emitCounts("notify", i18n.T("assurance.activity", map[string]any{
 					"uploads": result.Uploaded, "downloads": result.Downloads, "deletes": result.Deleted,
-				}))
+				}), counts)
 			}
 			r.emit("blocked", result.Blocked)
 			r.mu.Lock()
@@ -472,7 +490,7 @@ func (r *Runner) Run(ctx context.Context) error {
 		}
 		if r.cfg.Bool("notify_sync_completion") &&
 			(result.Uploaded+result.Downloads+result.Deleted > 0) {
-			r.emit("notify", summary)
+			r.emitCounts("notify", summary, counts)
 		}
 		// A successful sync is the natural point for the rare full audit. It
 		// runs in its own goroutine so the UI and the next sync never block.

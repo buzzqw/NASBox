@@ -6054,6 +6054,14 @@
     "en": "NASBox: conflicts to review",
     "it": "NASBox: conflitti da rivedere"
   },
+  "ui.notify.sync_digest": {
+    "en": "{passes}: ↑ {uploads} uploads · ↓ {downloads} downloads · ✕ {deletes} deletions, {conflicts} conflicts",
+    "it": "{passes}: ↑ {uploads} caricamenti · ↓ {downloads} download · ✕ {deletes} eliminazioni, {conflicts} conflitti"
+  },
+  "ui.notify.sync_digest_title": {
+    "en": "Sync summary",
+    "it": "Riepilogo sincronizzazioni"
+  },
   "guard.blocked_local_deletes": {
     "en": "Sync blocked: other PCs deleted {count} files that exist here (limit {limit}). Check the NAS before confirming: no local file was touched.",
     "it": "Sincronizzazione bloccata: altri PC hanno cancellato {count} file presenti qui (limite {limit}). Controlla il NAS prima di confermare: nessun file locale è stato toccato."

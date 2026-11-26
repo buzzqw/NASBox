@@ -97,6 +97,16 @@ func TestRunnerSchedulesAuditAfterSuccessfulSync(t *testing.T) {
 	}
 }
 
+func TestNotifyEventCarriesPassCounts(t *testing.T) {
+	r := &Runner{events: make(chan Event, 1)}
+	counts := SyncCounts{Uploads: 2, Downloads: 3, Deletes: 1, Conflicts: 4}
+	r.emitCounts("notify", "summary", counts)
+	event := <-r.Events()
+	if event.Kind != "notify" || event.Message != "summary" || event.Counts != counts {
+		t.Fatalf("notify event lost its counts: %+v", event)
+	}
+}
+
 func TestRunnerSkipsAuditWhenDisabled(t *testing.T) {
 	cfg, store, _ := setupTest(t)
 	cfg.Set("mirror_interval_seconds", 3600, false)
