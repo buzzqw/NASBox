@@ -5,6 +5,7 @@
 # uso (dalla copia di lavoro su un PC con Go e ssh verso il NAS):
 #   tools/release_all.sh CLIENT_VERSION SERVER_VERSION "note per il canale"
 #
+# SKIP_SERVER=1 salta l'aggiornamento del demone sul NAS (client soltanto).
 # Il lavoro da consegnare deve essere già committato; lo script aggiunge solo il
 # commit di versione. Si ferma al primo errore: se i test falliscono non rilascia.
 # Regole del progetto: vedi AGENT-NOTES.md (NAS rsync 3.1.2, /tmp noexec, scp
@@ -72,15 +73,19 @@ git bundle create "$OUT/release.bundle" "${NAS_HEAD}..HEAD" >/dev/null 2>&1
 nas "cat > /volume1/Varie/release.bundle" < "$OUT/release.bundle"
 nas "cd $NAS_REPO && git fetch -q /volume1/Varie/release.bundle HEAD && git merge --ff-only FETCH_HEAD >/dev/null && git tag v${CLIENT_VERSION} && git push origin master --tags 2>&1 | tail -3; rm -f /volume1/Varie/release.bundle"
 
-step "5/8 demone sul NAS (${SERVER_VERSION})"
-nas "cat > $NAS_SERVER_DIR/nasbox-server.new && chmod 755 $NAS_SERVER_DIR/nasbox-server.new" < "$OUT/nasbox-server-arm64"
-[[ "$(sha256sum < "$OUT/nasbox-server-arm64")" == "$(nas "sha256sum < $NAS_SERVER_DIR/nasbox-server.new")" ]] || { echo "sha256 del binario server diverso" >&2; exit 1; }
-nas "cd $NAS_SERVER_DIR && ./nasbox-server.new --version && ./nasbox-server.new -c $NAS_REPO/server/server.conf --chunk-fsck >/dev/null"
-nas "cd $NAS_SERVER_DIR && cp -p nasbox-server nasbox-server.prev-\$(./nasbox-server --version | awk '{print \$NF}' | tr -d v) && mv nasbox-server.new nasbox-server && ./nasbox-server.sh --restart | tail -2"
-sleep 3
-nas "$NAS_SERVER_DIR/nasbox-server.sh --version"
-nas "ps -o pid,args -C nasbox-server | grep -- '--run-foreground'" >/dev/null || { echo "il demone non è ripartito" >&2; exit 1; }
-nas "cd $NAS_SERVER_DIR && ls -t nasbox-server.prev-* | tail -n +4 | xargs -r rm -f"
+if [[ "${SKIP_SERVER:-0}" == 1 ]]; then
+  echo "SKIP_SERVER=1: il demone sul NAS non viene toccato"
+else
+  step "5/8 demone sul NAS (${SERVER_VERSION})"
+  nas "cat > $NAS_SERVER_DIR/nasbox-server.new && chmod 755 $NAS_SERVER_DIR/nasbox-server.new" < "$OUT/nasbox-server-arm64"
+  [[ "$(sha256sum < "$OUT/nasbox-server-arm64")" == "$(nas "sha256sum < $NAS_SERVER_DIR/nasbox-server.new")" ]] || { echo "sha256 del binario server diverso" >&2; exit 1; }
+  nas "cd $NAS_SERVER_DIR && ./nasbox-server.new --version && ./nasbox-server.new -c $NAS_REPO/server/server.conf --chunk-fsck >/dev/null"
+  nas "cd $NAS_SERVER_DIR && cp -p nasbox-server nasbox-server.prev-\$(./nasbox-server --version | awk '{print \$NF}' | tr -d v) && mv nasbox-server.new nasbox-server && ./nasbox-server.sh --restart | tail -2"
+  sleep 3
+  nas "$NAS_SERVER_DIR/nasbox-server.sh --version"
+  nas "ps -o pid,args -C nasbox-server | grep -- '--run-foreground'" >/dev/null || { echo "il demone non è ripartito" >&2; exit 1; }
+  nas "cd $NAS_SERVER_DIR && ls -t nasbox-server.prev-* | tail -n +4 | xargs -r rm -f"
+fi
 
 step "6/8 canale di aggiornamento dei client (go-stable)"
 nas "cat > $NAS_REPO/nasbox-go-${CLIENT_VERSION} && chmod 755 $NAS_REPO/nasbox-go-${CLIENT_VERSION}" < "$OUT/nasbox-go-${CLIENT_VERSION}"
