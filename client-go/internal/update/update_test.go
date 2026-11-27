@@ -1,7 +1,10 @@
 package update
 
 import (
+	"crypto/ed25519"
+	"crypto/rand"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -15,6 +18,27 @@ import (
 	"nasbox-go/internal/config"
 	"nasbox-go/internal/version"
 )
+
+var testSigningKey ed25519.PrivateKey
+
+func TestMain(m *testing.M) {
+	public, private, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		panic(err)
+	}
+	testSigningKey = private
+	updatePublicKey = public
+	os.Exit(m.Run())
+}
+
+func testManifestSignature(raw string) []byte {
+	return []byte(base64.StdEncoding.EncodeToString(ed25519.Sign(testSigningKey, []byte(raw))) + "\n")
+}
+
+func setTestManifest(reader *fakeReader, cfg *config.Config, raw string) {
+	reader.files[ManifestPath(cfg)] = []byte(raw)
+	reader.files[ManifestSignaturePath(cfg)] = testManifestSignature(raw)
+}
 
 const (
 	testRemote    = "/volume1/NASBox"
@@ -70,9 +94,9 @@ func makeSetup(t *testing.T, versionName string, binary []byte, extra string) (*
 	}
 	manifestJSON := "{" + fields + "}"
 	reader := &fakeReader{files: map[string][]byte{
-		ManifestPath(cfg):              []byte(manifestJSON),
 		testBinaryURL + "/" + artifact: binary,
 	}}
+	setTestManifest(reader, cfg, manifestJSON)
 	return cfg, reader, manifestJSON
 }
 
@@ -90,6 +114,24 @@ func TestNewestAndDownloadVerifySha256(t *testing.T) {
 	content, err := os.ReadFile(destination)
 	if err != nil || string(content) != string(binary) {
 		t.Fatalf("download wrong: %q %v", content, err)
+	}
+}
+
+func TestNewestRequiresDetachedSignature(t *testing.T) {
+	binary := []byte("signed-binary")
+	cfg, reader, manifestJSON := makeSetup(t, "9.9.9", binary, "")
+	reader.files[ManifestSignaturePath(cfg)] = []byte("not-base64")
+	if _, err := Newest(cfg, reader); err == nil || !strings.Contains(err.Error(), "firma") {
+		t.Fatalf("invalid signature accepted: %v", err)
+	}
+	delete(reader.files, ManifestSignaturePath(cfg))
+	if _, err := Newest(cfg, reader); err == nil || !strings.Contains(err.Error(), "firma") {
+		t.Fatalf("missing signature accepted: %v", err)
+	}
+	setTestManifest(reader, cfg, manifestJSON)
+	reader.files[ManifestPath(cfg)] = []byte(strings.Replace(manifestJSON, `"version":"9.9.9"`, `"version":"9.9.8"`, 1))
+	if _, err := Newest(cfg, reader); err == nil || !strings.Contains(err.Error(), "firma") {
+		t.Fatalf("tampered manifest accepted: %v", err)
 	}
 }
 
@@ -120,7 +162,8 @@ func TestAvailableRefusesDowngradeAndInvalidVersion(t *testing.T) {
 	_, _, downgradeJSON := makeSetup(t, "0.1.0", binary, "")
 	cfg := config.New("")
 	cfg.Set("remote_prefix", testRemote, false)
-	reader := &fakeReader{files: map[string][]byte{ManifestPath(cfg): []byte(downgradeJSON)}}
+	reader := &fakeReader{files: map[string][]byte{}}
+	setTestManifest(reader, cfg, downgradeJSON)
 	manifest, err := Newest(cfg, reader)
 	if err != nil {
 		t.Fatal(err)
@@ -173,7 +216,7 @@ func TestNewestRejectsWrongChannelTargetAndVersion(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			cfg, reader, manifestJSON := makeSetup(t, "9.9.9", binary, "")
 			manifestJSON = test.edit(manifestJSON)
-			reader.files[ManifestPath(cfg)] = []byte(manifestJSON)
+			setTestManifest(reader, cfg, manifestJSON)
 			if _, err := Newest(cfg, reader); err == nil || !strings.Contains(err.Error(), test.wantIn) {
 				t.Fatalf("expected rejection containing %q, got %v", test.wantIn, err)
 			}

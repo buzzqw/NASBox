@@ -183,6 +183,9 @@ type doctorReport struct {
 	LocalRoot        string              `json:"local_root"`
 	Repository       string              `json:"repository"`
 	Tracked          int                 `json:"tracked"`
+	TrackedActive    int                 `json:"tracked_active"`
+	TrackedTombstone int                 `json:"tracked_tombstones"`
+	LocalObserved    int                 `json:"local_observed"`
 	Undo             int                 `json:"undo"`
 	LastErrors       []diagnostics.Entry `json:"last_errors"`
 	ServerVersion    string              `json:"server_version,omitempty"`
@@ -305,6 +308,8 @@ func doctor(args []string) int {
 		report.LocalRoot = cfg.LocalRoot()
 		report.Repository = cfg.RepositoryID()
 		report.Tracked = store.EntryCount(repositoryID)
+		report.TrackedActive, report.TrackedTombstone = store.EntryStats(repositoryID)
+		report.LocalObserved = store.LocalObservationCount(repositoryID)
 		report.Undo = store.UndoCount(repositoryID, 24)
 	}
 
@@ -495,7 +500,8 @@ func writeDoctorReport(report doctorReport, asJSON bool) error {
 	fmt.Printf("config:      %s\n", report.ConfigPath)
 	fmt.Printf("local root:  %s\n", report.LocalRoot)
 	fmt.Printf("repository:  %s\n", report.Repository)
-	fmt.Printf("tracked:     %d\n", report.Tracked)
+	fmt.Printf("tracked:     %d (attivi %d, tombstone %d; osservati locali %d)\n",
+		report.Tracked, report.TrackedActive, report.TrackedTombstone, report.LocalObserved)
 	fmt.Printf("undo count:  %d\n", report.Undo)
 	if len(report.LastErrors) == 0 {
 		fmt.Println("ultimi errori: nessuno nelle ultime 24 ore")

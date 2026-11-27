@@ -263,6 +263,13 @@ func (s *Store) init() error {
 			return fmt.Errorf("create SQLite state index: %w", err)
 		}
 	}
+	// The legacy Python client recorded some folders as trailing-slash rows.
+	// They are not files and must not inflate the tracked/entry count.
+	for _, table := range []string{"entry", "local_observation", "file_identity"} {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM `+table+` WHERE path LIKE '%/'`); err != nil {
+			return fmt.Errorf("remove legacy directory rows from %s: %w", table, err)
+		}
+	}
 	if currentVersion != schemaVersion {
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO meta(key, value) VALUES(?, ?)
@@ -379,6 +386,28 @@ func (s *Store) EntryCount(repository string) int {
 	var count int
 	_ = s.db.QueryRow(
 		`SELECT COUNT(*) FROM entry WHERE repository = ?`, repository,
+	).Scan(&count)
+	return count
+}
+
+// EntryStats distinguishes live baselines from tombstones. Deletions keep a
+// causal tombstone with no digest, so the raw entry count is not a file count
+// and cannot be compared between PCs with different histories.
+func (s *Store) EntryStats(repository string) (active, tombstones int) {
+	_ = s.db.QueryRow(`
+		SELECT
+			COALESCE(SUM(CASE WHEN digest IS NOT NULL AND digest <> '' THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN digest IS NULL OR digest = '' THEN 1 ELSE 0 END), 0)
+		FROM entry WHERE repository = ?
+	`, repository).Scan(&active, &tombstones)
+	return active, tombstones
+}
+
+// LocalObservationCount reports files currently observed on this PC.
+func (s *Store) LocalObservationCount(repository string) int {
+	var count int
+	_ = s.db.QueryRow(
+		`SELECT COUNT(*) FROM local_observation WHERE repository = ?`, repository,
 	).Scan(&count)
 	return count
 }

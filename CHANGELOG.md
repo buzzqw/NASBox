@@ -4,6 +4,22 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 1.26.0 - 2026-11-27
+
+Client 1.26.0, server 3.38.0 (invariato).
+
+- **Aggiornamenti firmati**: il manifest `manifest-go.json` ha una firma
+  detached Ed25519 in `manifest-go.json.sig`; il client verifica la firma prima
+  di accettare versione, artifact o hash. La chiave privata resta fuori dal NAS;
+  nel client è incorporata solo la chiave pubblica. Un manifest senza firma,
+  con firma errata o modificato viene rifiutato.
+- **Conteggio file più chiaro**: `doctor` separa baseline attive, tombstone e
+  file osservati localmente. Le righe legacy che rappresentavano cartelle con
+  una barra finale vengono rimosse all'apertura dello stato; il conteggio
+  “tracciato” non viene più confuso con un numero di file vivi.
+- Aggiunto `tools/sign_update_manifest.py` per firmare il manifest con la chiave
+  privata offline.
+
 ## 1.25.0 / 3.38.0 - 2026-11-27
 
 Client 1.25.0 e server 3.38.0.

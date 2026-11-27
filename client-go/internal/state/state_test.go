@@ -14,6 +14,44 @@ import (
 	"nasbox-go/internal/config"
 )
 
+func TestEntryStatsSeparatesTombstonesAndDropsLegacyDirectories(t *testing.T) {
+	base := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", base)
+	cfg := config.New("")
+	store, err := Open(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := "repo"
+	if err := store.RecordEntry(repo, "a.txt", EntryState{Digest: "abc", Size: 3, MTimeNS: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.RecordEntry(repo, "deleted.txt", EntryState{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.RecordEntry(repo, "legacy-dir/", EntryState{}); err != nil {
+		t.Fatal(err)
+	}
+	if active, tombstones := store.EntryStats(repo); active != 1 || tombstones != 2 {
+		t.Fatalf("stats active=%d tombstones=%d", active, tombstones)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	// Reopening runs the legacy directory cleanup.
+	store, err = Open(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if got := store.EntryCount(repo); got != 2 {
+		t.Fatalf("legacy directory row not removed: %d", got)
+	}
+	if active, tombstones := store.EntryStats(repo); active != 1 || tombstones != 1 {
+		t.Fatalf("stats after cleanup active=%d tombstones=%d", active, tombstones)
+	}
+}
+
 func TestObservationClockIsStableThenIncrements(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	store, err := Open(config.New(""))

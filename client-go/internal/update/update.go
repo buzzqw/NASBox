@@ -137,6 +137,13 @@ func Newest(cfg *config.Config, client FileReader) (*Manifest, error) {
 	if len(raw) > maxManifestLen {
 		return nil, fmt.Errorf("manifest Go troppo grande")
 	}
+	signature, err := client.ReadRemoteFile(ManifestSignaturePath(cfg))
+	if err != nil {
+		return nil, fmt.Errorf("firma del manifest update non disponibile: %w", err)
+	}
+	if err := verifyManifestSignature(raw, signature); err != nil {
+		return nil, err
+	}
 	manifest := &Manifest{}
 	if err := json.Unmarshal(raw, manifest); err != nil {
 		return nil, err
