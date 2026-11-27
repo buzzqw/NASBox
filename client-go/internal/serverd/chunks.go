@@ -280,7 +280,22 @@ func (s *ChunkStore) RestoreFile(snap *Snapshot, relative, target string) error 
 		if file.Path != encodeField(relative) {
 			continue
 		}
-		return s.Assemble(file.Chunks, target)
+		if err := s.Assemble(file.Chunks, target); err != nil {
+			return err
+		}
+		// A corrupted object would otherwise produce a silently wrong restore.
+		// The publish path verifies the assembled file too; restore must not be
+		// the one place where metadata claims one digest and disk holds another.
+		digest, err := sha256File(target)
+		if err != nil {
+			_ = os.Remove(target)
+			return err
+		}
+		if digest != file.Digest {
+			_ = os.Remove(target)
+			return fmt.Errorf("restore %q: digest %s diverso da quello atteso %s", relative, digest, file.Digest)
+		}
+		return nil
 	}
 	return fmt.Errorf("percorso %q non presente nello snapshot %s", relative, snap.ID)
 }

@@ -309,6 +309,11 @@ func cmdPrintConfig(ctx *Context) error {
 	if lock.Held {
 		lockHeld = "true"
 	}
+	holder, _, leaseStale, leaseIdle := ctx.leaseState(time.Now())
+	heartbeat := "false"
+	if holder.LastActivity > 0 {
+		heartbeat = "true"
+	}
 	age := "0"
 	if lock.Held && lock.Since != "0" {
 		if since, err := strconv.ParseInt(lock.Since, 10, 64); err == nil {
@@ -344,9 +349,12 @@ func cmdPrintConfig(ctx *Context) error {
 		"CHUNK_SCRUB_WINDOW_HOURS=" + ctx.Config["CHUNK_SCRUB_WINDOW_HOURS"],
 		"CHUNK_SCRUB_NICE=" + ctx.Config["CHUNK_SCRUB_NICE"],
 		"TOMBSTONE_TTL_DAYS=" + ctx.Config["TOMBSTONE_TTL_DAYS"],
-		"SYNC_LOCK_MAX_AGE_MINUTES=0",
+		"SYNC_LOCK_MAX_AGE_MINUTES=" + value(ctx.Config, "SYNC_LOCK_MAX_AGE_MINUTES", "0"),
 		"SYNC_LOCK_HELD=" + lockHeld,
 		"SYNC_LOCK_AGE_SECONDS=" + age,
+		"SYNC_LOCK_IDLE_SECONDS=" + strconv.FormatInt(int64(leaseIdle.Seconds()), 10),
+		"SYNC_LOCK_STALE=" + strconv.FormatBool(leaseStale),
+		"SYNC_LOCK_HEARTBEAT=" + heartbeat,
 		"SYNC_LOCK_OWNER_PID=" + lock.PID,
 		"SYNC_LOCK_OWNER_ID=" + lock.ID,
 		"SYNC_LOCK_OWNER_HOST=" + lock.Host,
@@ -470,12 +478,36 @@ func cmdStatus(ctx *Context) error {
 	fmt.Printf("%-18s %d byte\n", "Manifest (spazio):", fileSize(p.Manifest))
 	fmt.Printf("%-18s %d byte\n", "Log server (spazio):", fileSize(p.ServerLog))
 	fmt.Printf("%-18s %d byte\n", "Eventi (spazio):", fileSize(p.Events))
+	fmt.Printf("%-18s %d byte\n", "Access log (spazio):", fileSize(filepath.Join(p.Dir, "access.log")))
 	lock := ctx.readLock()
+	holder, _, stale, idle := ctx.leaseState(time.Now())
+	if lock.PID == "" && holder.PID > 0 {
+		lock.PID = strconv.Itoa(holder.PID)
+	}
+	if lock.ID == "" {
+		lock.ID = holder.Device
+	}
+	if lock.Host == "" {
+		lock.Host = holder.Host
+	}
+	if lock.Age == "" && lock.Since != "" {
+		if since, err := strconv.ParseInt(lock.Since, 10, 64); err == nil {
+			lock.Age = strconv.FormatInt(int64(time.Since(time.Unix(since, 0)).Seconds()), 10)
+		}
+	}
 	if !lock.Held {
 		fmt.Println("Lock trasferimenti: libero")
 	} else {
 		fmt.Printf("Lock trasferimenti: occupato (host %s, device %s, PID %s, età %s secondi, fase %s %s/%s)\n",
 			orDash(lock.Host), orDash(lock.ID), orDash(lock.PID), orDash(lock.Age), orDash(lock.Phase), lock.Done, lock.Total)
+		fmt.Printf("%-18s %s\n", "Inattività lease:", idle.Round(time.Second).String())
+		if maxAge := ctx.leaseMaxAge(); maxAge > 0 {
+			state := "sotto soglia"
+			if stale {
+				state = "SCADUTO"
+			}
+			fmt.Printf("%-18s %s (soglia %s, heartbeat %t)\n", "Lease watchdog:", state, maxAge, holder.LastActivity > 0)
+		}
 	}
 	return nil
 }
@@ -623,36 +655,42 @@ func cmdManifestExport(ctx *Context, args []string) error {
 		rowBytes += int64(len(row)) + 1
 	}
 	ctx.recordManifestExport(delta, view.FallbackFull, len(view.Rows), rowBytes)
+	// One buffered writer for the whole export: a full manifest is ~100k rows
+	// and an unbuffered Println per row costs seconds over SSH.
+	out := bufio.NewWriterSize(os.Stdout, 256*1024)
 	if !delta {
-		fmt.Println("NASBOX_MANIFEST_V1")
+		out.WriteString("NASBOX_MANIFEST_V1\n")
 		for _, row := range view.Rows {
-			fmt.Println(row)
+			out.WriteString(row)
+			out.WriteByte('\n')
 		}
-		return nil
+		return out.Flush()
 	}
 	if since > view.Current {
 		fmt.Fprintln(os.Stderr, "manifest export delta: since_revision successiva alla revisione corrente")
 		return exitCode(75)
 	}
-	fmt.Println("NASBOX_MANIFEST_DELTA_V1")
-	fmt.Printf("BASE_REVISION=%d\n", since)
-	fmt.Printf("CURRENT_REVISION=%d\n", view.Current)
+	fmt.Fprintln(out, "NASBOX_MANIFEST_DELTA_V1")
+	fmt.Fprintf(out, "BASE_REVISION=%d\n", since)
+	fmt.Fprintf(out, "CURRENT_REVISION=%d\n", view.Current)
 	if since == view.Current {
-		fmt.Printf("CHANGED=0\nREMOVED=\n")
-		return nil
+		out.WriteString("CHANGED=0\nREMOVED=\n")
+		return out.Flush()
 	}
 	if view.FallbackFull {
-		fmt.Println("FALLBACK_FULL=1")
+		out.WriteString("FALLBACK_FULL=1\n")
 	}
-	fmt.Printf("CHANGED=%d\n", len(view.Rows))
+	fmt.Fprintf(out, "CHANGED=%d\n", len(view.Rows))
 	for _, row := range view.Rows {
-		fmt.Println(row)
+		out.WriteString(row)
+		out.WriteByte('\n')
 	}
-	fmt.Println("REMOVED=")
+	out.WriteString("REMOVED=\n")
 	for _, path := range view.Removed {
-		fmt.Println(path)
+		out.WriteString(path)
+		out.WriteByte('\n')
 	}
-	return nil
+	return out.Flush()
 }
 
 type exitCode int

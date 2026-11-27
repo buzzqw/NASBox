@@ -275,6 +275,26 @@ the check finds damaged data, or if disk and records disagree. Messages contain 
 numbers, never file names. All options, with their defaults, are described in
 `server.conf.example`.
 
+**Is everything healthy?** `nasbox-server --self-check` prints one `CHECK_*=ok|fail`
+line per item (daemon, journal, last pass, free space, chunk quota, stale lock) and
+exits non-zero if something needs attention. Point a DSM scheduled task, every 5
+minutes, at `tools/nasbox-watchdog.sh`: it runs the check, restarts the daemon when it
+is stopped, and logs the result. Without it, a dead daemon stays dead until someone
+opens the app.
+
+**Abandoned lock.** If a PC is suspended or loses the network while it holds the
+global transfer lock, the lock can stay held. Clients from 1.27.0 send a heartbeat
+every 30 seconds; set `SYNC_LOCK_MAX_AGE_MINUTES=120` and the daemon will stop a
+`--transfer-wait` process that has been silent that long (the next sync recovers the
+interrupted operation from its journal). Older clients are never force-released.
+
+**Web access log.** Every request to the web UI and API is written to
+`state/access.log` (timestamp, client, method, path, status, bytes, duration, user).
+Share links appear as `/s/[token]` and the query string is dropped, so tokens and
+paths with parameters never end up in the file. It rotates by size:
+`ACCESS_LOG_MAX_BYTES` (default 5 MB) with `ACCESS_LOG_KEEP` generations
+(default 3); `--status` shows the current size.
+
 ## 14. Updates
 
 - **PC**: the app checks at startup and every few hours, verifies the detached
@@ -328,5 +348,5 @@ nasbox-go integrate [--remove]     file-manager menu entry
 | PC state, log and trash | `~/.local/state/sync-daemon/` |
 | NAS configuration | `server.conf` (next to the program) |
 
-On the NAS the useful commands are `--status`, `--print-config`, `--restart`, `--stop`
+On the NAS the useful commands are `--status`, `--print-config`, `--self-check`, `--restart`, `--stop`
 and `--run-once` (runs maintenance right now).

@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-var version = "3.38.0"
+var version = "3.39.0"
 
 // LoadVersion allows a versioned binary to report its own version through a
 // small sidecar file next to the executable. This is how --server-update-install
@@ -98,6 +98,8 @@ var configDefaults = map[string]string{
 	"CHUNK_GC": "true", "CHUNK_GC_GRACE_HOURS": "24", "CHUNK_FSCK_DAYS": "7",
 	"CHUNK_MAX_MB": "0", "CHUNK_SCRUB_HOUR": "3",
 	"CHUNK_SCRUB_WINDOW_HOURS": "0", "CHUNK_SCRUB_NICE": "10",
+	"ACCESS_LOG_MAX_BYTES": "5242880", "ACCESS_LOG_KEEP": "3",
+	"SELF_CHECK_MIN_FREE_MB": "512",
 }
 
 func applyDefaults(cfg map[string]string) {
@@ -228,6 +230,8 @@ func Dispatch(ctx *Context, verb string, args []string) error {
 		return cmdJournalStatus(ctx)
 	case "--diagnostics":
 		return cmdDiagnostics(ctx)
+	case "--self-check":
+		return cmdSelfCheck(ctx)
 	case "--devices":
 		return cmdDevices(ctx)
 	case "--metrics":
@@ -341,6 +345,7 @@ Uso:
   nasbox-server -c FILE --metrics
   nasbox-server -c FILE --devices
   nasbox-server -c FILE --diagnostics
+  nasbox-server -c FILE --self-check
   nasbox-server -c FILE --manifest-export [SINCE]
   nasbox-server -c FILE --manifest-get PATH
   nasbox-server -c FILE --file-states

@@ -50,6 +50,22 @@ EVENTS_MAX_BYTES=5242880    # rotate events.jsonl past this size (bytes)
 JOURNAL_MAX_BYTES=10485760  # compact the transfer journal past this size (bytes)
 JOURNAL_MAX_LINES=50000     # ...or past this many lines
 STATE_TEMP_MAX_AGE_HOURS=24 # remove stale temporary files after N hours (0 = keep)
+# Web/API access log: one line per request, rotated by size. Tokens of the
+# /s/<token> links are never written; the query string is dropped.
+ACCESS_LOG_MAX_BYTES=5242880 # rotate access.log past this size (bytes, 0 = off)
+ACCESS_LOG_KEEP=3            # generations kept: access.log.1 ... access.log.N
+
+# --- Lease watchdog ---
+# A client that vanishes without closing its SSH session leaves the global
+# transfer lock held. The client sends ACTIVITY_V1 heartbeats every 30s; after
+# this many minutes without one, the daemon stops the stale --transfer-wait
+# process and the next client can take the lock. 0 (default) = disabled.
+# Clients older than 1.27.0 never send heartbeats and are never force-released.
+# SYNC_LOCK_MAX_AGE_MINUTES=120
+
+# --- Self check (--self-check, for an external watchdog) ---
+# Fails when free space on the share or on state/ is below this many MB.
+SELF_CHECK_MIN_FREE_MB=512
 
 # --- Capabilities ---
 # How many files --file-states reads and hashes at once. Empty (recommended)

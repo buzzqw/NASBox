@@ -4,6 +4,44 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 1.27.0 / 3.39.0 - 2026-11-27
+
+Client 1.27.0, server 3.39.0. Nessun cambio di formato su manifest, journal e
+intent: i client 1.26.0 continuano a funzionare con il server nuovo.
+
+- **Lease che non resta bloccato**: il client manda un frame `ACTIVITY_V1` ogni
+  30 secondi mentre tiene il lease; il server registra PID e ultimo battito in
+  `state/lease-holder.json` e, con `SYNC_LOCK_MAX_AGE_MINUTES > 0`, termina un
+  `--transfer-wait` rimasto senza heartbeat oltre la soglia (0 = disabilitato).
+  Prima di terminarlo verifica che il PID sia ancora un `nasbox-server
+  --transfer-wait`, così un PID riusato non fa danni. I client che non mandano
+  heartbeat non vengono mai interrotti.
+- **`--self-check`**: un controllo per voce (`CHECK_DAEMON`, `CHECK_JOURNAL`,
+  `CHECK_LAST_RUN`, `CHECK_DISK_*`, `CHECK_CHUNK_QUOTA`, `CHECK_LEASE`,
+  `CHECK_TEMP_DIRS`) con exit code non-zero se qualcosa non va, pensato per un
+  watchdog esterno. Aggiunto `tools/nasbox-watchdog.sh` per l'attività
+  pianificata DSM (riavvia il demone fermo).
+- **Access log della web UI/API** in `state/access.log`: una riga per richiesta
+  (data, IP, metodo, percorso, stato, byte, durata, utente), con rotazione a
+  dimensione (`ACCESS_LOG_MAX_BYTES`, default 5 MB, `ACCESS_LOG_KEEP` default 3).
+  I token `/s/<token>` diventano `/s/[token]` e la query string non viene
+  scritta. `--status` mostra la dimensione corrente.
+- **Restore verificato**: `--chunk-restore` ricalcola lo SHA-256 del file
+  ricomposto e, se non coincide con lo snapshot, elimina il risultato e
+  fallisce invece di lasciare su disco un file sbagliato.
+- **Export manifest più veloce**: una sola scrittura bufferizzata da 256 KB
+  invece di un `Println` per riga (~100k righe su un manifest pieno) e nessuna
+  riscrittura del render cache quando la revisione è già in cache.
+- **Pulizia dei temporanei completa**: vengono rimosse anche le directory
+  `.manifest-delta.<pid>.<rand>` e le copie SQLite messe in quarantena, dopo
+  `STATE_TEMP_MAX_AGE_HOURS` e solo se il PID non è più vivo. Sul NAS erano
+  rimaste 44 MB di delta orfani.
+- **Stato del lease trasparente**: `--status` e `--print-config` riportano
+  `SYNC_LOCK_IDLE_SECONDS`, `SYNC_LOCK_STALE`, `SYNC_LOCK_HEARTBEAT` e la
+  soglia reale; la pagina Stato espone `LEASE_*` e `ACCESS_LOG_BYTES`.
+- `--web` limita gli header a 16 KB; i link condivisi inviano anche
+  `X-Frame-Options: DENY`.
+
 ## 1.26.0 - 2026-11-27
 
 Client 1.26.0, server 3.38.0 (invariato).

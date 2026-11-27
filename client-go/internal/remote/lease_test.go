@@ -47,6 +47,30 @@ func TestLeaseIsReleasedByClosingStdin(t *testing.T) {
 	}
 }
 
+func TestLeaseSendsActivityHeartbeats(t *testing.T) {
+	frames := filepath.Join(t.TempDir(), "frames")
+	withLeaseCommand(t, `dd bs=1 count=60 of=/dev/null 2>/dev/null; echo NASBOX_LOCKED; cat > `+frames)
+	old := leaseHeartbeatInterval
+	leaseHeartbeatInterval = 80 * time.Millisecond
+	t.Cleanup(func() { leaseHeartbeatInterval = old })
+
+	client := New(config.New(""))
+	release, err := acquireTransferLease(client, "dev-1", 5*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(400 * time.Millisecond)
+	release()
+
+	data, err := os.ReadFile(frames)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count := strings.Count(string(data), "ACTIVITY_V1\x00lease\x000\x000\x00"); count < 3 {
+		t.Fatalf("attesi almeno 3 heartbeat durante il lease, trovati %d", count)
+	}
+}
+
 func TestLeaseBusyTimesOutAndStopsTheSession(t *testing.T) {
 	marker := filepath.Join(t.TempDir(), "still-running")
 	withLeaseCommand(t, `cat >/dev/null; sleep 30; echo late > `+marker)

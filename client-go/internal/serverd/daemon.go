@@ -70,15 +70,27 @@ func cmdDaemonForeground(ctx *Context) error {
 		}
 	}
 	fmt.Printf("sync-daemon-server v%s avviato in foreground (PID %d), intervallo interno: %d min\n", version, os.Getpid(), interval)
+	if err := cmdRunOnce(ctx); err != nil {
+		fmt.Fprintln(os.Stderr, "passo di manutenzione fallito:", err)
+	}
+	maintenance := time.NewTimer(time.Duration(interval) * time.Minute)
+	defer maintenance.Stop()
+	// The lease watchdog must not wait for the maintenance interval: an
+	// abandoned global lock blocks every PC.
+	leaseTicker := time.NewTicker(time.Minute)
+	defer leaseTicker.Stop()
 	for {
-		if err := cmdRunOnce(ctx); err != nil {
-			fmt.Fprintln(os.Stderr, "passo di manutenzione fallito:", err)
-		}
 		select {
 		case <-signals:
 			fmt.Println("Demone arrestato.")
 			return nil
-		case <-time.After(time.Duration(interval) * time.Minute):
+		case <-leaseTicker.C:
+			ctx.enforceLeaseMaxAge()
+		case <-maintenance.C:
+			if err := cmdRunOnce(ctx); err != nil {
+				fmt.Fprintln(os.Stderr, "passo di manutenzione fallito:", err)
+			}
+			maintenance.Reset(time.Duration(interval) * time.Minute)
 		}
 	}
 }

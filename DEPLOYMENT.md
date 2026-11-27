@@ -83,6 +83,56 @@ nasbox-ghost version          # launcher modalita' consultazione
 Nota: il canale di update Go si chiama `go-stable` e usa `manifest-go.json`;
 quello Python legacy non va più pubblicato.
 
+## Robustezza operativa (3.39.0 / client 1.27.0)
+
+Tre cose non si possono fare dal repo e vanno impostate una volta sul NAS.
+
+1. **Timeout delle sessioni SSH lasciate aperte** (richiede root/amministratore
+   DSM). Senza, un client che sparisce senza chiudere la sessione può tenere la
+   connessione mezza aperta per ore:
+
+   ```bash
+   sudo vi /etc/ssh/sshd_config
+   # decommentare o aggiungere:
+   ClientAliveInterval 60
+   ClientAliveCountMax 3
+   sudo synosystemctl restart sshd   # oppure: sudo systemctl restart sshd
+   ```
+
+   Con questi valori sshd chiude una sessione muta dopo ~3 minuti. Il lease
+   globale viene rilasciato dal `flock` alla chiusura della sessione.
+
+2. **Attività pianificata DSM per il watchdog** (Pannello di controllo →
+   Utilità pianificate → Crea → Script definito dall'utente), ogni 5 minuti,
+   utente `andres`:
+
+   ```bash
+   /volume1/Varie/sync-daemon/tools/nasbox-watchdog.sh
+   ```
+
+   Lo script esegue `--self-check`, riavvia il demone se è fermo e lascia nel
+   log dell'attività una riga per ogni controllo fallito. Senza questo, un
+   demone terminato resta fermo fino al prossimo accesso manuale.
+
+3. **Scadenza del lease** in `server.conf` (runtime, non si committa):
+
+   ```ini
+   SYNC_LOCK_MAX_AGE_MINUTES=120
+   ```
+
+   Il demone controlla ogni minuto il file `state/lease-holder.json`; se un
+   client con heartbeat (≥ 1.27.0) è silenzioso da più di 120 minuti, termina
+   il processo `--transfer-wait` e libera il lock. I client più vecchi non
+   mandano heartbeat e non vengono mai interrotti.
+
+Verifica dopo il deploy:
+
+```bash
+/volume1/Varie/nasbox-server/nasbox-server -c /volume1/Varie/sync-daemon/server/server.conf --self-check
+/volume1/Varie/nasbox-server/nasbox-server -c ... --print-config | grep -E 'SYNC_LOCK|ACCESS_LOG'
+ls -l /volume1/Varie/sync-daemon/server/state/access.log*
+```
+
 ## Verifica finale dopo il deploy 1.23.0 / 3.37.0
 
 - `--status` → v3.37.0, demone in esecuzione, ultimo pass registrato.

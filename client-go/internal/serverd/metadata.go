@@ -846,6 +846,15 @@ func (i *metadataIndex) cachedRender(revision int64) ([]string, bool, error) {
 	return strings.Split(text, "\n"), true, nil
 }
 
+// hasRender reports whether a full render for this revision is already stored.
+// Re-storing an identical 11 MB payload on every full export would rewrite the
+// SQLite index for no benefit.
+func (i *metadataIndex) hasRender(revision int64) bool {
+	var one int
+	err := i.db.QueryRow(`SELECT 1 FROM render_cache WHERE revision=?`, revision).Scan(&one)
+	return err == nil
+}
+
 // storeRender keeps a small ring of full renders. With a cached base a client
 // whose cursor is older than feed_start_revision can still receive a real
 // delta instead of the 11 MB full fallback.
@@ -983,7 +992,7 @@ func (c *Context) exportManifest(since int64, delta bool) (manifestView, error) 
 			view.Current = current
 			if !delta {
 				view.Rows, err = index.manifestRows(false, 0, current, c.Config["TOMBSTONE_TTL_DAYS"])
-				if err == nil {
+				if err == nil && !index.hasRender(current) {
 					_ = index.storeRender(current, view.Rows, 3)
 				}
 				return err
@@ -1013,7 +1022,7 @@ func (c *Context) exportManifest(since int64, delta bool) (manifestView, error) 
 			}
 			view.FallbackFull = true
 			view.Rows, err = index.manifestRows(false, 0, current, c.Config["TOMBSTONE_TTL_DAYS"])
-			if err == nil {
+			if err == nil && !index.hasRender(current) {
 				_ = index.storeRender(current, view.Rows, 3)
 			}
 			return err

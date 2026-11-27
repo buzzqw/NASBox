@@ -243,6 +243,7 @@ func (c *Context) handleWebShare(w http.ResponseWriter, r *http.Request) {
 func (c *Context) serveSharedFile(w http.ResponseWriter, r *http.Request, guard *webGuard) {
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Referrer-Policy", "no-referrer")
+	w.Header().Set("X-Frame-Options", "DENY")
 	w.Header().Set("Cache-Control", "no-store")
 	if !safeMethod(r.Method) {
 		http.Error(w, "metodo non consentito", http.StatusMethodNotAllowed)

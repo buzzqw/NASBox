@@ -192,6 +192,13 @@ func cmdTransferWait(ctx *Context) error {
 	if err := ctx.writeOwner(device, host, "", 0, 0); err != nil {
 		return err
 	}
+	// Record the holder so the daemon can force-release an abandoned lease
+	// (client suspended or network gone) after SYNC_LOCK_MAX_AGE_MINUTES.
+	holder := leaseHolder{Device: device, Host: host, PID: os.Getpid(), Since: time.Now().Unix()}
+	if err := ctx.writeLeaseHolder(holder); err != nil {
+		fmt.Fprintln(os.Stderr, "lease holder non scritto:", err)
+	}
+	defer os.Remove(ctx.leaseHolderPath())
 	// The global lease is now ours. Finish any interrupted chunk publication
 	// before telling the client that the NAS is ready for mutations.
 	if err := ctx.withJournalLock(func() error {
@@ -225,6 +232,7 @@ func cmdTransferWait(ctx *Context) error {
 			done, _ := strconv.ParseInt(parts[2], 10, 64)
 			total, _ := strconv.ParseInt(parts[3], 10, 64)
 			_ = ctx.writeOwner(device, host, parts[1], done, total)
+			ctx.touchLeaseHolder()
 		}
 	}
 }

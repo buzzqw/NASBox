@@ -47,6 +47,11 @@ func (c *Context) statusValues() map[string]string {
 	if recoveryErr != nil {
 		recoveryError = recoveryErr.Error()
 	}
+	holder, _, leaseStale, leaseIdle := c.leaseState(time.Now())
+	heartbeat := "false"
+	if holder.LastActivity > 0 {
+		heartbeat = "true"
+	}
 	return map[string]string{
 		"VERSION":                version,
 		"RUNNING":                running,
@@ -61,6 +66,11 @@ func (c *Context) statusValues() map[string]string {
 		"MANIFEST_BYTES":         strconv.FormatInt(fileSize(p.Manifest), 10),
 		"RECOVERY_PENDING":       strconv.Itoa(recoveryPending),
 		"RECOVERY_ERROR":         recoveryError,
+		"LEASE_MAX_AGE_MINUTES":  value(c.Config, "SYNC_LOCK_MAX_AGE_MINUTES", "0"),
+		"LEASE_IDLE_SECONDS":     strconv.FormatInt(int64(leaseIdle.Seconds()), 10),
+		"LEASE_HEARTBEAT":        heartbeat,
+		"LEASE_STALE":            strconv.FormatBool(leaseStale),
+		"ACCESS_LOG_BYTES":       strconv.FormatInt(fileSize(filepath.Join(p.Dir, "access.log")), 10),
 	}
 }
 
@@ -234,7 +244,7 @@ func (ctx *Context) webHandler() http.Handler {
 			"scrub_window_hours": ctx.Config["CHUNK_SCRUB_WINDOW_HOURS"],
 		})
 	})
-	return ctx.withWebAuth(mux)
+	return ctx.withAccessLog(ctx.withWebAuth(mux))
 }
 
 func isLoopbackAddress(address string) bool {
@@ -260,6 +270,7 @@ func cmdWeb(ctx *Context, args []string) error {
 	server := &http.Server{
 		Addr: address, Handler: ctx.webHandler(),
 		ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 2 * time.Minute,
+		MaxHeaderBytes: 16 << 10,
 	}
 	cert, key := ctx.Config["WEB_TLS_CERT"], ctx.Config["WEB_TLS_KEY"]
 	if cert != "" && key != "" {

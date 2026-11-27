@@ -44,25 +44,61 @@ func (c *Context) maintainStateFiles() {
 		return
 	}
 	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
 		name := entry.Name()
-		temporary := strings.Contains(name, ".rollback.") ||
-			strings.HasPrefix(name, "prune-files.") || strings.HasPrefix(name, "prune-dirs.") ||
-			strings.HasPrefix(name, "prune-staging.") || strings.HasPrefix(name, "fs-want.") ||
-			strings.HasPrefix(name, "fs-match.") || strings.HasPrefix(name, "manifest.tsv.tmp.") ||
-			strings.HasPrefix(name, "manifest.tsv.sweep.") || strings.HasPrefix(name, "transfer-journal.tsv.append.") ||
-			strings.HasPrefix(name, "transfer-journal.tsv.delete.") ||
-			strings.HasPrefix(name, "transfer-journal.tsv.rollback.") || strings.HasPrefix(name, "restore-manifest.")
-		if !temporary {
+		if !temporaryStateEntry(name) {
 			continue
 		}
 		info, err := entry.Info()
-		if err == nil && info.ModTime().Before(cutoff) {
-			_ = os.Remove(filepath.Join(p.Dir, name))
+		if err != nil || !info.ModTime().Before(cutoff) {
+			continue
 		}
+		full := filepath.Join(p.Dir, name)
+		if entry.IsDir() {
+			// A delta render directory may belong to a process that is still
+			// alive but has not finished. Never delete it while its PID exists.
+			if pid := temporaryEntryPID(name); pid > 0 && processAlive(pid) {
+				continue
+			}
+			_ = os.RemoveAll(full)
+			continue
+		}
+		if pid := temporaryEntryPID(name); pid > 0 && processAlive(pid) {
+			continue
+		}
+		_ = os.Remove(full)
 	}
+}
+
+// temporaryStateEntry reports whether a state-directory entry is a disposable
+// intermediate left behind by a mutation or by a manifest render.
+func temporaryStateEntry(name string) bool {
+	return strings.Contains(name, ".rollback.") ||
+		strings.HasPrefix(name, "prune-files.") || strings.HasPrefix(name, "prune-dirs.") ||
+		strings.HasPrefix(name, "prune-staging.") || strings.HasPrefix(name, "fs-want.") ||
+		strings.HasPrefix(name, "fs-match.") || strings.HasPrefix(name, "manifest.tsv.tmp.") ||
+		strings.HasPrefix(name, "manifest.tsv.sweep.") || strings.HasPrefix(name, "transfer-journal.tsv.append.") ||
+		strings.HasPrefix(name, "transfer-journal.tsv.delete.") ||
+		strings.HasPrefix(name, "transfer-journal.tsv.rollback.") || strings.HasPrefix(name, "restore-manifest.") ||
+		strings.HasPrefix(name, ".manifest-delta.") || strings.HasPrefix(name, metadataDBName+".")
+}
+
+// temporaryEntryPID extracts the PID from names shaped "<prefix><pid>.<suffix>"
+// (for example .manifest-delta.2855.XmoN9V). Names without a PID return 0.
+func temporaryEntryPID(name string) int {
+	idx := strings.Index(name, ".manifest-delta.")
+	if idx < 0 {
+		return 0
+	}
+	rest := name[idx+len(".manifest-delta."):]
+	dot := strings.Index(rest, ".")
+	if dot <= 0 {
+		return 0
+	}
+	pid, err := strconv.Atoi(rest[:dot])
+	if err != nil || pid <= 0 {
+		return 0
+	}
+	return pid
 }
 
 func parseConfigInt(raw string, fallback int64) int64 {

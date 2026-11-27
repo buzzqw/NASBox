@@ -603,9 +603,11 @@ func acquireTransferLease(c *Client, device string, timeout time.Duration) (func
 	select {
 	case line, ok := <-lines:
 		if ok && line == "NASBOX_LOCKED" {
+			stopHeartbeat := startLeaseHeartbeat(stdin)
 			var once sync.Once
 			return func() {
 				once.Do(func() {
+					stopHeartbeat()
 					_ = stdin.Close()
 					if !wait(10 * time.Second) {
 						_ = cmd.Process.Kill()
@@ -626,6 +628,36 @@ func acquireTransferLease(c *Client, device string, timeout time.Duration) (func
 		abort()
 		return nil, fmt.Errorf("lease NAS occupato da un altro PC: riprovo più tardi")
 	}
+}
+
+// leaseHeartbeatInterval is a variable so tests can shorten it.
+var leaseHeartbeatInterval = 30 * time.Second
+
+// startLeaseHeartbeat keeps the NAS lease marked alive. The server force-releases
+// a lease only after seeing at least one heartbeat and then
+// SYNC_LOCK_MAX_AGE_MINUTES of silence, so older clients that never send frames
+// keep today's behaviour.
+func startLeaseHeartbeat(stdin io.WriteCloser) func() {
+	stop := make(chan struct{})
+	var stopOnce sync.Once
+	go func() {
+		ticker := time.NewTicker(leaseHeartbeatInterval)
+		defer ticker.Stop()
+		// The first frame goes out at once: the lease must be covered by the
+		// watchdog from the moment it is granted.
+		frame := "ACTIVITY_V1\x00lease\x000\x000\x00"
+		for {
+			if _, err := io.WriteString(stdin, frame); err != nil {
+				return
+			}
+			select {
+			case <-stop:
+				return
+			case <-ticker.C:
+			}
+		}
+	}()
+	return func() { stopOnce.Do(func() { close(stop) }) }
 }
 
 func leaseRequestID() string {
