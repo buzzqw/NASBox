@@ -4,16 +4,16 @@ Questo file registra **dove** gira NASBox e **come** è stato aggiornato. Non
 contiene password, chiavi o segreti: per la configurazione effettiva leggere
 `server/server.conf` sul NAS (non committato).
 
-## Stato installato (2026-11-26)
+## Stato installato (2026-11-27)
 
 | Componente | Versione | Posizione |
 |---|---|---|
-| Demone NAS (Go) | **3.37.0** | `andres@192.168.1.119:/volume1/Varie/nasbox-server/nasbox-server` |
+| Demone NAS (Go) | **3.38.0** | `andres@192.168.1.119:/volume1/Varie/nasbox-server/nasbox-server` |
 | Wrapper demone | — | `/volume1/Varie/nasbox-server/nasbox-server.sh` → `nasbox-server -c /volume1/Varie/sync-daemon/server/server.conf "$@"` |
 | Config demone | — | `/volume1/Varie/sync-daemon/server/server.conf` (esclusa da git) |
 | Stato demone | — | `/volume1/Varie/sync-daemon/server/state/` |
 | Condivisione NAS | — | `/volume1/NASBox` |
-| Client Linux | **1.24.0** | `~/.local/bin/nasbox-go` su 122 e 134 |
+| Client Linux | **1.25.0** | `~/.local/bin/nasbox-go` su 122 e 134 |
 | Launcher consultazione | — | `~/.local/bin/nasbox-ghost` → `nasbox-go -ghost "$@"` (122 e 134) |
 | Canale update Go | `go-stable` | `/volume1/NASBox/.nasbox-client-update-go/` (`manifest-go.json`, `nasbox-go-<ver>`) |
 
@@ -22,6 +22,7 @@ Il demone gira come processo unico con timer interno di **720 minuti** (12 ore).
 
 ## Backup fatti durante gli aggiornamenti
 
+- `nasbox-server.prev-3.37.0-20261127` — demone precedente al rilascio 3.38.0.
 - `nasbox-server.prev-3.36.0-20261126` — demone precedente (anche
   `nasbox-server.prev-3.36.0` e `.prev-3.35.0` già presenti nella cartella).
 - `/volume1/Varie/sync-daemon/server/server.conf.bak-20261126-2000` — config
@@ -98,6 +99,19 @@ quello Python legacy non va più pubblicato.
 - Client 122 e 134 → 1.23.0, `doctor` con server raggiungibile e lock libero.
 - `last_manifest_revision` persistito nel `client.json` del 122 (legato al
   repository id): dopo il riavvio non serve più il manifest completo.
+
+## Verifica finale dopo il deploy 1.25.0 / 3.38.0
+
+- `--status` → v3.38.0, demone in esecuzione, ultimo pass registrato.
+- `--capabilities` → 3.38.0 con le capacità chunk/private_rsync invariate.
+- `--print-config` → `RECOVERY_PENDING=0`, `RECOVERY_ERROR=` vuoto.
+- `--metrics` → demone attivo, lock libero.
+- Client 122 e 134 → 1.25.0, `doctor` con server 3.38.0 raggiungibile,
+  backend `chunks`, lock libero.
+- Web UI: endpoint `/api/delete`, `/api/rename`, `/api/mkdir`, `/api/entry` e
+  card Recovery nella pagina Stato.
+- Canale Go: `manifest-go.json` → 1.25.0, `requires_server=3.38.0`, sha256
+  `401d9aa6cf196bc185a7d354c1afbf2d0f39930c27bebdef6b279f903b7fed85`.
 
 ## Verifica finale dopo il deploy 1.24.0 / 3.37.0
 
