@@ -4,6 +4,20 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 1.24.0 - 2026-11-27
+
+Client 1.24.0 e server 3.37.0 (invariato).
+
+- **Dettagli completi nel dialog «Versioni»**: selezionando una versione ora
+  compare un pannello con percorso del file, data e ora completa (secondi e
+  offset), dimensione leggibile e byte esatti, dove è conservata la copia
+  (questo PC o NAS), percorso della copia nello storico e identificativo della
+  versione. Anche le righe della lista mostrano timestamp con secondi e
+  dimensione esatta.
+- **Date delle versioni corrette**: il parser del dialog accettava solo un
+  letterale `-000000Z`, quindi le versioni recenti (con microsecondi) non
+  avevano data e venivano ordinate male. Usa ora lo stesso parser dello storico.
+
 ## 1.23.0 / 3.37.0 - 2026-11-26
 
 Client 1.23.0 e server 3.37.0.

@@ -29,20 +29,56 @@ type fileVersion struct {
 	Trash  string          // Source == nas: path inside .sync-trash
 }
 
-var versionStampLayouts = []string{"2006-01-02--15-04-05-000000Z", "2006-01-02--15-04-05"}
-
+// parseVersionStamp delegates to the history parser, which also understands
+// the microseconds of current stamps ("...-123456Z"). The old layout here
+// matched only a literal "-000000Z", so most versions had no date at all.
 func parseVersionStamp(value string) time.Time {
-	value = strings.TrimPrefix(value, "-")
-	for _, layout := range versionStampLayouts {
-		location := time.Local
-		if strings.HasSuffix(layout, "Z") {
-			location = time.UTC
-		}
-		if parsed, err := time.ParseInLocation(layout, value, location); err == nil {
-			return parsed
-		}
+	stamp, err := history.VersionTime(strings.TrimPrefix(value, "-"))
+	if err != nil {
+		return time.Time{}
 	}
-	return time.Time{}
+	return stamp
+}
+
+// versionStampFull keeps seconds and the UTC offset, unlike the compact stamp
+// used in the list, so two versions taken in the same minute stay distinct.
+func versionStampFull(value time.Time) string {
+	if value.IsZero() {
+		return "—"
+	}
+	return value.Local().Format("02/01/2006 15:04:05 -07:00")
+}
+
+// sizeDetail adds the exact byte count when the human-readable form rounds it.
+func sizeDetail(size int64) string {
+	human := humanBytes(size)
+	if strings.HasSuffix(human, " B") {
+		return human
+	}
+	return fmt.Sprintf("%s (%d B)", human, size)
+}
+
+// versionDetail describes one version fully: where the file lived, when the
+// copy was taken, how big it is and where its bytes are actually stored.
+func versionDetail(item fileVersion, original string) string {
+	source := tr("ui.versions.on_pc", nil)
+	copyPath := item.Local.TrashPath
+	id := item.Local.Timestamp
+	path := item.Local.Original
+	if item.Source == "nas" {
+		source = tr("ui.versions.on_nas", nil)
+		copyPath = ".sync-trash/" + strings.TrimPrefix(filepath.ToSlash(item.Trash), "/")
+		id = item.Suffix
+		path = original
+	}
+	return strings.Join([]string{
+		fmt.Sprintf("%s: %s", tr("ui.versions.detail_path", nil), valueOrDash(path)),
+		fmt.Sprintf("%s: %s", tr("ui.versions.detail_when", nil), versionStampFull(item.When)),
+		fmt.Sprintf("%s: %s", tr("ui.versions.detail_size", nil), sizeDetail(item.Size)),
+		fmt.Sprintf("%s: %s", tr("ui.versions.detail_source", nil), source),
+		fmt.Sprintf("%s: %s", tr("ui.versions.detail_copy", nil), valueOrDash(copyPath)),
+		fmt.Sprintf("%s: %s", tr("ui.versions.detail_id", nil), valueOrDash(id)),
+	}, "\n")
 }
 
 // loadFileVersions merges local and NAS history for one path, newest first.
@@ -83,7 +119,16 @@ func (c *clientApp) showFileVersions(original string) {
 	restore := widget.NewButtonWithIcon(tr("ui.versions.restore", nil), theme.ContentRedoIcon(), nil)
 	restore.Importance = widget.HighImportance
 	restore.Disable()
-	list := newRowList(func() int { return len(versions) }, 220, 200, func(id int, row *listRow) {
+	// Reserve the full height from the start: Fyne does not re-layout a Border
+	// when a label's text grows, so a one-line placeholder would be clipped
+	// once the six detail lines arrive.
+	detailHint := strings.Join([]string{
+		tr("ui.versions.detail_none", nil), "", "", "", "", "", "", "",
+	}, "\n")
+	detail := widget.NewLabel(detailHint)
+	detail.Wrapping = fyne.TextWrapWord
+	detail.Importance = widget.LowImportance
+	list := newRowList(func() int { return len(versions) }, 200, 340, func(id int, row *listRow) {
 		if id >= len(versions) {
 			return
 		}
@@ -95,14 +140,13 @@ func (c *clientApp) showFileVersions(original string) {
 			row.icon.SetResource(theme.ComputerIcon())
 			row.name.SetText(tr("ui.versions.on_pc", nil))
 		}
-		when := "—"
-		if !item.When.IsZero() {
-			when = item.When.Local().Format("02/01/2006 15:04")
-		}
-		row.meta.SetText(fmt.Sprintf("%s · %s", when, humanBytes(item.Size)))
+		row.meta.SetText(fmt.Sprintf("%s · %s", versionStampFull(item.When), sizeDetail(item.Size)))
 	})
 	list.OnSelected = func(id widget.ListItemID) {
 		selected = int(id)
+		if selected >= 0 && selected < len(versions) {
+			detail.SetText(versionDetail(versions[selected], original))
+		}
 		restore.Enable()
 	}
 	title := widget.NewLabelWithStyle(original, fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
@@ -110,7 +154,7 @@ func (c *clientApp) showFileVersions(original string) {
 	note := widget.NewLabel(tr("ui.versions.note", nil))
 	note.Wrapping = fyne.TextWrapWord
 	note.Importance = widget.LowImportance
-	content := container.NewBorder(container.NewVBox(title, note, status), nil, nil, nil, list)
+	content := container.NewBorder(container.NewVBox(title, note, status), detail, nil, nil, list)
 	popup := dialog.NewCustom(tr("ui.versions.title", nil), tr("ui.action.cancel_short", nil),
 		container.NewBorder(nil, restore, nil, nil, content), c.window)
 	restore.OnTapped = func() {
@@ -132,7 +176,7 @@ func (c *clientApp) showFileVersions(original string) {
 			})
 		}()
 	}
-	popup.Resize(fyne.NewSize(640, 460))
+	popup.Resize(fyne.NewSize(720, 620))
 	popup.Show()
 	go func() {
 		loaded, err := c.loadFileVersions(original)
@@ -143,6 +187,13 @@ func (c *clientApp) showFileVersions(original string) {
 			}
 			versions = loaded
 			list.Refresh()
+			if selected >= len(versions) {
+				selected = -1
+				restore.Disable()
+				detail.SetText(detailHint)
+			} else if selected >= 0 {
+				detail.SetText(versionDetail(versions[selected], original))
+			}
 			if len(versions) == 0 {
 				status.SetText(tr("ui.versions.empty", nil))
 			} else {

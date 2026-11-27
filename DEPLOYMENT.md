@@ -13,7 +13,7 @@ contiene password, chiavi o segreti: per la configurazione effettiva leggere
 | Config demone | — | `/volume1/Varie/sync-daemon/server/server.conf` (esclusa da git) |
 | Stato demone | — | `/volume1/Varie/sync-daemon/server/state/` |
 | Condivisione NAS | — | `/volume1/NASBox` |
-| Client Linux | **1.23.0** | `~/.local/bin/nasbox-go` su 122 e 134 |
+| Client Linux | **1.24.0** | `~/.local/bin/nasbox-go` su 122 e 134 |
 | Launcher consultazione | — | `~/.local/bin/nasbox-ghost` → `nasbox-go -ghost "$@"` (122 e 134) |
 | Canale update Go | `go-stable` | `/volume1/NASBox/.nasbox-client-update-go/` (`manifest-go.json`, `nasbox-go-<ver>`) |
 
@@ -98,3 +98,10 @@ quello Python legacy non va più pubblicato.
 - Client 122 e 134 → 1.23.0, `doctor` con server raggiungibile e lock libero.
 - `last_manifest_revision` persistito nel `client.json` del 122 (legato al
   repository id): dopo il riavvio non serve più il manifest completo.
+
+## Verifica finale dopo il deploy 1.24.0 / 3.37.0
+
+- Solo client: il demone resta 3.37.0, `--status` e `--capabilities` invariati.
+- Client 122 e 134 → 1.24.0, `nasbox-go version` dopo il riavvio della GUI.
+- Dialog «Versioni»: pannello dettagli con data completa, byte esatti e
+  percorso della copia nello storico; data non più «—» sulle versioni recenti.
