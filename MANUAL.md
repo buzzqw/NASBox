@@ -277,10 +277,12 @@ numbers, never file names. All options, with their defaults, are described in
 
 ## 14. Updates
 
-- **PC**: the app checks at startup and every few hours, verifies the update and goes
-  back to the previous version by itself if the new one fails to start. If you
-  installed the `.deb` package, updates come through your package manager. Manual
-  check: *Settings → About → Check for updates*.
+- **PC**: the app checks at startup and every few hours, verifies the detached
+  Ed25519 signature of the manifest and the artifact hash, and goes back to the
+  previous version by itself if the new one fails to start. A manifest without a
+  valid signature is refused. If you installed the `.deb` package, updates come
+  through your package manager. Manual check:
+  *Settings → About → Check for updates*.
 - **NAS**: the daemon can be updated from the app (*Settings → About → Check for
   server update*) after you confirm.
 
