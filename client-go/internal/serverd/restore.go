@@ -223,13 +223,16 @@ func (c *Context) restoreBackupRelative(path string, now time.Time) (string, err
 	return "", fmt.Errorf("impossibile allocare una versione di backup per %s", path)
 }
 
-func (c *Context) appendRestorePUT(device string, item restoreRequest, fingerprint restoreFingerprint, index int) (string, error) {
-	txid := fmt.Sprintf("restore-%d-%d-%d-%s", time.Now().Unix(), index, os.Getpid(), randomSuffix())
-	row := journalRowPUT(
+func restorePutRow(device string, item restoreRequest, fingerprint restoreFingerprint) string {
+	return journalRowPUT(
 		encodeField(item.path), fingerprint.digest, fingerprint.size, fingerprint.mtimeNS,
 		encodeField(device), journalNow(), "",
 	)
-	return txid, c.appendTransactionLocked(txid, device, []string{row})
+}
+
+func (c *Context) appendRestorePUT(device string, item restoreRequest, fingerprint restoreFingerprint, index int) (string, error) {
+	txid := fmt.Sprintf("restore-%d-%d-%d-%s", time.Now().Unix(), index, os.Getpid(), randomSuffix())
+	return txid, c.appendTransactionLocked(txid, device, []string{restorePutRow(device, item, fingerprint)})
 }
 
 // restoreJournalError keeps the restored bytes whenever the transaction is
@@ -326,19 +329,47 @@ func (c *Context) restoreOne(device string, plan restorePlan, manifest restoreFi
 		return "ERROR", restoreFingerprint{}, false, nil
 	}
 
-	undo := restoreUndo{source: plan.source, target: target}
+	backupRelative := ""
+	var prior *publishIntentFileState
 	if existed {
-		backupRelative, err := c.restoreBackupRelative(item.path, now)
+		backupRelative, err = c.restoreBackupRelative(item.path, now)
 		if err != nil {
 			return "ERROR", restoreFingerprint{}, false, nil
 		}
+		prior, err = publishPriorFromInfo(info)
+		if err != nil {
+			return "ERROR", restoreFingerprint{}, false, nil
+		}
+	}
+	size, _ := strconv.ParseInt(fingerprint.size, 10, 64)
+	mtimeNS, _ := strconv.ParseInt(fingerprint.mtimeNS, 10, 64)
+	txid := fmt.Sprintf("restore-%d-%d-%d-%s", time.Now().Unix(), index, os.Getpid(), randomSuffix())
+	row := restorePutRow(device, item, fingerprint)
+	intent, err := c.prepareMutationIntent(mutationIntentPayload{
+		Version: mutationIntentVersion, TxID: txid, Device: device, RunTS: webRunTS(),
+		Kind: mutationKindRestore,
+		Ops: []mutationIntentOp{{
+			Src: sourceRelative, Dst: item.path, Backup: backupRelative, Prior: prior,
+			Digest: fingerprint.digest, Size: size, MTimeNS: mtimeNS, Rows: []string{row},
+		}},
+	})
+	if err != nil {
+		return "ERROR", restoreFingerprint{}, false, nil
+	}
+	defer intent.close()
+	runTxIntentFailpoint("mutation_prepared", txid)
+
+	undo := restoreUndo{source: plan.source, target: target}
+	if existed {
 		undo.backup = filepath.Join(c.ShareRoot, backupRelative)
 		if err := os.MkdirAll(filepath.Dir(undo.backup), 0o755); err != nil {
+			_ = intent.finish()
 			return "ERROR", restoreFingerprint{}, false, nil
 		}
 		// Keep the current inode reachable under its history name, then replace
 		// the live path with one atomic rename. No window exposes a partial file.
 		if err := os.Link(target, undo.backup); err != nil {
+			_ = intent.finish()
 			return "ERROR", restoreFingerprint{}, false, nil
 		}
 	}
@@ -346,15 +377,18 @@ func (c *Context) restoreOne(device string, plan restorePlan, manifest restoreFi
 		if undo.backup != "" {
 			_ = os.Remove(undo.backup)
 		}
+		_ = intent.finish()
 		return "ERROR", restoreFingerprint{}, false, nil
 	}
 	undo.movedSource = true
+	runTxIntentFailpoint("mutation_moved", txid)
 
 	matches, err := restoreFileMatches(target, fingerprint)
 	if err != nil || !matches {
 		if rollbackErr := undo.rollback(); rollbackErr != nil {
 			return "", restoreFingerprint{}, false, rollbackErr
 		}
+		_ = intent.finish()
 		return "ERROR", restoreFingerprint{}, false, nil
 	}
 	_ = syncFile(target)
@@ -364,16 +398,23 @@ func (c *Context) restoreOne(device string, plan restorePlan, manifest restoreFi
 		_ = syncDir(filepath.Dir(undo.backup))
 	}
 
-	txid, err := c.appendRestorePUT(device, item, fingerprint, index)
-	if err != nil {
+	if err := c.appendTransactionLocked(txid, device, []string{row}); err != nil {
 		committed, checkErr := c.restoreJournalError(txid, &undo)
 		if checkErr != nil {
 			return "", restoreFingerprint{}, false, checkErr
 		}
 		if committed {
+			_ = intent.markCommitted()
+			_ = intent.finish()
 			return "RESTORED", fingerprint, true, nil
 		}
+		_ = intent.finish()
 		return "ERROR", restoreFingerprint{}, false, nil
+	}
+	runTxIntentFailpoint("mutation_committed", txid)
+	_ = intent.markCommitted()
+	if err := intent.finish(); err != nil {
+		return "", restoreFingerprint{}, false, err
 	}
 	return "RESTORED", fingerprint, true, nil
 }
@@ -413,6 +454,9 @@ func cmdRestoreBatch(ctx *Context) error {
 
 	statuses := make([]string, len(items))
 	err = ctx.withJournalLock(func() error {
+		if err := ctx.recoverMutationIntentsLocked(device); err != nil {
+			return err
+		}
 		plans := make([]restorePlan, len(items))
 		for i, item := range items {
 			if err := ctx.verifyRestorePaths(item); err != nil {

@@ -195,7 +195,10 @@ func cmdTransferWait(ctx *Context) error {
 	// The global lease is now ours. Finish any interrupted chunk publication
 	// before telling the client that the NAS is ready for mutations.
 	if err := ctx.withJournalLock(func() error {
-		return ctx.recoverTxIntentsLocked(device, nil)
+		if err := ctx.recoverTxIntentsLocked(device, nil); err != nil {
+			return err
+		}
+		return ctx.recoverMutationIntentsLocked(device)
 	}); err != nil {
 		return err
 	}

@@ -158,6 +158,16 @@ func openTxIntentStore(paths StatePaths) (*txIntentStore, error) {
 		) WITHOUT ROWID;
 		CREATE INDEX IF NOT EXISTS idx_intent_status_revision
 		ON intent(status, target_revision, created_at);
+		CREATE TABLE IF NOT EXISTS mutation_intent (
+			txid TEXT PRIMARY KEY,
+			kind TEXT NOT NULL CHECK(kind IN ('delete', 'rename', 'restore')),
+			status TEXT NOT NULL CHECK(status IN ('PREPARED', 'READY', 'COMMITTED')),
+			payload TEXT NOT NULL,
+			created_at INTEGER NOT NULL,
+			updated_at INTEGER NOT NULL
+		) WITHOUT ROWID;
+		CREATE INDEX IF NOT EXISTS idx_mutation_status_created
+		ON mutation_intent(status, created_at);
 	`
 	if schemaVersion == 0 {
 		schemaSQL += `PRAGMA user_version=1;`

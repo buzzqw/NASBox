@@ -228,18 +228,42 @@ func (c *Context) deleteEntryLocked(device, runTS, relative string) (webDeleteRe
 		result.Files = len(paths)
 		backupRelative := filepath.ToSlash(filepath.Join(".sync-trash", relative+"-"+runTS))
 		backup := filepath.Join(c.ShareRoot, filepath.FromSlash(backupRelative))
-		if err := os.MkdirAll(filepath.Dir(backup), 0o755); err != nil {
-			return err
-		}
-		if err := os.Rename(full, backup); err != nil {
+		prior, err := publishPriorFromInfo(info)
+		if err != nil {
 			return err
 		}
 		txid := "web-delete-" + runTS + "-" + strconv.Itoa(os.Getpid()) + "-" + randomSuffix()
-		if err := c.appendTransactionLocked(txid, device, deleteRows(paths, device, journalNow())); err != nil {
+		rows := deleteRows(paths, device, journalNow())
+		intent, err := c.prepareMutationIntent(mutationIntentPayload{
+			Version: mutationIntentVersion, TxID: txid, Device: device, RunTS: runTS,
+			Kind: mutationKindDelete,
+			Ops:  []mutationIntentOp{{Path: relative, Backup: backupRelative, Prior: prior, Rows: rows}},
+		})
+		if err != nil {
+			return err
+		}
+		defer intent.close()
+		runTxIntentFailpoint("mutation_prepared", txid)
+		if err := os.MkdirAll(filepath.Dir(backup), 0o755); err != nil {
+			_ = intent.finish()
+			return err
+		}
+		if err := os.Rename(full, backup); err != nil {
+			_ = intent.finish()
+			return err
+		}
+		runTxIntentFailpoint("mutation_moved", txid)
+		if err := c.appendTransactionLocked(txid, device, rows); err != nil {
 			_ = os.MkdirAll(filepath.Dir(full), 0o755)
 			if rollbackErr := os.Rename(backup, full); rollbackErr != nil {
 				return fmt.Errorf("delete journal: %w (rollback: %v)", err, rollbackErr)
 			}
+			_ = intent.finish()
+			return err
+		}
+		runTxIntentFailpoint("mutation_committed", txid)
+		_ = intent.markCommitted()
+		if err := intent.finish(); err != nil {
 			return err
 		}
 		result.Trash = backupRelative
@@ -361,14 +385,37 @@ func (c *Context) renameEntryLocked(device, runTS, src, dst string) (webRenameRe
 			})
 		}
 		result.Files = len(records)
-		if err := os.Rename(srcFull, dstFull); err != nil {
+		prior, err := publishPriorFromInfo(info)
+		if err != nil {
 			return err
 		}
 		txid := "web-rename-" + runTS + "-" + strconv.Itoa(os.Getpid()) + "-" + randomSuffix()
-		if err := c.appendTransactionLocked(txid, device, renameRows(src, dst, records, device, journalNow())); err != nil {
+		rows := renameRows(src, dst, records, device, journalNow())
+		intent, err := c.prepareMutationIntent(mutationIntentPayload{
+			Version: mutationIntentVersion, TxID: txid, Device: device, RunTS: runTS,
+			Kind: mutationKindRename,
+			Ops:  []mutationIntentOp{{Src: src, Dst: dst, Prior: prior, Rows: rows}},
+		})
+		if err != nil {
+			return err
+		}
+		defer intent.close()
+		runTxIntentFailpoint("mutation_prepared", txid)
+		if err := os.Rename(srcFull, dstFull); err != nil {
+			_ = intent.finish()
+			return err
+		}
+		runTxIntentFailpoint("mutation_moved", txid)
+		if err := c.appendTransactionLocked(txid, device, rows); err != nil {
 			if rollbackErr := os.Rename(dstFull, srcFull); rollbackErr != nil {
 				return fmt.Errorf("rename journal: %w (rollback: %v)", err, rollbackErr)
 			}
+			_ = intent.finish()
+			return err
+		}
+		runTxIntentFailpoint("mutation_committed", txid)
+		_ = intent.markCommitted()
+		if err := intent.finish(); err != nil {
 			return err
 		}
 		return nil

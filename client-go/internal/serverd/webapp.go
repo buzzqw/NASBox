@@ -203,6 +203,16 @@ func (c *Context) withWebLease(timeout time.Duration, fn func() error) error {
 	if err := c.writeOwner(webDevice, "web", "", 0, 0); err != nil {
 		return err
 	}
+	// A web mutation also waits for an interrupted publish/delete/rename to be
+	// resolved. It holds the lease now, so it is the recovery owner.
+	if err := c.withJournalLock(func() error {
+		if err := c.recoverTxIntentsLocked(webDevice, nil); err != nil {
+			return err
+		}
+		return c.recoverMutationIntentsLocked(webDevice)
+	}); err != nil {
+		return err
+	}
 	return fn()
 }
 

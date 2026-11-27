@@ -75,17 +75,24 @@ func cmdCheckedDelete(ctx *Context) error {
 		return mapLeaseError(err)
 	}
 	statuses := make([]string, count)
-	batch := []string{}
-	moved := []struct{ from, to string }{}
-	trash := filepath.Join(ctx.ShareRoot, ".sync-trash")
+	repairRows := []string{}
+	type checkedMove struct {
+		index                          int
+		target, backup, backupRelative string
+		rows                           []string
+	}
+	var moves []checkedMove
 
 	err = ctx.withJournalLock(func() error {
+		if err := ctx.recoverMutationIntentsLocked(device); err != nil {
+			return err
+		}
 		for index, item := range items {
 			target := filepath.Join(ctx.ShareRoot, item.path)
 			info, statErr := os.Lstat(target)
 			if os.IsNotExist(statErr) {
 				statuses[index] = "ABSENT"
-				batch = append(batch, item.path)
+				repairRows = append(repairRows, deleteRows([]string{item.path}, device, journalNow())...)
 				continue
 			}
 			if statErr != nil || !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
@@ -97,24 +104,76 @@ func cmdCheckedDelete(ctx *Context) error {
 				statuses[index] = "STALE"
 				continue
 			}
-			backup := filepath.Join(trash, item.path+"-"+runTS)
-			if err := os.MkdirAll(filepath.Dir(backup), 0o755); err != nil {
+			backupRelative := filepath.ToSlash(filepath.Join(".sync-trash", item.path+"-"+runTS))
+			backup := filepath.Join(ctx.ShareRoot, filepath.FromSlash(backupRelative))
+			if _, err := publishPriorFromInfo(info); err != nil {
 				statuses[index] = "ERROR"
 				continue
 			}
-			if err := os.Rename(target, backup); err != nil {
-				statuses[index] = "ERROR"
-				continue
-			}
-			moved = append(moved, struct{ from, to string }{backup, target})
-			batch = append(batch, item.path)
-			statuses[index] = "DELETED"
+			moves = append(moves, checkedMove{
+				index: index, target: target, backup: backup, backupRelative: backupRelative,
+				rows: deleteRows([]string{item.path}, device, journalNow()),
+			})
 		}
-		if len(batch) == 0 {
+		if len(moves) == 0 && len(repairRows) == 0 {
 			return nil
 		}
 		txid := "delete-batch-" + runTS + "-" + strconv.Itoa(os.Getpid()) + "-" + randomSuffix()
-		if err := ctx.appendTransactionLocked(txid, device, deleteRows(batch, device, journalNow())); err != nil {
+		var intent *mutationIntent
+		if len(moves) > 0 {
+			ops := make([]mutationIntentOp, 0, len(moves))
+			for _, move := range moves {
+				info, err := os.Lstat(move.target)
+				if err != nil {
+					return err
+				}
+				prior, err := publishPriorFromInfo(info)
+				if err != nil {
+					return err
+				}
+				ops = append(ops, mutationIntentOp{
+					Path: items[move.index].path, Backup: move.backupRelative,
+					Prior: prior, Rows: move.rows,
+				})
+			}
+			var err error
+			intent, err = ctx.prepareMutationIntent(mutationIntentPayload{
+				Version: mutationIntentVersion, TxID: txid, Device: device, RunTS: runTS,
+				Kind: mutationKindDelete, Ops: ops,
+			})
+			if err != nil {
+				return err
+			}
+			defer intent.close()
+			runTxIntentFailpoint("mutation_prepared", txid)
+		}
+		var moved []struct{ from, to string }
+		movedRows := []string{}
+		for _, move := range moves {
+			index := move.index
+			if err := os.MkdirAll(filepath.Dir(move.backup), 0o755); err != nil {
+				statuses[index] = "ERROR"
+				continue
+			}
+			if err := os.Rename(move.target, move.backup); err != nil {
+				statuses[index] = "ERROR"
+				continue
+			}
+			moved = append(moved, struct{ from, to string }{move.backup, move.target})
+			movedRows = append(movedRows, move.rows...)
+			statuses[index] = "DELETED"
+		}
+		if len(moved) > 0 {
+			runTxIntentFailpoint("mutation_moved", txid)
+		}
+		rows := append(append([]string{}, repairRows...), movedRows...)
+		if len(rows) == 0 {
+			if intent != nil {
+				_ = intent.finish()
+			}
+			return nil
+		}
+		if err := ctx.appendTransactionLocked(txid, device, rows); err != nil {
 			for _, pair := range moved {
 				_ = os.MkdirAll(filepath.Dir(pair.to), 0o755)
 				_ = os.Rename(pair.from, pair.to)
@@ -124,7 +183,17 @@ func cmdCheckedDelete(ctx *Context) error {
 					statuses[i] = "ERROR"
 				}
 			}
+			if intent != nil {
+				_ = intent.finish()
+			}
 			return err
+		}
+		runTxIntentFailpoint("mutation_committed", txid)
+		if intent != nil {
+			_ = intent.markCommitted()
+			if err := intent.finish(); err != nil {
+				return err
+			}
 		}
 		for _, item := range items {
 			pruneEmptyDirs(ctx.ShareRoot, item.path)

@@ -4,6 +4,12 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+- **Recovery durevole per delete, rename e restore**: ogni operazione scrive un
+  intent persistente prima dello spostamento su disco; se il processo si
+  interrompe, il lease successivo completa il journal o annulla l’operazione in
+  modo idempotente. Lo stato è visibile in `doctor`, nella schermata di controllo
+  e nella pagina Stato della web UI (`RECOVERY_PENDING`); gli stati ambigui
+  falliscono chiusi e richiedono intervento.
 - **Diagnostica allineata al backend reale**: la schermata di controllo e
   `doctor` mostrano il backend effettivo (`chunks` o `rsync`); rsync locale e
   sul NAS vengono verificati solo quando quel backend lo usa; il rilevamento

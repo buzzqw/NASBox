@@ -6222,6 +6222,22 @@
     "en": "The NAS journal is not ready: restart the NASBox daemon on the NAS.",
     "it": "Il journal del NAS non è pronto: riavvia il demone NASBox sul NAS."
   },
+  "ui.health.recovery": {
+    "en": "Recovery",
+    "it": "Recupero"
+  },
+  "ui.health.recovery_ok": {
+    "en": "no pending operation",
+    "it": "nessuna operazione in sospeso"
+  },
+  "ui.health.recovery_pending": {
+    "en": "{count} operations to recover",
+    "it": "{count} operazioni da recuperare"
+  },
+  "ui.health.recovery_hint": {
+    "en": "The next lease acquisition completes the recovery automatically. If the error persists, run doctor on the client.",
+    "it": "La prossima acquisizione del lease completa il recupero automaticamente. Se l'errore persiste, esegui doctor sul client."
+  },
   "ui.health.rsync_local": {
     "en": "rsync on this PC",
     "it": "rsync su questo PC"

@@ -299,6 +299,11 @@ func cmdPrintConfig(ctx *Context) error {
 			chunkBytes, chunkObjects, chunkAt = fields[0], fields[1], fields[2]
 		}
 	}
+	recoveryPending, recoveryErr := ctx.pendingRecovery()
+	recoveryError := ""
+	if recoveryErr != nil {
+		recoveryError = recoveryErr.Error()
+	}
 	lock := ctx.readLock()
 	lockHeld := "false"
 	if lock.Held {
@@ -367,6 +372,8 @@ func cmdPrintConfig(ctx *Context) error {
 	lines = append(lines,
 		"JOURNAL_READY="+strconv.FormatBool(fileExists(p.Journal)),
 		"STATE_DIR="+p.Dir,
+		"RECOVERY_PENDING="+strconv.Itoa(recoveryPending),
+		"RECOVERY_ERROR="+recoveryError,
 	)
 	if flockOK {
 		lines = append(lines, "SYNC_LOCK_FILE="+p.Lock, "SYNC_LOCK_OWNER_FILE="+p.Owner)

@@ -245,6 +245,10 @@ NASBox is built so you don't lose files by mistake:
   leaves it alone.
 - **Integrity check**: *Settings → Integrity* verifies that files match what was
   recorded.
+- **Interrupted operations**: if a delete, rename or restore is interrupted (for
+  example by a power cut), the next sync lease completes or safely undoes it.
+  *Status* and `nasbox doctor` show whether recovery work is pending; an ambiguous
+  case is left untouched and reported instead of guessing.
 
 NASBox synchronizes; it is **not a backup**. If you delete a file everywhere and empty
 the history, no other copy exists. Keep a separate backup of the NAS.

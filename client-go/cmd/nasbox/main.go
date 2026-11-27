@@ -193,6 +193,8 @@ type doctorReport struct {
 	RequestedBackend string              `json:"requested_backend,omitempty"`
 	RsyncLocal       string              `json:"rsync_local,omitempty"`
 	RsyncNAS         string              `json:"rsync_nas,omitempty"`
+	RecoveryPending  int                 `json:"recovery_pending,omitempty"`
+	RecoveryError    string              `json:"recovery_error,omitempty"`
 	Realtime         string              `json:"realtime,omitempty"`
 	NasCapabilities  string              `json:"nas_capabilities,omitempty"`
 	NasHardware      string              `json:"nas_hardware,omitempty"`
@@ -220,11 +222,13 @@ type remoteLockReport struct {
 }
 
 type serverProbe struct {
-	RsyncNAS   string
-	Version    string
-	Reachable  bool
-	Error      string
-	RemoteLock remoteLockReport
+	RsyncNAS        string
+	Version         string
+	Reachable       bool
+	Error           string
+	RecoveryPending int
+	RecoveryError   string
+	RemoteLock      remoteLockReport
 }
 
 func doctor(args []string) int {
@@ -310,6 +314,8 @@ func doctor(args []string) int {
 	report.ServerError = probe.Error
 	report.Lock.Remote = probe.RemoteLock
 	report.RsyncNAS = probe.RsyncNAS
+	report.RecoveryPending = probe.RecoveryPending
+	report.RecoveryError = probe.RecoveryError
 	report.Backend = transfer.EffectiveBackend(cfg)
 	report.RequestedBackend = strings.ToLower(strings.TrimSpace(cfg.String("transfer_backend")))
 	if report.Backend == "rsync" {
@@ -435,6 +441,8 @@ func probeServer(cfg *config.Config) serverProbe {
 		probe.Error = "versione server sconosciuta"
 	}
 	probe.RemoteLock = remoteLockFromValues(values)
+	probe.RecoveryPending, _ = strconv.Atoi(strings.TrimSpace(values["RECOVERY_PENDING"]))
+	probe.RecoveryError = strings.TrimSpace(values["RECOVERY_ERROR"])
 	// rsync is a dependency of the optional rsync backend only. Probing it
 	// while the client transfers chunks produced a misleading diagnostic.
 	if transfer.EffectiveBackend(cfg) == "rsync" {
@@ -519,6 +527,13 @@ func writeDoctorReport(report doctorReport, asJSON bool) error {
 		fmt.Printf("rsync:       locale %s · NAS %s\n", valueOr(report.RsyncLocal, "?"), valueOr(report.RsyncNAS, "?"))
 	} else {
 		fmt.Printf("rsync:       non usato dal backend %s\n", report.Backend)
+	}
+	if report.RecoveryError != "" {
+		fmt.Printf("recupero:   errore %s\n", report.RecoveryError)
+	} else if report.RecoveryPending > 0 {
+		fmt.Printf("recupero:   %d operazioni in sospeso\n", report.RecoveryPending)
+	} else {
+		fmt.Println("recupero:   nessuna operazione in sospeso")
 	}
 	fmt.Printf("tempo reale: %s\n", valueOr(report.Realtime, "?"))
 	fmt.Printf("capacità NAS: %s\n", valueOr(report.NasHardware, "?"))

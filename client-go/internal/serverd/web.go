@@ -42,6 +42,11 @@ func (c *Context) statusValues() map[string]string {
 	if _, ok := c.daemonRunning(); ok {
 		running = "true"
 	}
+	recoveryPending, recoveryErr := c.pendingRecovery()
+	recoveryError := ""
+	if recoveryErr != nil {
+		recoveryError = recoveryErr.Error()
+	}
 	return map[string]string{
 		"VERSION":                version,
 		"RUNNING":                running,
@@ -54,6 +59,8 @@ func (c *Context) statusValues() map[string]string {
 		"CHECK_INTERVAL_MINUTES": value(c.Config, "CHECK_INTERVAL_MINUTES", "60"),
 		"JOURNAL_BYTES":          strconv.FormatInt(fileSize(p.Journal), 10),
 		"MANIFEST_BYTES":         strconv.FormatInt(fileSize(p.Manifest), 10),
+		"RECOVERY_PENDING":       strconv.Itoa(recoveryPending),
+		"RECOVERY_ERROR":         recoveryError,
 	}
 }
 

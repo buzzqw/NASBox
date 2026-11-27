@@ -150,18 +150,17 @@ func cmdBrowseRename(ctx *Context) error {
 		return mapLeaseError(err)
 	}
 	err = ctx.withJournalLock(func() error {
+		if err := ctx.recoverMutationIntentsLocked(device); err != nil {
+			return err
+		}
 		if _, err := os.Lstat(target); err == nil {
 			return failBrowse(magic, "destinazione gia' esistente")
 		}
-		if err := os.Rename(source, target); err != nil {
-			return failBrowse(magic, "rinomina fallita")
-		}
-		txid := "browse-rename-" + runTS + "-" + strconv.Itoa(os.Getpid()) + "-" + randomSuffix()
 		var rows []string
 		if magic == "BROWSE_RENAME_V1" {
 			paths := []string{src}
 			if info.IsDir() {
-				files, _ := listRegularFiles(target)
+				files, _ := listRegularFiles(source)
 				paths = nil
 				for _, relative := range files {
 					paths = append(paths, filepath.ToSlash(filepath.Join(src, relative)))
@@ -171,8 +170,36 @@ func cmdBrowseRename(ctx *Context) error {
 		} else {
 			rows = renameRows(src, dst, records, device, journalNow())
 		}
+		prior, err := publishPriorFromInfo(info)
+		if err != nil {
+			return failBrowse(magic, "identità file non disponibile")
+		}
+		txid := "browse-rename-" + runTS + "-" + strconv.Itoa(os.Getpid()) + "-" + randomSuffix()
+		intent, err := ctx.prepareMutationIntent(mutationIntentPayload{
+			Version: mutationIntentVersion, TxID: txid, Device: device, RunTS: runTS,
+			Kind: mutationKindRename,
+			Ops:  []mutationIntentOp{{Src: src, Dst: dst, Prior: prior, Rows: rows}},
+		})
+		if err != nil {
+			return err
+		}
+		defer intent.close()
+		runTxIntentFailpoint("mutation_prepared", txid)
+		if err := os.Rename(source, target); err != nil {
+			_ = intent.finish()
+			return failBrowse(magic, "rinomina fallita")
+		}
+		runTxIntentFailpoint("mutation_moved", txid)
 		if err := ctx.appendTransactionLocked(txid, device, rows); err != nil {
-			_ = os.Rename(target, source)
+			if rollbackErr := os.Rename(target, source); rollbackErr != nil {
+				return err
+			}
+			_ = intent.finish()
+			return err
+		}
+		runTxIntentFailpoint("mutation_committed", txid)
+		_ = intent.markCommitted()
+		if err := intent.finish(); err != nil {
 			return err
 		}
 		return nil

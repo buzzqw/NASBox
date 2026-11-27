@@ -92,6 +92,16 @@ func (c *clientApp) runHealthChecks() []healthCheck {
 		if strings.ToLower(values["JOURNAL_READY"]) != "true" {
 			add("error", tr("ui.health.journal", nil), values["JOURNAL_READY"], tr("ui.health.journal_hint", nil))
 		}
+		if values["RECOVERY_ERROR"] != "" {
+			add("error", tr("ui.health.recovery", nil), values["RECOVERY_ERROR"], tr("ui.health.recovery_hint", nil))
+		} else if pending, err := strconv.Atoi(values["RECOVERY_PENDING"]); err == nil {
+			if pending > 0 {
+				add("warn", tr("ui.health.recovery", nil),
+					tr("ui.health.recovery_pending", map[string]any{"count": pending}), tr("ui.health.recovery_hint", nil))
+			} else {
+				add("ok", tr("ui.health.recovery", nil), tr("ui.health.recovery_ok", nil), "")
+			}
+		}
 	}
 
 	backend := transfer.EffectiveBackend(c.cfg)

@@ -30,6 +30,9 @@ func cmdBrowseDelete(ctx *Context) error {
 	target := filepath.Join(ctx.ShareRoot, relative)
 	backup := filepath.Join(ctx.ShareRoot, ".sync-trash", relative+"-"+runTS)
 	err = ctx.withJournalLock(func() error {
+		if err := ctx.recoverMutationIntentsLocked(device); err != nil {
+			return err
+		}
 		info, err := os.Lstat(target)
 		if err != nil || info.Mode()&os.ModeSymlink != 0 {
 			return failBrowseDelete("elemento non trovato")
@@ -45,16 +48,43 @@ func cmdBrowseDelete(ctx *Context) error {
 				paths = append(paths, filepath.ToSlash(filepath.Join(relative, file)))
 			}
 		}
+		backupRelative := filepath.ToSlash(filepath.Join(".sync-trash", relative+"-"+runTS))
+		prior, err := publishPriorFromInfo(info)
+		if err != nil {
+			return failBrowseDelete("identità file non disponibile")
+		}
+		txid := "browse-delete-" + runTS + "-" + strconv.Itoa(os.Getpid()) + "-" + randomSuffix()
+		rows := deleteRows(paths, device, journalNow())
+		intent, err := ctx.prepareMutationIntent(mutationIntentPayload{
+			Version: mutationIntentVersion, TxID: txid, Device: device, RunTS: runTS,
+			Kind: mutationKindDelete,
+			Ops:  []mutationIntentOp{{Path: relative, Backup: backupRelative, Prior: prior, Rows: rows}},
+		})
+		if err != nil {
+			return err
+		}
+		defer intent.close()
+		runTxIntentFailpoint("mutation_prepared", txid)
 		if err := os.MkdirAll(filepath.Dir(backup), 0o755); err != nil {
+			_ = intent.finish()
 			return failBrowseDelete("cartella storico non creata")
 		}
 		if err := os.Rename(target, backup); err != nil {
+			_ = intent.finish()
 			return failBrowseDelete("spostamento fallito")
 		}
-		txid := "browse-delete-" + runTS + "-" + strconv.Itoa(os.Getpid()) + "-" + randomSuffix()
-		if err := ctx.appendTransactionLocked(txid, device, deleteRows(paths, device, journalNow())); err != nil {
+		runTxIntentFailpoint("mutation_moved", txid)
+		if err := ctx.appendTransactionLocked(txid, device, rows); err != nil {
 			_ = os.MkdirAll(filepath.Dir(target), 0o755)
-			_ = os.Rename(backup, target)
+			if rollbackErr := os.Rename(backup, target); rollbackErr != nil {
+				return err
+			}
+			_ = intent.finish()
+			return err
+		}
+		runTxIntentFailpoint("mutation_committed", txid)
+		_ = intent.markCommitted()
+		if err := intent.finish(); err != nil {
 			return err
 		}
 		pruneEmptyDirs(ctx.ShareRoot, relative)
