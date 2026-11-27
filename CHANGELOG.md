@@ -4,6 +4,10 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 1.25.0 / 3.38.0 - 2026-11-27
+
+Client 1.25.0 e server 3.38.0.
+
 - **Recovery durevole per delete, rename e restore**: ogni operazione scrive un
   intent persistente prima dello spostamento su disco; se il processo si
   interrompe, il lease successivo completa il journal o annulla l’operazione in
