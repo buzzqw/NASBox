@@ -4,6 +4,14 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+- **Web UI: elimina, rinomina e crea cartelle**: dalla pagina File si possono
+  eliminare file e cartelle (spostati nel cestino del NAS, con conferma e
+  conteggio dei file), rinominare file e cartelle senza sovrascrivere, e creare
+  una nuova cartella. Le operazioni usano lo stesso lease, journal e cestino del
+  client desktop; richiedono `WEB_PASSWORD`, l'header anti-CSRF e il percorso
+  sicuro già usato da browse/upload. Una cartella vuota creata dal web compare
+  sugli altri PC quando contiene almeno un file.
+
 ## 1.24.0 - 2026-11-27
 
 Client 1.24.0 e server 3.37.0 (invariato).

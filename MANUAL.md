@@ -182,7 +182,8 @@ The default mode is `normal`: an existing client keeps syncing exactly as before
 
 The NAS daemon serves a web page so you can use your files from any browser, including
 your phone: browse, search, preview (images, PDF, audio, video, text), download, see
-previous versions and **upload** files by dragging them in.
+previous versions, **upload** files by dragging them in, **rename** files and folders,
+**delete** them to the NAS trash, and **create folders**.
 
 Turn it on in `server.conf` on the NAS:
 
@@ -198,6 +199,12 @@ then restart the daemon (`--restart`) and open `http://your-nas:8080`.
   itself.
 - Files uploaded from the web reach all your PCs like any other file. If the name
   already exists, the new file becomes `name (1).ext`: nothing is ever overwritten.
+- **Rename**, **Delete** and **New folder** appear when a password is configured.
+  Rename never overwrites: a name collision is refused. Delete moves files and
+  folders to the NAS trash and asks for confirmation, showing the number of files
+  for a folder; deleted files remain recoverable from history, while a deleted
+  folder is kept as a snapshot under the trash. An empty folder created from the
+  web appears on the other PCs once it contains at least one file.
 - **Share links**: the *Share* button next to a file creates a link (1, 7 or 30 days,
   or no expiry) that anyone can use without a password. *Shared links* lists, copies
   and **revokes** them. Only files can be shared, never folders. `WEB_PUBLIC_URL`

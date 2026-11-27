@@ -10,8 +10,8 @@ cloud. Think of it as a self-hosted Dropbox.
   history you can browse and restore, on the PC and on the NAS.
 - **Simple window, powerful when needed** — a clean *Status / Files / Settings* view
   by default; queue, logs and NAS monitor are one click away under *Advanced tools*.
-- **Browser access** — browse, search, preview, download and upload from any
-  browser, and share a file with a link that expires.
+- **Browser access** — browse, search, preview, download, upload, rename, delete
+  and create folders from any browser, and share a file with a link that expires.
 - **Safe by default** — guards against mass deletions, conflict handling that never
   overwrites silently, and fail-closed behaviour when something looks wrong.
 

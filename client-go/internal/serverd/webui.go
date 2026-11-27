@@ -27,7 +27,7 @@ main{max-width:64rem;margin:0 auto;padding:1rem}
 .row:last-child{border-bottom:0}.row:hover{background:var(--hover)}
 .row .name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer}
 .row .meta{color:var(--mut);font-size:.85rem;text-align:right}
-.row .acts{display:flex;gap:.3rem}.row .acts button{padding:.2rem .5rem;font-size:.85rem}
+.row .acts{display:flex;gap:.3rem;flex-wrap:wrap;justify-content:flex-end}.row .acts button{padding:.2rem .5rem;font-size:.85rem}
 .empty{padding:2.5rem 1rem;text-align:center;color:var(--mut)}
 #drop{position:fixed;inset:0;background:rgba(37,99,235,.15);border:3px dashed var(--pri);display:none;align-items:center;justify-content:center;font-size:1.4rem;z-index:20;pointer-events:none}
 #toast{position:fixed;bottom:1rem;left:50%;transform:translateX(-50%);background:var(--fg);color:var(--bg);padding:.6rem 1rem;border-radius:10px;display:none;z-index:30;max-width:90vw}
@@ -50,6 +50,7 @@ canvas.spark{width:100%;height:52px}
 </style></head><body>
 <header><h1>NASBox</h1>
 <input id="q" type="search" placeholder="Cerca per nome…" aria-label="Cerca">
+<button id="newDirBtn" style="display:none">Nuova cartella</button>
 <button id="linksBtn" style="display:none">Link condivisi</button>
 <label id="upLabel" class="btn primary" style="display:none">Carica<input id="pick" type="file" multiple hidden></label></header>
 <nav id="tabs"><button data-page="file" aria-current="true">File</button><button data-page="stato">Stato</button></nav>
@@ -128,6 +129,9 @@ function render(items,searching){var l=$("list");l.textContent="";
   if(!dir){var d=el("button","Scarica");d.onclick=function(){location.href="/api/download?path="+enc(full)};a.appendChild(d);
    var v=el("button","Versioni");v.onclick=function(){versions(full)};a.appendChild(v);
    if(canShare){var sh=el("button","Condividi");sh.onclick=function(){shareDialog(full,it.name||full)};a.appendChild(sh)}}
+  if(writable){
+   var rn=el("button","Rinomina");rn.onclick=function(){renameEntry(full,it.name||full)};a.appendChild(rn);
+   var de=el("button","Elimina");de.onclick=function(){deleteEntry(full,it.name||full,dir)};a.appendChild(de)}
   r.appendChild(a);l.appendChild(r)})}
 function sortItems(a){return a.slice().sort(function(x,y){if(x.kind!==y.kind)return x.kind==="DIR"?-1:1;return x.name.toLowerCase()<y.name.toLowerCase()?-1:1})}
 function go(path){mode="dir";cwd=path;showPage("file");$("q").value="";crumbs();
@@ -142,6 +146,27 @@ function versions(path){api("/api/versions?path="+enc(path)).then(function(v){va
   var d=el("button","Scarica");d.onclick=function(){location.href="/api/download?path="+enc(x.path)};r.appendChild(d);b.appendChild(r)});
  b.appendChild(el("p","Per ripristinare una versione usa l'app NASBox sul PC.","note"));$("dlg").showModal()}).catch(function(e){toast(e.message)})}
 function postJSON(url,method){return api(url,{method:method,headers:{"X-NASBox-Web":"1"}})}
+function askName(title,initial,okText,onOk){var b=$("db");b.textContent="";$("dt").textContent=title;
+ var inp=el("input");inp.type="text";inp.value=initial||"";inp.style.cssText="width:100%;padding:.55rem .7rem;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg)";b.appendChild(inp);
+ var row=el("div");row.style.cssText="display:flex;gap:.5rem;margin-top:.8rem";b.appendChild(row);
+ var ok=el("button",okText||"Salva","primary");ok.onclick=function(){var v=inp.value;if(!v){toast("Scrivi un nome.");return}$("dlg").close();onOk(v)};row.appendChild(ok);
+ var cancel=el("button","Annulla");cancel.onclick=function(){$("dlg").close()};row.appendChild(cancel);
+ $("dlg").showModal();setTimeout(function(){inp.focus();inp.select()},0)}
+function newFolder(){if(!writable)return;askName("Nuova cartella","","Crea",function(name){
+ postJSON("/api/mkdir?path="+enc(cwd)+"&name="+enc(name),"POST").then(function(){toast("Cartella creata; sarà visibile agli altri PC quando conterrà file.");go(cwd)}).catch(function(e){toast(e.message)})})}
+function renameEntry(path,name){if(!writable)return;askName("Rinomina "+name,name,"Rinomina",function(to){
+ if(!to||to===name)return;
+ postJSON("/api/rename?path="+enc(path)+"&name="+enc(to),"POST").then(function(){toast("Rinominato");go(cwd)}).catch(function(e){toast(e.message)})})}
+function deleteEntry(path,name,dir){if(!writable)return;api("/api/entry?path="+enc(path)).then(function(info){
+ var b=$("db");b.textContent="";$("dt").textContent="Elimina "+name;
+ b.appendChild(el("p",dir?"La cartella e il suo contenuto saranno spostati nel cestino del NAS.":"Il file sarà spostato nel cestino del NAS.","note"));
+ if(dir)b.appendChild(el("p",(info.truncated?"Almeno ":"")+info.files+" file, "+fmtSize(info.bytes),"note"));
+ else b.appendChild(el("p",fmtSize(info.size),"note"));
+ b.appendChild(el("p","Potrai recuperarlo dal cestino del NAS.","note"));
+ var row=el("div");row.style.cssText="display:flex;gap:.5rem";b.appendChild(row);
+ var ok=el("button","Elimina","primary");ok.onclick=function(){$("dlg").close();postJSON("/api/delete?path="+enc(path)+"&confirm=1","POST").then(function(r){toast(r.files?"Eliminati "+r.files+" file":"Elemento eliminato");go(cwd)}).catch(function(e){toast(e.message)})};row.appendChild(ok);
+ var cancel=el("button","Annulla");cancel.onclick=function(){$("dlg").close()};row.appendChild(cancel);
+ $("dlg").showModal()}).catch(function(e){toast(e.message)})}
 function expiryText(t){return t?"scade il "+new Date(t*1000).toLocaleDateString():"non scade"}
 function shareDialog(path,name){var b=$("db");b.textContent="";$("dt").textContent="Condividi "+name;
  b.appendChild(el("p","Chiunque abbia il link potrà scaricare questo file. Scegli per quanto tempo:","note"));
@@ -160,6 +185,7 @@ function linksDialog(){api("/api/share").then(function(list){var b=$("db");b.tex
   var d=el("button","Revoca");d.onclick=function(){postJSON("/api/share?token="+enc(l.token),"DELETE").then(function(){linksDialog()}).catch(function(e){toast(e.message)})};r.appendChild(d);b.appendChild(r)});
  $("dlg").showModal()}).catch(function(e){toast(e.message)})}
 $("linksBtn").onclick=linksDialog;
+$("newDirBtn").onclick=newFolder;
 var st;$("q").oninput=function(){clearTimeout(st);var q=this.value.trim();if(q.length<2){if(mode==="search")go(cwd);return}
  st=setTimeout(function(){mode="search";api("/api/search?q="+enc(q)).then(function(r){render(r.hits,true);$("foot").textContent=r.hits.length+" risultati"+(r.truncated?" (ricerca troncata, affina i termini)":"")}).catch(function(e){toast(e.message)})},300)};
 function upload(files){if(!writable){toast("Caricamento non abilitato sul server.");return}
@@ -179,6 +205,6 @@ window.addEventListener("drop",function(e){e.preventDefault();depth=0;$("drop").
 $("dc").onclick=function(){$("dlg").close();$("db").textContent=""};$("dlg").addEventListener("close",function(){$("db").textContent=""});
 var tabs=document.querySelectorAll("#tabs button");for(var ti=0;ti<tabs.length;ti++)tabs[ti].onclick=function(){showPage(this.getAttribute("data-page"))};
 setInterval(function(){if(page==="stato")loadMetrics()},5000);
-api("/api/info").then(function(i){writable=!!i.writable;canShare=!!i.can_share;maxUp=i.max_upload_bytes||0;if(canShare)$("linksBtn").style.display="";if(writable)$("upLabel").style.display="";else $("foot").textContent="Sola lettura (imposta WEB_PASSWORD per caricare file).";go("")}).catch(function(e){toast(e.message);go("")});
+api("/api/info").then(function(i){writable=!!i.writable;canShare=!!i.can_share;maxUp=i.max_upload_bytes||0;if(canShare)$("linksBtn").style.display="";if(writable){$("upLabel").style.display="";$("newDirBtn").style.display=""}else $("foot").textContent="Sola lettura (imposta WEB_PASSWORD per caricare file).";go("")}).catch(function(e){toast(e.message);go("")});
 })();
 </script></body></html>`
