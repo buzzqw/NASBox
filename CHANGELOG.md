@@ -4,6 +4,19 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+## 3.39.1 - 2026-11-27
+
+Server 3.39.1 (client 1.27.0 invariato).
+
+- **`--self-check --quick`**: salta il controllo del journal, l'unico che apre
+  l'indice SQLite e quindi tocca il disco. Serve al watchdog frequente: un
+  `--self-check` completo ogni pochi minuti impediva l'ibernazione degli hard
+  disk. Misurato a sistema fermo: demone con 0 byte di lettura e scrittura in
+  90 secondi, heartbeat del lease assente (esiste solo durante un trasferimento).
+- `tools/nasbox-watchdog.sh` usa `--quick` a ogni esecuzione e il controllo
+  completo una volta al giorno (stamp `state/self-check-full.stamp`). Cadenza
+  consigliata: ogni 30 minuti.
+
 ## 1.27.0 / 3.39.0 - 2026-11-27
 
 Client 1.27.0, server 3.39.0. Nessun cambio di formato su manifest, journal e

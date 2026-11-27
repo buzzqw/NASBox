@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-var version = "3.39.0"
+var version = "3.39.1"
 
 // LoadVersion allows a versioned binary to report its own version through a
 // small sidecar file next to the executable. This is how --server-update-install
@@ -231,7 +231,7 @@ func Dispatch(ctx *Context, verb string, args []string) error {
 	case "--diagnostics":
 		return cmdDiagnostics(ctx)
 	case "--self-check":
-		return cmdSelfCheck(ctx)
+		return cmdSelfCheck(ctx, args)
 	case "--devices":
 		return cmdDevices(ctx)
 	case "--metrics":
@@ -345,7 +345,7 @@ Uso:
   nasbox-server -c FILE --metrics
   nasbox-server -c FILE --devices
   nasbox-server -c FILE --diagnostics
-  nasbox-server -c FILE --self-check
+  nasbox-server -c FILE --self-check [--quick]
   nasbox-server -c FILE --manifest-export [SINCE]
   nasbox-server -c FILE --manifest-get PATH
   nasbox-server -c FILE --file-states

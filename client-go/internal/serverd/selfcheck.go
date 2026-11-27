@@ -9,11 +9,16 @@ import (
 	"time"
 )
 
-// cmdSelfCheck answers one question: is this NAS in a state where a scheduled
-// sync can succeed? It is meant for an external watchdog (DSM Task Scheduler)
-// and for `doctor`-style diagnostics, so every line is machine readable and the
-// exit code is non-zero when something needs attention.
-func cmdSelfCheck(ctx *Context) error {
+// cmdSelfCheck risponde a una domanda: questo NAS è in uno stato in cui una
+// sincronizzazione pianificata può riuscire? È pensato per un watchdog esterno
+// (attività DSM) e per la diagnostica, quindi ogni riga è leggibile da script e
+// l'exit code è non-zero quando serve attenzione.
+//
+// Con --quick salta il controllo del journal: aprire l'indice SQLite in WAL
+// tocca il disco e, eseguito ogni pochi minuti, impedirebbe l'ibernazione degli
+// hard disk. Il controllo completo resta disponibile e va eseguito di rado.
+func cmdSelfCheck(ctx *Context, args []string) error {
+	quick := hasFlag(args, "--quick")
 	failures := 0
 	report := func(name string, ok bool, detail string) {
 		status := "ok"
@@ -40,15 +45,19 @@ func cmdSelfCheck(ctx *Context) error {
 		report("SHARE_ROOT", true, "")
 	}
 
-	writeErr := ctx.withJournalLock(func() error {
-		index, err := openMetadataIndex(p)
-		if err != nil {
-			return err
-		}
-		defer index.Close()
-		return index.syncLocked()
-	})
-	report("JOURNAL", writeErr == nil, errorDetail(writeErr))
+	if quick {
+		report("JOURNAL", true, "saltato (--quick)")
+	} else {
+		writeErr := ctx.withJournalLock(func() error {
+			index, err := openMetadataIndex(p)
+			if err != nil {
+				return err
+			}
+			defer index.Close()
+			return index.syncLocked()
+		})
+		report("JOURNAL", writeErr == nil, errorDetail(writeErr))
+	}
 
 	if running {
 		age := fileAge(p.LastRun)

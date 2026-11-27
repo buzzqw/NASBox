@@ -103,16 +103,18 @@ Tre cose non si possono fare dal repo e vanno impostate una volta sul NAS.
    globale viene rilasciato dal `flock` alla chiusura della sessione.
 
 2. **Attività pianificata DSM per il watchdog** (Pannello di controllo →
-   Utilità pianificate → Crea → Script definito dall'utente), ogni 5 minuti,
-   utente `andres`:
+   Utilità pianificate → Crea → Script definito dall'utente), ogni **30
+   minuti**, utente `andres`:
 
    ```bash
    /volume1/Varie/sync-daemon/tools/nasbox-watchdog.sh
    ```
 
-   Lo script esegue `--self-check`, riavvia il demone se è fermo e lascia nel
-   log dell'attività una riga per ogni controllo fallito. Senza questo, un
-   demone terminato resta fermo fino al prossimo accesso manuale.
+   Lo script esegue `--self-check --quick` (non apre l'indice SQLite, quindi non
+   tocca il disco), riavvia il demone se è fermo e lascia nel log dell'attività
+   una riga per ogni controllo fallito. Il controllo completo gira una volta al
+   giorno. Non scendere sotto i 30 minuti: un controllo completo ogni pochi
+   minuti impedisce l'ibernazione degli hard disk.
 
 3. **Scadenza del lease** in `server.conf` (runtime, non si committa):
 
@@ -132,6 +134,27 @@ Verifica dopo il deploy:
 /volume1/Varie/nasbox-server/nasbox-server -c ... --print-config | grep -E 'SYNC_LOCK|ACCESS_LOG'
 ls -l /volume1/Varie/sync-daemon/server/state/access.log*
 ```
+
+### Ibernazione degli hard disk
+
+Cosa tocca il disco e quando (misurato il 2026-11-27 sul DS420j):
+
+- **Heartbeat del lease**: esiste solo mentre un client tiene il lease, cioè
+  durante un trasferimento. A NAS fermo non c'è lease, quindi nessun frame e
+  nessuna scrittura. Scrive due file da poche centinaia di byte ogni 30 s, ma
+  con i dischi già attivi per il trasferimento.
+- **Ticker del demone** (ogni 60 s): legge solo `lease-holder.json`, che di
+  solito non esiste. Misurato a sistema fermo: `read_bytes` e `write_bytes` del
+  processo demone invariati (0 byte) in 90 secondi.
+- **Access log**: scrive solo quando arriva una richiesta alla UI/API. Un
+  monitoraggio che interroga la web UI ogni minuto tiene i dischi svegli: è
+  l'unico caso da evitare.
+- **Watchdog `--self-check`**: la versione completa apre l'indice SQLite e
+  quindi legge/scrive; per questo lo script usa `--quick` a ogni giro e il
+  controllo completo una volta al giorno.
+- **Fuori da NASBox**: sul NAS il sistema scrive comunque ~1 MB ogni 90 secondi
+  sulla partizione di sistema (RAID1), quindi l'ibernazione è già poco
+  praticabile a prescindere dal demone.
 
 ## Verifica finale dopo il deploy 1.23.0 / 3.37.0
 

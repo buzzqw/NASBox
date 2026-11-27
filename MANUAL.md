@@ -277,10 +277,13 @@ numbers, never file names. All options, with their defaults, are described in
 
 **Is everything healthy?** `nasbox-server --self-check` prints one `CHECK_*=ok|fail`
 line per item (daemon, journal, last pass, free space, chunk quota, stale lock) and
-exits non-zero if something needs attention. Point a DSM scheduled task, every 5
-minutes, at `tools/nasbox-watchdog.sh`: it runs the check, restarts the daemon when it
-is stopped, and logs the result. Without it, a dead daemon stays dead until someone
-opens the app.
+exits non-zero if something needs attention. Add `--quick` to skip the journal check,
+which opens the SQLite index and therefore touches the disk. Point a DSM scheduled
+task, every 30 minutes, at `tools/nasbox-watchdog.sh`: it runs the quick check,
+restarts the daemon when it is stopped, logs the result and runs the full check once
+a day. Keep it at 30 minutes or more: executing a full check on the archive every few
+minutes keeps the hard disks from spinning down. Without a watchdog, a dead daemon
+stays dead until someone opens the app.
 
 **Abandoned lock.** If a PC is suspended or loses the network while it holds the
 global transfer lock, the lock can stay held. Clients from 1.27.0 send a heartbeat

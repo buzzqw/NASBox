@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"crypto/sha256"
 	"encoding/hex"
+	"io"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -171,9 +172,29 @@ func TestReadActivityFrameSplitsNULFields(t *testing.T) {
 	}
 }
 
+func TestSelfCheckQuickSkipsJournal(t *testing.T) {
+	ctx, _ := newWebTestContext(t, "")
+	old := os.Stdout
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stdout = writer
+	checkErr := cmdSelfCheck(ctx, []string{"--quick"})
+	writer.Close()
+	os.Stdout = old
+	data, _ := io.ReadAll(reader)
+	if !strings.Contains(string(data), "CHECK_JOURNAL=ok saltato (--quick)") {
+		t.Fatalf("--quick deve saltare il journal: %q", string(data))
+	}
+	if checkErr == nil {
+		t.Fatal("con il demone fermo il controllo rapido deve comunque fallire")
+	}
+}
+
 func TestSelfCheckFailsWithStoppedDaemon(t *testing.T) {
 	ctx, _ := newWebTestContext(t, "")
-	if err := cmdSelfCheck(ctx); err == nil {
+	if err := cmdSelfCheck(ctx, nil); err == nil {
 		t.Fatal("--self-check deve fallire quando il demone non è in esecuzione")
 	}
 }
