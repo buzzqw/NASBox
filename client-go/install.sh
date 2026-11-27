@@ -32,10 +32,8 @@ SOURCE="${1:-$HERE/nasbox-go}"
 [[ -x "$SOURCE" ]] || { echo "binario non trovato o non eseguibile: $SOURCE" >&2; exit 1; }
 "$SOURCE" version >/dev/null || { echo "il binario non parte: $SOURCE" >&2; exit 1; }
 
-for tool in ssh rsync; do
-    command -v "$tool" >/dev/null || echo "attenzione: '$tool' non installato (necessario)." >&2
-done
-command -v inotifywait >/dev/null || echo "suggerito: installa inotify-tools per il rilevamento immediato delle modifiche." >&2
+command -v ssh >/dev/null || echo "attenzione: 'ssh' non installato (necessario)." >&2
+command -v rsync >/dev/null || echo "opzionale: 'rsync' non installato; serve solo con il backend rsync, non con chunks." >&2
 
 if $migrate; then
     if systemctl --user list-unit-files sync-daemon-client.service >/dev/null 2>&1; then

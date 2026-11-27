@@ -190,6 +190,7 @@ type doctorReport struct {
 	ServerError      string              `json:"server_error,omitempty"`
 	Lock             doctorLockReport    `json:"lock"`
 	Backend          string              `json:"backend,omitempty"`
+	RequestedBackend string              `json:"requested_backend,omitempty"`
 	RsyncLocal       string              `json:"rsync_local,omitempty"`
 	RsyncNAS         string              `json:"rsync_nas,omitempty"`
 	Realtime         string              `json:"realtime,omitempty"`
@@ -309,19 +310,22 @@ func doctor(args []string) int {
 	report.ServerError = probe.Error
 	report.Lock.Remote = probe.RemoteLock
 	report.RsyncNAS = probe.RsyncNAS
-	report.Backend = cfg.String("transfer_backend")
-	report.RsyncLocal = transfer.LocalRsyncVersion()
-	// The probe asks the login shell, which finds the system rsync. Transfers
-	// may use a newer private one that the server advertises: show both, or the
-	// line would contradict the capabilities right below it.
-	if private := strings.TrimSpace(cfg.String("nas_rsync_path")); private != "" {
-		effective := strings.TrimSpace(cfg.String("nas_rsync_version"))
-		system := strings.TrimSpace(cfg.String("nas_rsync_system_version"))
-		if effective != "" {
-			if system != "" && system != effective {
-				report.RsyncNAS = effective + " privato, sistema " + system
-			} else {
-				report.RsyncNAS = effective + " privato"
+	report.Backend = transfer.EffectiveBackend(cfg)
+	report.RequestedBackend = strings.ToLower(strings.TrimSpace(cfg.String("transfer_backend")))
+	if report.Backend == "rsync" {
+		report.RsyncLocal = transfer.LocalRsyncVersion()
+		// The probe asks the login shell, which finds the system rsync. Transfers
+		// may use a newer private one that the server advertises: show both, or the
+		// line would contradict the capabilities right below it.
+		if private := strings.TrimSpace(cfg.String("nas_rsync_path")); private != "" {
+			effective := strings.TrimSpace(cfg.String("nas_rsync_version"))
+			system := strings.TrimSpace(cfg.String("nas_rsync_system_version"))
+			if effective != "" {
+				if system != "" && system != effective {
+					report.RsyncNAS = effective + " privato, sistema " + system
+				} else {
+					report.RsyncNAS = effective + " privato"
+				}
 			}
 		}
 	}
@@ -431,8 +435,12 @@ func probeServer(cfg *config.Config) serverProbe {
 		probe.Error = "versione server sconosciuta"
 	}
 	probe.RemoteLock = remoteLockFromValues(values)
-	if output, err := client.Run([]string{"rsync", "--version"}, nil, 20*time.Second); err == nil {
-		probe.RsyncNAS = transfer.ParseRsyncVersion(string(output))
+	// rsync is a dependency of the optional rsync backend only. Probing it
+	// while the client transfers chunks produced a misleading diagnostic.
+	if transfer.EffectiveBackend(cfg) == "rsync" {
+		if output, err := client.Run([]string{"rsync", "--version"}, nil, 20*time.Second); err == nil {
+			probe.RsyncNAS = transfer.ParseRsyncVersion(string(output))
+		}
 	}
 	return probe
 }
@@ -502,8 +510,16 @@ func writeDoctorReport(report doctorReport, asJSON bool) error {
 	}
 	fmt.Println()
 	fmt.Printf("lock NAS:    %s\n", formatRemoteLock(report.Lock.Remote))
-	fmt.Printf("backend:     %s\n", valueOr(report.Backend, "rsync"))
-	fmt.Printf("rsync:       locale %s · NAS %s (non usato per i trasferimenti se backend=chunks)\n", valueOr(report.RsyncLocal, "?"), valueOr(report.RsyncNAS, "?"))
+	fmt.Printf("backend:     %s", valueOr(report.Backend, "rsync"))
+	if report.RequestedBackend != "" && !strings.EqualFold(report.RequestedBackend, report.Backend) {
+		fmt.Printf(" (richiesto %s)", report.RequestedBackend)
+	}
+	fmt.Println()
+	if strings.EqualFold(report.Backend, "rsync") {
+		fmt.Printf("rsync:       locale %s · NAS %s\n", valueOr(report.RsyncLocal, "?"), valueOr(report.RsyncNAS, "?"))
+	} else {
+		fmt.Printf("rsync:       non usato dal backend %s\n", report.Backend)
+	}
 	fmt.Printf("tempo reale: %s\n", valueOr(report.Realtime, "?"))
 	fmt.Printf("capacità NAS: %s\n", valueOr(report.NasHardware, "?"))
 	if report.Error != "" {

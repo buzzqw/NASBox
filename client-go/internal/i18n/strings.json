@@ -5151,8 +5151,8 @@
     "it": "Passa il mouse per i dettagli"
   },
   "ui.file.browse_note": {
-    "en": "Click a folder once to open it. Select a file to download, rename or move it to the NAS trash.",
-    "it": "Clicca una cartella una volta per aprirla. Seleziona un file per scaricarlo, rinominarlo o spostarlo nel cestino NAS."
+    "en": "Click a folder once to open it. Select a file to download, rename or move it to the NAS trash. The per-file status is indicative (presence and size); a conflict or an in-flight transfer takes precedence.",
+    "it": "Clicca una cartella una volta per aprirla. Seleziona un file per scaricarlo, rinominarlo o spostarlo nel cestino NAS. Lo stato per file è indicativo (presenza e dimensione); conflitto o trasferimento in corso hanno priorità."
   },
   "ui.file.download_already": {
     "en": "Already on this PC: {path}",
@@ -5217,6 +5217,62 @@
   "ui.file.selected": {
     "en": "Selected: {name}",
     "it": "Selezionato: {name}"
+  },
+  "ui.file.selected_status": {
+    "en": "Selected: {name} · {status}",
+    "it": "Selezionato: {name} · {status}"
+  },
+  "ui.file.status_synced": {
+    "en": "Synced",
+    "it": "Sincronizzato"
+  },
+  "ui.file.status_synced_hint": {
+    "en": "The file is present on this PC; the engine verifies the content during sync.",
+    "it": "Il file è presente su questo PC; il motore verifica il contenuto durante la sincronizzazione."
+  },
+  "ui.file.status_uploading": {
+    "en": "Uploading",
+    "it": "In caricamento"
+  },
+  "ui.file.status_downloading": {
+    "en": "Downloading",
+    "it": "In scaricamento"
+  },
+  "ui.file.status_transfer_hint": {
+    "en": "A transfer is in progress. The Cancel button on the status page stops the current batch.",
+    "it": "Un trasferimento è in corso. Il pulsante Annulla nella pagina Stato ferma il batch corrente."
+  },
+  "ui.file.status_conflict": {
+    "en": "Conflict",
+    "it": "Conflitto"
+  },
+  "ui.file.status_conflict_hint": {
+    "en": "Open the Conflicts tab to choose which copy to keep; the other one is never discarded silently.",
+    "it": "Apri la scheda Conflitti per scegliere quale copia tenere; l'altra non viene mai scartata in silenzio."
+  },
+  "ui.file.status_remote_only": {
+    "en": "NAS only",
+    "it": "Solo sul NAS"
+  },
+  "ui.file.status_remote_hint": {
+    "en": "The file is only on the NAS. Download it to have a local copy.",
+    "it": "Il file è solo sul NAS. Scaricalo per averne una copia locale."
+  },
+  "ui.file.status_not_synced": {
+    "en": "Not synced",
+    "it": "Non sincronizzato"
+  },
+  "ui.file.status_not_synced_hint": {
+    "en": "The local copy differs in size from the NAS copy; the next sync will reconcile it.",
+    "it": "La copia locale ha una dimensione diversa da quella sul NAS; la prossima sync la riconcilierà."
+  },
+  "ui.file.status_available": {
+    "en": "Available",
+    "it": "Disponibile"
+  },
+  "ui.file.status_available_hint": {
+    "en": "The file is present locally. In browse-only mode it is not synced automatically.",
+    "it": "Il file è presente localmente. In modalità consultazione non viene sincronizzato automaticamente."
   },
   "ui.file.up_hint": {
     "en": "Go to the parent folder",
@@ -6182,17 +6238,45 @@
     "en": "rsync on the NAS",
     "it": "rsync sul NAS"
   },
-  "ui.health.inotify": {
+  "ui.health.backend": {
+    "en": "Transfer backend",
+    "it": "Backend di trasferimento"
+  },
+  "ui.health.backend_chunks": {
+    "en": "chunks (SSH, deduplicated)",
+    "it": "chunks (SSH, deduplicato)"
+  },
+  "ui.health.backend_rsync": {
+    "en": "rsync",
+    "it": "rsync"
+  },
+  "ui.health.backend_fallback": {
+    "en": "Requested {requested}, but the NAS is using rsync: check the server version and capabilities.",
+    "it": "Richiesto {requested}, ma il NAS sta usando rsync: controlla versione e capacità del server."
+  },
+  "ui.health.watcher": {
     "en": "Change detection",
     "it": "Rilevamento modifiche"
   },
-  "ui.health.inotify_missing": {
-    "en": "inotifywait not installed",
-    "it": "inotifywait non installato"
+  "ui.health.watcher_ok": {
+    "en": "active (built-in fsnotify)",
+    "it": "attivo (fsnotify integrato)"
   },
-  "ui.health.inotify_hint": {
-    "en": "Install inotify-tools: without it, changes are found by slower, heavier periodic scans.",
-    "it": "Installa inotify-tools: senza, le modifiche vengono cercate con scansioni periodiche più lente e pesanti."
+  "ui.health.watcher_starting": {
+    "en": "starting",
+    "it": "in avvio"
+  },
+  "ui.health.watcher_ghost": {
+    "en": "not active (browse-only mode)",
+    "it": "non attivo (modalità consultazione)"
+  },
+  "ui.health.watcher_degraded": {
+    "en": "periodic scans (watcher not reliable)",
+    "it": "scansioni periodiche (watcher non affidabile)"
+  },
+  "ui.health.watcher_hint": {
+    "en": "Check fs.inotify.max_user_watches; without the watcher, changes are found by slower periodic scans.",
+    "it": "Controlla fs.inotify.max_user_watches; senza watcher le modifiche vengono cercate con scansioni periodiche più lente."
   },
   "ui.health.errors": {
     "en": "Errors in the last 24 hours",

@@ -4,6 +4,16 @@ Tutte le modifiche rilevanti di NASBox sono documentate in questo file.
 
 ## Unreleased
 
+- **Diagnostica allineata al backend reale**: la schermata di controllo e
+  `doctor` mostrano il backend effettivo (`chunks` o `rsync`); rsync locale e
+  sul NAS vengono verificati solo quando quel backend lo usa; il rilevamento
+  modifiche riporta lo stato del watcher `fsnotify` invece di cercare
+  `inotifywait`. README e installer non chiedono più `inotify-tools`.
+- **Stato per file nel browser NAS**: ogni file mostra Sincronizzato, In
+  caricamento, In scaricamento, Conflitto, Solo sul NAS o Non sincronizzato,
+  con una spiegazione nella barra di selezione. Lo stato è indicativo (presenza
+  e dimensione); conflitto e trasferimento in corso hanno priorità. Restano
+  disponibili Versioni per il ripristino e Annulla per fermare il batch.
 - **Web UI: elimina, rinomina e crea cartelle**: dalla pagina File si possono
   eliminare file e cartelle (spostati nel cestino del NAS, con conferma e
   conteggio dei file), rinominare file e cartelle senza sovrascrivere, e creare

@@ -83,6 +83,87 @@ func sortBrowse(entries []remote.BrowseEntry, mode string) []remote.BrowseEntry 
 	return sorted
 }
 
+// browseFileStatus is the per-file indication shown in the NAS browser. It is
+// deliberately conservative: without downloading a digest for every row, the
+// local copy is compared by presence and size. Conflict and an in-flight
+// transfer take precedence because they are authoritative.
+type browseFileStatus struct {
+	Label   string
+	Hint    string
+	Warning bool
+}
+
+func (c *clientApp) browseConflictStatus(relative string) bool {
+	for _, group := range c.confGroups {
+		if group.Original == relative {
+			return true
+		}
+		for _, candidate := range group.Candidates {
+			if candidate == relative {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func (c *clientApp) browseTransferStatus(relative string) string {
+	c.progressMu.Lock()
+	progress := c.progress
+	c.progressMu.Unlock()
+	if progress.Finished || progress.Total == 0 || progress.File == "" || progress.File != relative {
+		return ""
+	}
+	if progress.Upload {
+		return tr("ui.file.status_uploading", nil)
+	}
+	return tr("ui.file.status_downloading", nil)
+}
+
+func (c *clientApp) browseFileStatus(relative string, entry remote.BrowseEntry) browseFileStatus {
+	if entry.Kind != "FILE" {
+		return browseFileStatus{}
+	}
+	if c.browseConflictStatus(relative) {
+		return browseFileStatus{
+			Label:   tr("ui.file.status_conflict", nil),
+			Hint:    tr("ui.file.status_conflict_hint", nil),
+			Warning: true,
+		}
+	}
+	if active := c.browseTransferStatus(relative); active != "" {
+		return browseFileStatus{Label: active, Hint: tr("ui.file.status_transfer_hint", nil)}
+	}
+	root := strings.TrimSpace(c.cfg.LocalRoot())
+	if root == "" {
+		return browseFileStatus{Label: tr("ui.file.status_remote_only", nil), Hint: tr("ui.file.status_remote_hint", nil)}
+	}
+	info, err := os.Stat(filepath.Join(root, filepath.FromSlash(relative)))
+	if err != nil || !info.Mode().IsRegular() {
+		return browseFileStatus{Label: tr("ui.file.status_remote_only", nil), Hint: tr("ui.file.status_remote_hint", nil)}
+	}
+	if info.Size() != entry.Size {
+		return browseFileStatus{
+			Label:   tr("ui.file.status_not_synced", nil),
+			Hint:    tr("ui.file.status_not_synced_hint", nil),
+			Warning: true,
+		}
+	}
+	if c.ghost {
+		return browseFileStatus{Label: tr("ui.file.status_available", nil), Hint: tr("ui.file.status_available_hint", nil)}
+	}
+	return browseFileStatus{Label: tr("ui.file.status_synced", nil), Hint: tr("ui.file.status_synced_hint", nil)}
+}
+
+func (c *clientApp) browseEntryByName(name string) (remote.BrowseEntry, bool) {
+	for _, entry := range c.browseEntries {
+		if entry.Name == name {
+			return entry, true
+		}
+	}
+	return remote.BrowseEntry{}, false
+}
+
 func (c *clientApp) browseSortSelect() fyne.CanvasObject {
 	options := browseSortOptions()
 	labels := make([]string, 0, len(options))
@@ -128,6 +209,10 @@ func (c *clientApp) buildBrowsePane() fyne.CanvasObject {
 			meta := humanBytes(entry.Size)
 			if entry.MTime > 0 {
 				meta += " · " + time.Unix(entry.MTime, 0).Format("02/01/2006")
+			}
+			status := c.browseFileStatus(c.joinBrowsePath(entry.Name), entry)
+			if status.Label != "" {
+				meta = status.Label + " · " + meta
 			}
 			row.meta.SetText(meta)
 		},
@@ -421,7 +506,20 @@ func (c *clientApp) updateBrowseSelection() {
 		case c.selectedBrowse == "":
 			c.browseSelectedLabel.SetText(tr("ui.file.none_selected", nil))
 		default:
-			c.browseSelectedLabel.SetText(tr("ui.file.selected", map[string]any{"name": c.selectedBrowse}))
+			status := browseFileStatus{}
+			if entry, ok := c.browseEntryByName(c.selectedBrowse); ok {
+				status = c.browseFileStatus(c.joinBrowsePath(c.selectedBrowse), entry)
+			}
+			if status.Label != "" {
+				c.browseSelectedLabel.SetText(tr("ui.file.selected_status", map[string]any{
+					"name": c.selectedBrowse, "status": status.Label,
+				}))
+			} else {
+				c.browseSelectedLabel.SetText(tr("ui.file.selected", map[string]any{"name": c.selectedBrowse}))
+			}
+			if status.Hint != "" && c.setHint != nil {
+				c.setHint(status.Hint)
+			}
 		}
 	}
 	if c.browseDeleteBtn != nil {

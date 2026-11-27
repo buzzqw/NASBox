@@ -117,7 +117,11 @@ Clicking the icon shows a short menu:
 ## 6. Files: browse, versions, trash, conflicts
 
 - **Browse NAS**: breadcrumb path, sorting, download, rename, delete (goes to the NAS
-  trash) and *download folder*.
+  trash) and *download folder*. Each file shows a status: **Synced**, **Uploading**,
+  **Downloading**, **Conflict**, **NAS only** or **Not synced**. The status is
+  indicative (presence and size); a conflict or an in-flight transfer takes
+  precedence. Use **Versions** to restore an earlier copy; **Cancel** on the Status
+  screen stops the current transfer batch.
 - **Previous versions**: every replaced or deleted file is kept. Open *Files →
   History / Trash* to see and restore them; in your file manager you can also
   right-click a file → **NASBox: previous versions**.

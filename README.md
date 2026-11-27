@@ -66,9 +66,9 @@ proxy**; do not expose the port to the Internet without TLS.
 
 ## Requirements
 
-- PC: Linux with `ssh` (and `inotify-tools` for instant change detection).
+- PC: Linux with `ssh`; change detection uses the built-in filesystem watcher.
 - NAS: reachable over SSH with a key; Linux ARM64 or x86-64.
-- Optional: `rsync` ≥ 3.1 is used only by the legacy transfer backend.
+- Optional: `rsync` ≥ 3.1 is used only by the legacy transfer backend; the default `chunks` backend does not need it.
 
 ## Everyday use
 

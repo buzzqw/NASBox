@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"nasbox-go/internal/osx"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -95,23 +94,53 @@ func (c *clientApp) runHealthChecks() []healthCheck {
 		}
 	}
 
-	localRsync := transfer.LocalRsyncVersion()
-	switch {
-	case localRsync == "":
-		add("error", tr("ui.health.rsync_local", nil), "—", tr("ui.health.rsync_local_hint", nil))
-	case lessVersion(localRsync, "3.1.0"):
-		add("warn", tr("ui.health.rsync_local", nil), localRsync, tr("ui.health.rsync_progress_hint", nil))
-	default:
-		add("ok", tr("ui.health.rsync_local", nil), localRsync, "")
+	backend := transfer.EffectiveBackend(c.cfg)
+	requested := strings.ToLower(strings.TrimSpace(c.cfg.String("transfer_backend")))
+	backendDetail := backend
+	switch backend {
+	case "chunks":
+		backendDetail = tr("ui.health.backend_chunks", nil)
+	case "rsync":
+		backendDetail = tr("ui.health.backend_rsync", nil)
 	}
-	if output, err := c.client.Run([]string{"rsync", "--version"}, nil, 20*time.Second); err == nil {
-		add("ok", tr("ui.health.rsync_nas", nil), transfer.ParseRsyncVersion(string(output)), "")
+	if requested != "" && requested != backend {
+		add("warn", tr("ui.health.backend", nil), backendDetail,
+			tr("ui.health.backend_fallback", map[string]any{"requested": requested}))
+	} else {
+		add("ok", tr("ui.health.backend", nil), backendDetail, "")
 	}
 
-	if _, err := exec.LookPath("inotifywait"); err != nil {
-		add("warn", tr("ui.health.inotify", nil), tr("ui.health.inotify_missing", nil), tr("ui.health.inotify_hint", nil))
-	} else {
-		add("ok", tr("ui.health.inotify", nil), "inotifywait", "")
+	// rsync is only a dependency of the optional rsync backend. Checking it
+	// while the client is using chunks produced a false "missing" warning.
+	if backend == "rsync" {
+		localRsync := transfer.LocalRsyncVersion()
+		switch {
+		case localRsync == "":
+			add("error", tr("ui.health.rsync_local", nil), "—", tr("ui.health.rsync_local_hint", nil))
+		case lessVersion(localRsync, "3.1.0"):
+			add("warn", tr("ui.health.rsync_local", nil), localRsync, tr("ui.health.rsync_progress_hint", nil))
+		default:
+			add("ok", tr("ui.health.rsync_local", nil), localRsync, "")
+		}
+		if output, err := c.client.Run([]string{"rsync", "--version"}, nil, 20*time.Second); err == nil {
+			add("ok", tr("ui.health.rsync_nas", nil), transfer.ParseRsyncVersion(string(output)), "")
+		}
+	}
+
+	switch {
+	case c.ghost:
+		add("ok", tr("ui.health.watcher", nil), tr("ui.health.watcher_ghost", nil), "")
+	default:
+		known, reliable := c.runner.WatcherStatus()
+		switch {
+		case !known:
+			add("ok", tr("ui.health.watcher", nil), tr("ui.health.watcher_starting", nil), "")
+		case reliable:
+			add("ok", tr("ui.health.watcher", nil), tr("ui.health.watcher_ok", nil), "")
+		default:
+			add("warn", tr("ui.health.watcher", nil), tr("ui.health.watcher_degraded", nil),
+				tr("ui.health.watcher_hint", nil))
+		}
 	}
 
 	if c.logger != nil {

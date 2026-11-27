@@ -91,6 +91,23 @@ func persistedManifestRevision(cfg *config.Config) int {
 	return revision
 }
 
+// WatcherStatus reports whether the local filesystem watcher has started and,
+// when it has, whether every folder is really watched. The UI uses it instead
+// of checking an external inotifywait binary: the engine uses fsnotify in Go,
+// so a missing command-line tool says nothing about change detection.
+func (r *Runner) WatcherStatus() (known, reliable bool) {
+	if r == nil {
+		return false, false
+	}
+	r.mu.Lock()
+	check := r.watchReliable
+	r.mu.Unlock()
+	if check == nil {
+		return false, false
+	}
+	return true, check()
+}
+
 func (r *Runner) saveManifestRevision() {
 	if r.manifestRevision < 0 {
 		return
