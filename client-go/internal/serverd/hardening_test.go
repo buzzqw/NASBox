@@ -1,6 +1,7 @@
 package serverd
 
 import (
+	"bufio"
 	"crypto/sha256"
 	"encoding/hex"
 	"net/http/httptest"
@@ -150,6 +151,23 @@ func TestLeaseStaleNeedsHeartbeatAndHeldLease(t *testing.T) {
 	}
 	if _, _, stale, _ := ctx.leaseState(now); stale {
 		t.Fatal("un lease con heartbeat recente non deve risultare scaduto")
+	}
+}
+
+func TestReadActivityFrameSplitsNULFields(t *testing.T) {
+	reader := bufio.NewReader(strings.NewReader("upload\x0010\x0020\x00"))
+	phase, done, total, err := readActivityFrame(reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if phase != "upload" || done != 10 || total != 20 {
+		t.Fatalf("frame letto male: %q %d %d", phase, done, total)
+	}
+	// A frame truncated by the client closing the session must be an error, not
+	// a set of zero values that look like valid progress.
+	truncated := bufio.NewReader(strings.NewReader("upload\x0010\x00"))
+	if _, _, _, err := readActivityFrame(truncated); err == nil {
+		t.Fatal("un frame troncato deve produrre un errore")
 	}
 }
 

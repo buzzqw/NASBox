@@ -97,6 +97,23 @@ func (c *Context) writeOwner(device, host string, phase string, done, total int6
 	return os.Rename(tmp, p.Owner)
 }
 
+// readActivityFrame reads the three fields that follow ACTIVITY_V1. The old
+// parser expected them in one ReadString call, which never happens: stdin is a
+// NUL-delimited stream and each call returns a single field.
+func readActivityFrame(reader *bufio.Reader) (string, int64, int64, error) {
+	fields := make([]string, 0, 3)
+	for len(fields) < 3 {
+		field, err := reader.ReadString('\x00')
+		if err != nil {
+			return "", 0, 0, err
+		}
+		fields = append(fields, strings.TrimSuffix(field, "\x00"))
+	}
+	done, _ := strconv.ParseInt(fields[1], 10, 64)
+	total, _ := strconv.ParseInt(fields[2], 10, 64)
+	return fields[0], done, total, nil
+}
+
 func cmdTransferWait(ctx *Context) error {
 	reader := bufio.NewReader(os.Stdin)
 	fields := make([]string, 0, 5)
@@ -220,19 +237,24 @@ func cmdTransferWait(ctx *Context) error {
 			return exitCode(143)
 		default:
 		}
-		frame, err := reader.ReadString('\x00')
+		field, err := reader.ReadString('\x00')
 		if err == io.EOF {
 			return nil
 		}
 		if err != nil {
 			return err
 		}
-		parts := strings.Split(strings.TrimSuffix(frame, "\x00"), "\x00")
-		if len(parts) == 4 && parts[0] == "ACTIVITY_V1" {
-			done, _ := strconv.ParseInt(parts[2], 10, 64)
-			total, _ := strconv.ParseInt(parts[3], 10, 64)
-			_ = ctx.writeOwner(device, host, parts[1], done, total)
-			ctx.touchLeaseHolder()
+		if strings.TrimSuffix(field, "\x00") != "ACTIVITY_V1" {
+			continue
 		}
+		phase, done, total, readErr := readActivityFrame(reader)
+		if readErr != nil {
+			if readErr == io.EOF {
+				return nil
+			}
+			return readErr
+		}
+		_ = ctx.writeOwner(device, host, phase, done, total)
+		ctx.touchLeaseHolder()
 	}
 }
